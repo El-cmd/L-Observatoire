@@ -18,27 +18,43 @@ const MessageItem = memo(function MessageItem({message, streaming, last, onRegen
   </article>;
 });
 
-export function MessageList({chat, busy, onRegenerate, onError}: {
-  chat?: Conversation; busy: boolean; onRegenerate: () => void; onError: (message: string) => void;
+export function MessageList({chat, busy, summaryFocus, onRegenerate, onError}: {
+  chat?: Conversation; busy: boolean; summaryFocus: number; onRegenerate: () => void; onError: (message: string) => void;
 }) {
   const scroll = useRef<HTMLElement>(null);
   const atBottom = useRef(true);
   const previousId = useRef<string | undefined>(undefined);
   const messages = chat?.messages || [];
+  const through = Math.min(chat?.compacted_through || 0, messages.length);
+  const summary = useRef<HTMLDetailsElement>(null);
+  const previousFocus = useRef(summaryFocus);
   useLayoutEffect(() => {
     const element = scroll.current; if (!element) return;
-    if (previousId.current !== chat?.id || atBottom.current) element.scrollTop = element.scrollHeight;
+    if (previousFocus.current !== summaryFocus) {
+      if (summary.current) summary.current.open = true;
+      element.scrollTop = 0;
+    } else if (previousId.current !== chat?.id || atBottom.current) element.scrollTop = element.scrollHeight;
+    previousFocus.current = summaryFocus;
     previousId.current = chat?.id;
-  }, [chat?.id, messages, busy]);
+  }, [chat?.id, messages, busy, summaryFocus]);
   return <main className="main" id="main" ref={scroll} onScroll={() => {
     const element = scroll.current;
     if (element) atBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 130;
   }}>
     <section className="welcome" id="welcome" hidden={messages.length > 0}><h1>Qu’avez-vous en tête aujourd’hui ?</h1></section>
     <div id="messages" className="messages" role="log" aria-label="Conversation" aria-live="polite" aria-relevant="additions">
-      {messages.map((message, index) => <MessageItem key={`${chat?.id}:${index}`} message={message}
+      {through > 0 && chat?.context_summary && <div className="context-memory">
+        <details className="context-summary" ref={summary} key={chat.id}>
+          <summary>Résumé du début · {through} messages</summary>
+          <div className="message-content"><Suspense fallback={<span className="typing">Chargement du résumé…</span>}><Markdown content={chat.context_summary} onError={onError}/></Suspense></div>
+        </details>
+        <details className="archived-messages"><summary>Voir les {through} messages d’origine</summary>
+          {messages.slice(0, through).map((message, index) => <MessageItem key={`${chat.id}:${index}`} message={message} streaming={false} last={false} onRegenerate={onRegenerate} onError={onError}/>)}
+        </details>
+      </div>}
+      {messages.slice(through).map((message, offset) => {const index = through + offset; return <MessageItem key={`${chat?.id}:${index}`} message={message}
         last={index === messages.length - 1} streaming={busy && message.role === 'assistant' && index === messages.length - 1}
-        onRegenerate={onRegenerate} onError={onError}/>)}
+        onRegenerate={onRegenerate} onError={onError}/>;})}
     </div>
   </main>;
 }

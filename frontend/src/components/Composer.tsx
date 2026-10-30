@@ -1,13 +1,15 @@
 import {useEffect, useLayoutEffect, useRef, useState} from 'react';
-import type {Effort, Notice, Settings} from '../types';
+import type {Effort, Notice, Settings, ContextUsage} from '../types';
 import {Icon} from './Icon';
+import {ContextMeter} from './ContextMeter';
 
 const effortLabels = {none:'désactivée', low:'légère', medium:'intermédiaire', xhigh:'approfondie'};
 
-export function Composer({prompt, onPrompt, onSend, onStop, onRegenerate, settings, onSettings, busy, disabled, notice, chatId}: {
+export function Composer({prompt, onPrompt, onSend, onStop, onRegenerate, settings, onSettings, busy, disabled, notice, chatId, contextUsage, compacting, onCompact}: {
   prompt: string; onPrompt: (value: string) => void; onSend: (value: string) => void; onStop: () => void;
   onRegenerate: () => void; settings: Settings; onSettings: (value: Settings) => void; busy: boolean;
   disabled: boolean; notice: Notice | null; chatId?: string;
+  contextUsage: ContextUsage | null; compacting: boolean; onCompact: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
@@ -46,6 +48,7 @@ export function Composer({prompt, onPrompt, onSend, onStop, onRegenerate, settin
         onKeyDown={event => {
           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {event.preventDefault(); if (!busy && !disabled && prompt.trim()) onSend(prompt);}
         }}/>
+      <ContextMeter usage={contextUsage} compacting={compacting} disabled={busy || disabled && !compacting} onCompact={onCompact}/>
       <button id="generation-toggle" ref={toggle} type="button" className="generation-toggle icon-button" aria-label="Régler la température et la réflexion" title={`Réflexion ${effortLabels[settings.effort]} · Température ${temperature}`} aria-controls="generation-settings" aria-expanded={open} onClick={() => setOpen(value => !value)}><Icon name="settings"/></button>
       <button id="send" type="submit" className="send-button" aria-label="Envoyer le message" disabled={busy || disabled || !prompt.trim()} hidden={busy}><Icon name="send"/></button>
       <button id="stop" type="button" className="stop-button" aria-label="Arrêter la réponse" hidden={!busy} onClick={onStop}><Icon name="stop"/></button>

@@ -1,4 +1,4 @@
-use crate::{App, Error, session};
+use crate::{App, Error, context, session};
 use axum::{
     Json,
     body::Body,
@@ -15,7 +15,7 @@ use std::convert::Infallible;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Deserialize, Serialize)]
 pub struct Message {
     pub role: String,
     pub content: String,
@@ -31,6 +31,9 @@ pub struct Conversation {
     pub title: String,
     pub messages: DbJson<Vec<Message>>,
     pub version: i64,
+    pub context_summary: String,
+    pub compacted_through: i32,
+    pub compaction_count: i32,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -44,14 +47,14 @@ pub struct Summary {
 }
 
 fn validate_messages(messages: &[Message]) -> Result<(), Error> {
-    if messages.len() > 100 {
-        return Err(Error::bad("La conversation est limitée à 100 messages."));
+    if messages.len() > context::MAX_MESSAGES {
+        return Err(Error::bad("La limite technique de 10 000 messages est atteinte."));
     }
     let mut size = 0;
     for m in messages {
         if !matches!(m.role.as_str(), "user" | "assistant")
-            || m.content.len() > 100_000
-            || m.reasoning.len() > 100_000
+            || m.content.len() > context::MAX_MESSAGE_BYTES
+            || m.reasoning.len() > context::MAX_MESSAGE_BYTES
             || (m.content.trim().is_empty() && (m.role == "user" || m.reasoning.is_empty()))
         {
             return Err(Error::bad(
@@ -60,9 +63,9 @@ fn validate_messages(messages: &[Message]) -> Result<(), Error> {
         }
         size += m.content.len() + m.reasoning.len();
     }
-    if size > 400_000 {
+    if size > context::MAX_HISTORY_BYTES {
         return Err(Error::bad(
-            "Cette conversation est trop volumineuse. Ouvre un nouveau chat.",
+            "L’archive de cette conversation dépasse 8 Mo. Ouvre un nouveau chat.",
         ));
     }
     Ok(())
@@ -109,7 +112,7 @@ pub async fn create(
     if count >= 1000 {
         return Err(Error::bad("La limite de 1 000 conversations est atteinte."));
     }
-    let row=sqlx::query_as::<_,Conversation>("INSERT INTO conversations(id,user_id) VALUES($1,$2) RETURNING id,title,messages,version,updated_at").bind(Uuid::new_v4()).bind(user.user_id).fetch_one(&mut *tx).await?;
+    let row=sqlx::query_as::<_,Conversation>("INSERT INTO conversations(id,user_id) VALUES($1,$2) RETURNING id,title,messages,version,updated_at,context_summary,compacted_through,compaction_count").bind(Uuid::new_v4()).bind(user.user_id).fetch_one(&mut *tx).await?;
     tx.commit().await?;
     Ok((StatusCode::CREATED, Json(row)))
 }
@@ -121,7 +124,7 @@ pub async fn get_one(
 ) -> Result<Json<Conversation>, Error> {
     let user = session(&app, &headers, false).await?;
     let row = sqlx::query_as::<_, Conversation>(
-        "SELECT id,title,messages,version,updated_at FROM conversations WHERE id=$1 AND user_id=$2",
+        "SELECT id,title,messages,version,updated_at,context_summary,compacted_through,compaction_count FROM conversations WHERE id=$1 AND user_id=$2",
     )
     .bind(id)
     .bind(user.user_id)
@@ -137,7 +140,7 @@ pub struct Update {
     messages: Vec<Message>,
 }
 
-async fn not_found_or_conflict(app: &App, id: Uuid, user: Uuid) -> Error {
+pub(crate) async fn not_found_or_conflict(app: &App, id: Uuid, user: Uuid) -> Error {
     let exists: bool =
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM conversations WHERE id=$1 AND user_id=$2)")
             .bind(id)
@@ -160,8 +163,14 @@ pub async fn update(
 ) -> Result<Json<Conversation>, Error> {
     let user = session(&app, &headers, true).await?;
     validate_messages(&input.messages)?;
-    let row=sqlx::query_as::<_,Conversation>("UPDATE conversations SET title=$3,messages=$4,version=version+1,updated_at=now() WHERE id=$1 AND user_id=$2 AND version=$5 AND (active_generation IS NULL OR generation_started_at<now()-interval '5 minutes') RETURNING id,title,messages,version,updated_at")
-        .bind(id).bind(user.user_id).bind(title(&input.messages)).bind(DbJson(input.messages)).bind(input.version).fetch_optional(&app.db).await?;
+    let previous=sqlx::query_as::<_,Conversation>("SELECT id,title,messages,version,updated_at,context_summary,compacted_through,compaction_count FROM conversations WHERE id=$1 AND user_id=$2")
+        .bind(id).bind(user.user_id).fetch_optional(&app.db).await?.ok_or_else(Error::missing)?;
+    let through=previous.compacted_through as usize;
+    let keep_memory=input.messages.len()>=through && previous.messages.0.get(..through)==input.messages.get(..through);
+    let memory=if keep_memory{previous.context_summary}else{String::new()};
+    let compacted=if keep_memory{previous.compacted_through}else{0};
+    let row=sqlx::query_as::<_,Conversation>("UPDATE conversations SET title=$3,messages=$4,context_summary=$6,compacted_through=$7,version=version+1,updated_at=now() WHERE id=$1 AND user_id=$2 AND version=$5 AND (active_generation IS NULL OR generation_started_at<now()-interval '10 minutes') RETURNING id,title,messages,version,updated_at,context_summary,compacted_through,compaction_count")
+        .bind(id).bind(user.user_id).bind(title(&input.messages)).bind(DbJson(input.messages)).bind(input.version).bind(memory).bind(compacted).fetch_optional(&app.db).await?;
     match row {
         Some(row) => Ok(Json(row)),
         None => Err(not_found_or_conflict(&app, id, user.user_id).await),
@@ -174,7 +183,7 @@ pub async fn delete(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, Error> {
     let user = session(&app, &headers, true).await?;
-    let result=sqlx::query("DELETE FROM conversations WHERE id=$1 AND user_id=$2 AND (active_generation IS NULL OR generation_started_at<now()-interval '5 minutes')").bind(id).bind(user.user_id).execute(&app.db).await?;
+    let result=sqlx::query("DELETE FROM conversations WHERE id=$1 AND user_id=$2 AND (active_generation IS NULL OR generation_started_at<now()-interval '10 minutes')").bind(id).bind(user.user_id).execute(&app.db).await?;
     if result.rows_affected() == 0 {
         return Err(not_found_or_conflict(&app, id, user.user_id).await);
     }
@@ -265,7 +274,7 @@ impl Generate {
     }
 }
 
-async fn release(app: &App, id: Uuid, generation: Uuid) {
+pub(crate) async fn release(app: &App, id: Uuid, generation: Uuid) {
     let _=sqlx::query("UPDATE conversations SET active_generation=NULL,generation_started_at=NULL WHERE id=$1 AND active_generation=$2").bind(id).bind(generation).execute(&app.db).await;
 }
 
@@ -290,14 +299,14 @@ pub async fn generate(
         )
     })?;
     let generation = Uuid::new_v4();
-    let row=sqlx::query_as::<_,Conversation>("UPDATE conversations SET active_generation=$3,generation_started_at=now() WHERE id=$1 AND user_id=$2 AND version=$4 AND (active_generation IS NULL OR generation_started_at<now()-interval '5 minutes') RETURNING id,title,messages,version,updated_at")
+    let row=sqlx::query_as::<_,Conversation>("UPDATE conversations SET active_generation=$3,generation_started_at=now() WHERE id=$1 AND user_id=$2 AND version=$4 AND (active_generation IS NULL OR generation_started_at<now()-interval '10 minutes') RETURNING id,title,messages,version,updated_at,context_summary,compacted_through,compaction_count")
         .bind(id).bind(user.user_id).bind(generation).bind(input.version).fetch_optional(&app.db).await?;
     let mut row = match row {
         Some(row) => row,
         None => return Err(not_found_or_conflict(&app, id, user.user_id).await),
     };
     if row.messages.0.is_empty()
-        || row.messages.0.len() >= 100
+        || row.messages.0.len() >= context::MAX_MESSAGES
         || row.messages.0.last().is_none_or(|m| m.role != "user")
     {
         release(&app, id, generation).await;
@@ -305,13 +314,13 @@ pub async fn generate(
             "Ajoute une question avant de demander une réponse.",
         ));
     }
-    let messages: Vec<Value> = row
-        .messages
-        .0
-        .iter()
-        .filter(|m| !m.interrupted && !m.content.trim().is_empty())
-        .map(|m| json!({"role":m.role,"content":m.content}))
-        .collect();
+    let prepared = tokio::time::timeout(std::time::Duration::from_secs(210), context::prepare(&app, &mut row, generation, input.max_tokens as u64)).await;
+    match prepared {
+        Ok(Ok(())) => {},
+        Ok(Err(error)) => {release(&app,id,generation).await;return Err(error);},
+        Err(_) => {release(&app,id,generation).await;return Err(Error(StatusCode::GATEWAY_TIMEOUT,"La compression du contexte a pris trop de temps. Les messages d’origine sont conservés.".into()));}
+    }
+    let messages = context::prompt(&row);
     let payload = json!({"model":app.config.model,"messages":messages,"reasoning_effort":input.reasoning_effort,"temperature":input.temperature,"max_tokens":input.max_tokens,"stream":true,"stream_options":{"include_usage":true}});
     let response = app
         .http
@@ -437,7 +446,7 @@ pub async fn generate(
                 }
                 if output.content.len() > 100_000
                     || output.reasoning.len() > 100_000
-                    || existing_bytes + output.content.len() + output.reasoning.len() > 400_000
+                    || existing_bytes + output.content.len() + output.reasoning.len() > context::MAX_HISTORY_BYTES
                 {
                     failed = true;
                     break 'read;
@@ -455,7 +464,7 @@ pub async fn generate(
         // Dropping source cancels the upstream HTTP request before persisting the result.
         drop(source);
         output.interrupted = !done || failed || disconnected;
-        let budget = 400_000usize.saturating_sub(existing_bytes);
+        let budget = context::MAX_HISTORY_BYTES.saturating_sub(existing_bytes);
         truncate_utf8(&mut output.content, 100_000.min(budget));
         truncate_utf8(
             &mut output.reasoning,

@@ -1,5 +1,6 @@
 mod auth;
 mod chat;
+mod context;
 
 use anyhow::{Context, Result};
 use axum::{
@@ -25,6 +26,7 @@ pub struct App {
     pub password_work: Arc<Semaphore>,
     pub dummy_hash: Arc<String>,
     pub shutdown: tokio::sync::watch::Receiver<bool>,
+    pub token_counts: Arc<tokio::sync::Mutex<context::TokenCache>>,
 }
 
 pub struct Config {
@@ -176,6 +178,7 @@ async fn main() -> Result<()> {
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     let app = App {
         shutdown: shutdown_rx,
+        token_counts: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         db: db.clone(),
         http: reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
@@ -204,10 +207,10 @@ async fn main() -> Result<()> {
     });
     let router = Router::new()
         .route("/api/health", get(health))
-        .route("/api/auth/login", post(auth::login))
+        .route("/api/auth/login", post(auth::login).layer(DefaultBodyLimit::max(8192)))
         .route("/api/auth/me", get(auth::me))
         .route("/api/auth/logout", post(auth::logout))
-        .route("/api/auth/password", put(auth::change_password))
+        .route("/api/auth/password", put(auth::change_password).layer(DefaultBodyLimit::max(8192)))
         .route("/api/conversations", get(chat::list).post(chat::create))
         .route("/api/conversations/import", post(chat::import))
         .route(
@@ -215,8 +218,10 @@ async fn main() -> Result<()> {
             get(chat::get_one).put(chat::update).delete(chat::delete),
         )
         .route("/api/conversations/{id}/generate", post(chat::generate))
+        .route("/api/conversations/{id}/context", get(context::usage))
+        .route("/api/conversations/{id}/compact", post(context::compact))
         .fallback(|| async { Error(StatusCode::NOT_FOUND, "Route introuvable.".into()) })
-        .layer(DefaultBodyLimit::max(512 * 1024))
+        .layer(DefaultBodyLimit::max(16 * 1024 * 1024))
         .layer(middleware::from_fn(security))
         .layer(TraceLayer::new_for_http())
         .with_state(app);

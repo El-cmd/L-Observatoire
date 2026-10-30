@@ -1,7 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {APIClient, APIError, errorMessage} from '../lib/api';
 import {consumeCompletion} from '../lib/stream';
-import type {Auth, Conversation, ConversationSummary, Legacy, Message, Notice, Settings} from '../types';
+import type {Auth, Conversation, ConversationSummary, Legacy, Message, Notice, Settings, ContextUsage} from '../types';
 
 function readLegacy(): Legacy | null {
   try { return JSON.parse(localStorage.getItem('observatoir-chat-v1') || localStorage.getItem('qwen-chat-v1') || 'null') as Legacy | null; }
@@ -46,6 +46,9 @@ export function useObservatoire() {
   const [settings, setSettings] = useState<Settings>({effort:'none', temperature:0.7, maxTokens:4096});
   const [canImport, setCanImport] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
+  const [compacting, setCompacting] = useState(false);
+  const [summaryFocus, setSummaryFocus] = useState(0);
 
   const notify = useCallback((message: string) => setNotice({message}), []);
   const replaceChats = useCallback((value: Conversation[]) => { chatsRef.current = value; setChats(value); }, []);
@@ -60,7 +63,7 @@ export function useObservatoire() {
     generation.current = null; authRef.current = null; client.setCSRF('');
     setAuth(null); replaceChats([]); setCurrentId(undefined); setPrompt('');
     busyRef.current = false; creating.current = false; loadingList.current = false; setBusy(false); setNavigating(false);
-    setNotice(null); setCanImport(false); setLoginError(message); setInitializing(false);
+    setNotice(null); setCanImport(false); setContextUsage(null); setCompacting(false); setLoginError(message); setInitializing(false);
   }, [client, replaceChats]);
 
   const failure = useCallback((error: unknown) => {
@@ -139,6 +142,32 @@ export function useObservatoire() {
     try {localStorage.setItem(`observatoire-settings:${auth.user.id}`, JSON.stringify(settings));}
     catch {notify('Le navigateur ne permet pas de mémoriser les réglages. Les conversations restent sauvegardées sur le serveur.');}
   }, [auth?.user.id, settings, notify]);
+
+  const activeChat = chats.find(chat => chat.id === currentId);
+  useEffect(() => {
+    if (!auth || !activeChat) {setContextUsage(null); return;}
+    const controller = new AbortController(); const account = epoch.current;
+    client.json<ContextUsage>(`/api/conversations/${activeChat.id}/context`, {signal:controller.signal}).then(value => {
+      if (epoch.current === account && !controller.signal.aborted) setContextUsage(value);
+    }).catch(error => {
+      if (epoch.current === account && error instanceof APIError && error.status === 401) failure(error);
+    });
+    return () => controller.abort();
+  }, [auth?.user.id, activeChat?.id, activeChat?.version, client]);
+
+  async function compactContext() {
+    const chat = chatsRef.current.find(value => value.id === currentId);
+    if (!chat || busyRef.current || !authRef.current?.configured) return;
+    const account = epoch.current; const controller = new AbortController();
+    generation.current = controller; busyRef.current = true; setCompacting(true); setNotice(null);
+    try {
+      const saved = normalize(await client.json<Conversation>(`/api/conversations/${chat.id}/compact`, {method:'POST', body:{version:chat.version}, signal:controller.signal}));
+      if (epoch.current !== account) return;
+      replaceChat(saved); setSummaryFocus(value => value + 1);
+      setNotice({message:'Le début de la conversation a été résumé. Les messages d’origine sont conservés.'});
+    } catch (error) {if (epoch.current === account) failure(error);}
+    finally {if (epoch.current === account) {busyRef.current = false; setCompacting(false); generation.current = null;}}
+  }
 
   useEffect(() => () => {generation.current?.abort(); navigation.current.controller?.abort();}, []);
 
@@ -223,7 +252,7 @@ export function useObservatoire() {
   async function send(content: string) {
     const chat = chatsRef.current.find(value => value.id === currentId);
     if (!chat || busyRef.current || navigating || !content.trim()) return;
-    if (chat.messages.length >= 98) {notify('Cette conversation est longue. Ouvre un nouveau chat pour continuer.'); return;}
+    if (chat.messages.length >= 9998) {notify('Cette conversation est longue. Ouvre un nouveau chat pour continuer.'); return;}
     setPrompt('');
     await requestAnswer({...chat, title:chat.messages.length ? chat.title : content.slice(0,80),
       messages:[...chat.messages, {role:'user', content:content.trim()}], message_count:chat.messages.length+1}, content);
@@ -252,5 +281,7 @@ export function useObservatoire() {
   return {auth, initializing, loginError, signingIn, login, logout, changePassword,
     chats, current:chats.find(chat => chat.id === currentId), busy, navigating, notice, notify,
     prompt, setPrompt, settings, setSettings, newChat, openChat, deleteChat, send, regenerate,
+    contextUsage:contextUsage && contextUsage.conversation_id === currentId && contextUsage.version === activeChat?.version ? contextUsage : null,
+    compacting, compactContext, summaryFocus,
     stop:() => generation.current?.abort(), canImport, importing, importLegacy};
 }
