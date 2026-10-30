@@ -7,3 +7,9 @@ __pycache__/
 .venv/
 node_modules/
 .DS_Store
+
+backend/target/
+backups/
+.initial-admin-password
+*.dump
+tests/integration/.env

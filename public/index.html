@@ -6,12 +6,33 @@
   <title>L’Observatoire</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/vendor/highlight/github-dark.min.css"><link rel="stylesheet" href="/vendor/katex/katex.min.css"><link rel="stylesheet" href="/style.css"><script src="/vendor/highlight/highlight.min.js" defer></script><script src="/vendor/katex/katex.min.js" defer></script><script src="/render.js" defer></script><script src="/app.js" defer></script>
 </head>
 <body>
-<div class="app">
+<section id="auth-screen" class="auth-screen" aria-label="Connexion">
+  <div class="auth-card">
+    <h1>L’Observatoire</h1><p class="auth-intro">Connecte-toi pour retrouver tes conversations.</p>
+    <p id="auth-loading" role="status">Vérification de la session…</p>
+    <form id="login-form" hidden>
+      <label for="login-username">Identifiant</label><input id="login-username" name="username" autocomplete="username" maxlength="64" required>
+      <label for="login-password">Mot de passe</label><input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
+      <p id="login-error" class="auth-error" role="alert"></p>
+      <button id="login-submit" class="auth-submit" type="submit">Se connecter</button>
+    </form>
+    <p class="auth-footnote">Ton compte et tes conversations restent sur ton serveur.</p>
+  </div>
+</section>
+<div class="app" id="chat-app" hidden>
   <aside class="sidebar" id="sidebar" aria-label="Conversations">
     <div class="sidebar-header"><a class="brand" href="/">L’Observatoire</a><button id="sidebar-close" class="icon-button" aria-label="Fermer la barre latérale" title="Fermer la barre latérale"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></button></div>
     <button class="new-chat" id="new-chat" title="Ctrl / Cmd + Maj + N"><svg viewBox="0 0 24 24"><path d="M12 4H6a3 3 0 0 0-3 3v11a3 3 0 0 0 3 3h11a3 3 0 0 0 3-3v-6M15 3l6 6M11 13l-1 4 4-1 8-8a2.1 2.1 0 0 0-3-3z"/></svg><span>Nouveau chat</span></button>
     <div class="history-label">Conversations</div>
     <div class="history" id="history" aria-label="Historique des conversations"></div>
+    <div class="account-area">
+      <div id="account-panel" class="account-panel" hidden>
+        <button id="import-legacy" type="button" hidden>Importer les anciens chats de ce navigateur</button>
+        <button id="change-password" type="button">Changer mon mot de passe</button>
+        <button id="logout" type="button">Se déconnecter</button>
+      </div>
+      <button id="account-toggle" class="account-toggle" type="button" aria-label="Mon compte"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg><span id="account-name"></span><span class="account-dots">···</span></button>
+    </div>
   </aside>
   <button id="sidebar-backdrop" class="sidebar-backdrop" aria-label="Fermer les conversations" tabindex="-1"></button>
   <div class="workspace empty" id="workspace">
@@ -42,5 +63,16 @@
     </div>
   </div>
 </div>
+<dialog id="password-dialog" class="password-dialog">
+  <form id="password-form">
+    <h2>Changer mon mot de passe</h2>
+    <label for="current-password">Mot de passe actuel</label><input id="current-password" type="password" autocomplete="current-password" required maxlength="256">
+    <label for="new-password">Nouveau mot de passe</label><input id="new-password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required>
+    <label for="confirm-password">Confirmer le nouveau mot de passe</label><input id="confirm-password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required>
+    <p class="password-hint">12 caractères minimum. Toutes tes sessions seront déconnectées.</p>
+    <p id="password-error" class="auth-error" role="alert"></p>
+    <div class="password-actions"><button id="password-cancel" type="button">Annuler</button><button id="password-submit" class="auth-submit" type="submit">Enregistrer</button></div>
+  </form>
+</dialog>
 </body>
 </html>

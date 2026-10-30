@@ -1,6 +1,11 @@
-.env
+.env*
 .git
 __pycache__
+**/__pycache__
 tests
 *.tar.gz
+*.dump
 README.md
+backend
+backups
+.initial-admin-password

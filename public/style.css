@@ -39,3 +39,25 @@
 .generation-settings p{color:#888;font-size:10px;margin:16px 0 0}
 .generation-settings select:focus-visible,.generation-settings input:focus-visible{outline:2px solid #aaa;outline-offset:3px}
 @media(max-width:760px){.generation-settings{right:14px}.composer{gap:6px}.generation-toggle{width:29px}.generation-toggle svg{width:19px;height:19px}}
+
+.auth-screen{min-height:100dvh;display:grid;place-items:center;padding:35px 24px;background:#000}
+.auth-card{width:100%;max-width:350px}
+.auth-card h1{font-size:29px;font-weight:500;letter-spacing:-.7px;margin:0 0 14px}
+.auth-intro{color:#999;font-size:14px;line-height:1.7;margin:0 0 30px}
+.auth-card label,.password-dialog label{display:block;color:#bbb;font-size:12px;margin:18px 0 9px}
+.auth-card input,.password-dialog input{width:100%;min-height:46px;background:#181818;border:1px solid #3c3c3c;border-radius:9px;color:#eee;padding:11px 13px;font:inherit;font-size:16px}
+.auth-card input:focus-visible,.password-dialog input:focus-visible{outline:2px solid #999;outline-offset:2px}
+.auth-submit{display:block;width:100%;background:#eee;color:#111;border:0;border-radius:9px;font-size:14px;font-weight:600;padding:13px 16px;cursor:pointer}
+.auth-submit:disabled{opacity:.5;cursor:wait}
+.auth-error{color:#e9a49c;font-size:12px;line-height:1.6;min-height:18px;margin:16px 0}
+.auth-footnote{color:#666;font-size:10px;line-height:1.7;margin-top:25px}
+.account-area{position:relative;padding-top:12px;margin-top:12px;border-top:1px solid #262626}
+.account-toggle{display:flex;gap:11px;align-items:center;width:100%;padding:12px;background:transparent;border:0;border-radius:8px;text-align:left;font-size:13px;color:#bbb}
+.account-toggle:hover{background:#1b1b1b}.account-toggle svg{width:18px;height:18px}.account-dots{margin-left:auto;font-size:18px}
+.account-panel{position:absolute;bottom:62px;left:0;right:0;background:#242424;border:1px solid #3d3d3d;padding:5px;border-radius:10px;box-shadow:0 10px 25px #0007;z-index:12}
+.account-panel button{display:block;width:100%;text-align:left;border:0;background:none;padding:12px 10px;font-size:12px;border-radius:6px;line-height:1.5}
+.account-panel button:hover{background:#343434}
+.password-dialog{width:min(420px,calc(100vw - 32px));background:#202020;border:1px solid #414141;border-radius:16px;color:#eee;padding:25px}
+.password-dialog::backdrop{background:#000b}.password-dialog h2{font-size:20px;font-weight:500;margin:0 0 22px}
+.password-hint{font-size:11px;color:#999;line-height:1.7;margin-top:16px}.password-actions{display:flex;gap:10px;justify-content:flex-end;align-items:center}
+.password-actions>button{border:0;border-radius:8px;padding:12px 15px;background:#333;color:#eee;font-size:12px}.password-actions .auth-submit{width:auto;background:#eee;color:#111}

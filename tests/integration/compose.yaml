@@ -1,0 +1,24 @@
+services:
+  frontend:
+    ports: !override
+      - "127.0.0.1:${TEST_PORT}:8080"
+  backend:
+    environment:
+      PUBLIC_ORIGIN: http://localhost:${TEST_PORT}
+      QWEN_BASE_URL: http://mock:8080/v1
+      QWEN_API_KEY: integration-test-key
+      BOOTSTRAP_USERNAME: ""
+      BOOTSTRAP_PASSWORD: ""
+      RUST_LOG: observatoire=warn,tower_http=warn
+    depends_on:
+      mock:
+        condition: service_started
+  mock:
+    image: python:3.13-slim
+    command: [python, /mock.py]
+    user: "10001:10001"
+    volumes:
+      - ./tests/integration/mock.py:/mock.py:ro
+    networks: [web]
+    read_only: true
+    cap_drop: [ALL]

@@ -1,69 +1,132 @@
 # L’Observatoire
 
-L’Observatoire est une interface de chat en français pour `qwen3.8-27b-abliterated`, livrée avec Dockerfile, Docker Compose et Makefile. Les bibliothèques de rendu sont embarquées dans `public/vendor` (KaTeX et Highlight.js). Aucun paquet applicatif à installer : le backend utilise Python 3.11+ et sa bibliothèque standard ; le frontend utilise HTML, CSS et JavaScript.
+Chatbot Qwen avec une interface sobre, un backend Rust et des conversations privées enregistrées dans PostgreSQL.
 
-## Démarrer avec Docker
+## Architecture
 
-Prérequis : Docker avec le plugin Compose, et Make.
+```mermaid
+flowchart LR
+    Browser[Navigateur] -->|HTTP local / HTTPS via votre proxy| Front[Frontend Nginx]
+    Front -->|/api — réseau Docker| API[API Rust / Axum]
+    API --> DB[(PostgreSQL 17)]
+    API --> Qwen[Votre API Qwen]
+```
+
+| Service | Rôle | Accès depuis l’hôte |
+| --- | --- | --- |
+| `frontend` | HTML/CSS/JavaScript, fichiers KaTeX/Highlight.js et proxy de l’API | `127.0.0.1:8080` par défaut |
+| `backend` | Rust, Axum, SQLx : authentification, conversations, streaming Qwen | Aucun port publié |
+| `db` | PostgreSQL, sur un réseau Docker interne | Aucun port publié |
+
+Les images frontend et backend sont distinctes. Les polices et bibliothèques du navigateur sont embarquées : aucun CDN n’est requis. Le frontend et l’API utilisent la même origine via Nginx.
+
+## Démarrage
+
+Prérequis : Docker avec le plugin Compose (2.24.4+ pour les tests), Python 3 pour les utilitaires et Make. Rust et Node ne sont pas nécessaires sur l’hôte.
 
 ```sh
+git clone https://github.com/El-cmd/L-Observatoire.git chatbot_perso
 cd chatbot_perso
 make init
 ```
 
-Renseigner `QWEN_BASE_URL` (adresse de votre API compatible, terminée par `/v1`) et `QWEN_API_KEY` dans `.env`, puis :
+Renseigner `QWEN_BASE_URL` (adresse terminée par `/v1`) et `QWEN_API_KEY` dans `.env`, puis :
 
 ```sh
 make up
+make user
 ```
 
-Ouvrir **http://localhost:8080**. Par défaut, le port Docker est accessible uniquement depuis l’ordinateur local. `PORT` dans `.env` permet de choisir un autre port. Si le tunnel Cloudflare change, modifier `QWEN_BASE_URL`, en conservant le suffixe `/v1`, puis exécuter `make restart`.
+`make user` demande un identifiant et un mot de passe masqué de 12 caractères minimum. Le premier compte devient administrateur ; les suivants sont des comptes ordinaires. Il n’existe pas d’inscription publique. La création et la réinitialisation des comptes demandent un accès opérateur au serveur Docker.
 
-La clé reste côté serveur. `.env` est exclu de Git et du contexte de construction Docker. Le modèle et l’adresse du serveur sont fixés par la configuration backend, pas par le navigateur.
+Autre possibilité pour le tout premier compte : `make first-user` génère un mot de passe aléatoire et le place dans `.initial-admin-password` (permissions 600, exclu de Git). Ne pas partager ce fichier ; le supprimer après avoir conservé le mot de passe dans un gestionnaire.
 
-## Commandes
+Ouvrir **http://localhost:8080** et se connecter. Les conversations sont enregistrées en base et isolées par compte. Le menu de compte en bas de la barre latérale permet de changer son mot de passe ou de se déconnecter.
 
-| Commande | Action |
-| --- | --- |
-| `make up` | Construire et démarrer |
-| `make down` | Arrêter le projet |
-| `make restart` | Recréer le conteneur et relire `.env` |
-| `make logs` | Suivre les logs |
-| `make status` | Afficher l’état |
-| `make dev` | Lancer avec Python, sans Docker |
-| `make test` | Tests du proxy avec une API simulée |
-| `make clean` | Supprimer le conteneur et l’image locale du projet |
+## Authentification et accès
 
-`make dev` lit `.env` comme un fichier shell : entourer les valeurs contenant des espaces ou caractères spéciaux de guillemets simples. Sans Make : exporter les variables puis lancer `python3 server.py`.
+- Mots de passe hachés avec Argon2id, sel aléatoire distinct par mot de passe.
+- Sessions opaques de 256 bits ; seul le SHA-256 du jeton est enregistré en base. Aucun jeton d’authentification dans `localStorage`.
+- Cookie `HttpOnly`, `SameSite=Lax`, durée maximale de 24 heures. `Secure` et préfixe `__Host-` lorsque `PUBLIC_ORIGIN` utilise HTTPS.
+- Nouvelle session à chaque connexion ; déconnexion révoquée en base. Un changement ou une réinitialisation du mot de passe révoque toutes les sessions du compte.
+- Vérification stricte de `Origin` et jeton CSRF sur les écritures authentifiées. Le jeton CSRF reste dans la mémoire de la page.
+- Tentatives de connexion limitées en PostgreSQL par identifiant et par adresse IP, plus une limite Nginx. Les compteurs persistent après redémarrage.
+- Toute lecture, modification, suppression ou génération vérifie le propriétaire de la conversation. L’API renvoie 404 pour une conversation appartenant à un autre compte.
+- Concurrence limitée pour le hachage des mots de passe et les générations. Mises à jour des conversations avec vérification de version pour éviter les écrasements entre onglets.
 
-## Fonctionnalités
-
-- Interface sobre sur fond noir, avec conversations dans la barre latérale.
-- Nouveau chat, navigation et suppression des conversations ; historique conservé dans ce navigateur.
-- Réponses en streaming SSE, arrêt de génération et nouvelle tentative.
-- Texte formaté, code coloré avec numéros de ligne et copie sans les numéros.
-- Formules LaTeX rendues avec KaTeX : `$…$`, `$$…$$`, `\(…\)` et `\[…\]`.
-- Interface adaptée aux mobiles ; Entrée envoie, Maj+Entrée ajoute une ligne.
-
-Le bouton de réglages dans la saisie permet de choisir la température (0 à 2) et la réflexion (désactivée, légère, intermédiaire ou approfondie). Les réglages sont mémorisés dans ce navigateur et appliqués aux prochaines requêtes. Valeurs initiales : réflexion désactivée, température 0,7 ; limite de réponse de 4 096 tokens.
-
-Les requêtes envoyées à Qwen contiennent l’historique du fil actif. Le raisonnement reçu n’est pas réinjecté dans l’historique transmis. Le chat gère les messages texte ; l’envoi d’images et d’audio n’est pas inclus. L’affichage Markdown couvre paragraphes, titres, listes, gras, blocs de code colorés et formules mathématiques ; le HTML du modèle est échappé.
+Le rôle SQL de l’API n’est pas superutilisateur et ne peut créer ni base ni rôle. Il possède son schéma applicatif pour exécuter les migrations. Le mot de passe de l’administrateur PostgreSQL est séparé et n’est pas transmis au backend.
 
 ## Configuration
 
-| Variable | Valeur par défaut |
+| Variable | Usage |
 | --- | --- |
-| `QWEN_BASE_URL` | `https://votre-api.example/v1` |
-| `QWEN_API_KEY` | À renseigner |
-| `QWEN_MODEL` | `qwen3.8-27b-abliterated` |
-| `PORT` | `8080` |
-| `CHAT_USER` | `vloth` |
-| `CHAT_PASSWORD` | Vide : authentification HTTP désactivée |
+| `PORT` | Port local du frontend, `8080` par défaut |
+| `PUBLIC_ORIGIN` | Origine exacte du site, sans chemin : `http://localhost:8080` ou `https://chat.exemple.fr` |
+| `QWEN_BASE_URL` | Base de l’API compatible, terminée par `/v1` |
+| `QWEN_API_KEY` | Clé envoyée uniquement par l’API Rust à Qwen |
+| `QWEN_MODEL` | `qwen3.8-27b-abliterated` par défaut |
+| `POSTGRES_PASSWORD` | Mot de passe du rôle applicatif, généré par `make init` |
+| `POSTGRES_ADMIN_PASSWORD` | Mot de passe de l’administrateur PostgreSQL, généré séparément |
+| `BOOTSTRAP_USERNAME`, `BOOTSTRAP_PASSWORD` | Facultatifs : création du premier administrateur uniquement si aucun utilisateur n’existe |
 
-Pour un accès réseau ultérieur, configurer `CHAT_PASSWORD` et placer le service derrière un proxy HTTPS. Le Compose livré reste lié à `127.0.0.1`. La configuration ne crée aucun compte utilisateur et les historiques ne sont pas synchronisés entre appareils.
+`make init` conserve les valeurs existantes et crée les secrets PostgreSQL manquants. `.env` reste local, avec permissions 600, et est exclu de Git et des images. Ne pas modifier les mots de passe PostgreSQL dans `.env` après création du volume sans modifier aussi les rôles dans la base. Les secrets générés utilisent un alphabet compatible avec les URL PostgreSQL.
 
-Le contexte maximal côté Qwen est de 32 768 tokens. Le serveur Qwen signale un dépassement ; ouvrir un nouveau fil si nécessaire. Le raisonnement partage la limite de sortie avec la réponse finale. Après un arrêt, la fermeture du flux est demandée à l’API ; la libération immédiate du calcul dépend de cette API.
+Après un changement de configuration, utiliser `make restart` pour recréer les conteneurs. Un simple `docker compose restart` ne recharge pas les variables d’environnement.
 
-## Vérification
+Pour un accès hors de la machine, placer le frontend derrière un proxy HTTPS et définir `PUBLIC_ORIGIN` avec l’adresse HTTPS exacte. Les ports API et PostgreSQL doivent rester privés. La configuration fournie conserve l’écoute sur `127.0.0.1`.
 
-`make test` vérifie le transfert des paramètres, le streaming, les erreurs, le filtrage des origines et l’absence de clé dans les réponses. Les tests utilisent une API simulée et ne consomment pas de tokens Qwen.
+## Interface et conversations
+
+- Conversations dans la barre latérale ; copie des questions et réponses.
+- Réponses en streaming ; arrêt et nouvelle génération.
+- Réglage de température et réflexion (`none`, `low`, `medium`, `xhigh`). Réglages mémorisés dans ce navigateur, séparément pour chaque compte.
+- Coloration syntaxique, numéros de ligne, copie du code sans les numéros.
+- Rendu LaTeX : `$…$`, `$$…$$`, `\(…\)` et `\[…\]`.
+- HTML du modèle échappé ; commandes KaTeX de confiance désactivées.
+
+L’API lit l’historique en base pour construire les requêtes Qwen. Le raisonnement n’est pas réinjecté dans le contexte. Le backend sauvegarde la réponse avant de signaler la fin au navigateur et conserve la partie reçue lors d’une interruption. Le contexte et les quotas du serveur Qwen restent applicables. L’interface est limitée au texte.
+
+## Migration de l’ancienne version
+
+`make up` remplace l’ancien service Python `chat` par les trois nouveaux services. Les anciennes conversations restent dans le stockage du navigateur : elles ne sont pas automatiquement affectées à un utilisateur.
+
+Après connexion, le menu de compte propose **Importer les anciens chats de ce navigateur** lorsqu’un ancien historique est présent. N’importer que ses propres conversations, sur le compte choisi. L’import est transactionnel et limité à 100 conversations et 512 Ko par requête. Le stockage local original est conservé.
+
+Les anciennes variables `CHAT_USER` / `CHAT_PASSWORD` de l’authentification Basic ne sont plus utilisées. Créer un compte avec `make user`. La nouvelle authentification ne partage aucun mot de passe avec le VPS ou GitHub.
+
+## Administration et sauvegardes
+
+```sh
+make user             # Créer un compte
+make reset-password   # Changer un mot de passe perdu et révoquer ses sessions
+make backup           # Dump PostgreSQL dans backups/, permissions 600
+make status
+make logs
+make down             # Arrêter sans supprimer le volume
+```
+
+Le volume nommé `postgres_data` conserve les comptes, sessions et conversations après arrêt ou recréation des conteneurs. Les sauvegardes contiennent des données privées : elles sont exclues de Git, à conserver aussi hors de cette machine.
+
+Restauration à effectuer dans une base vide après vérification de la sauvegarde et arrêt des écritures. Exemple avec une base de restauration préalablement créée :
+
+```sh
+docker compose exec -T db pg_restore --no-owner --no-privileges \
+  -U observatoire_owner -d NOM_BASE_VIDE < backups/observatoire-AAAAMMJJ-HHMMSS.dump
+```
+
+Ne pas lancer `docker compose down -v` sur l’installation courante : cette option efface le volume. Le Makefile ne l’utilise pas.
+
+## Tests
+
+```sh
+make build
+make test
+```
+
+Les tests Rust couvrent les identifiants, la politique de mots de passe, Argon2id et les paramètres Qwen. Les tests d’intégration démarrent un projet Docker séparé avec une base jetable et une API Qwen simulée, sans utiliser les secrets de votre `.env` ni consommer de tokens.
+
+Ils vérifient les accès anonymes, les cookies et jetons hachés, le rôle SQL, les protections Origin/CSRF, l’isolation des comptes, les conflits de version, le streaming et l’annulation, la révocation et l’expiration des sessions, les limites de connexion, la persistance après redémarrage et la restauration d’un dump. Seul le volume du projet de test est supprimé à la fin.
+
+Des parcours navigateur sont disponibles dans `tests/browser.mjs` avec Playwright : `OBSERVATOIRE_BROWSER=1 python3 tests/integration/run.py` après installation locale de Playwright et de son navigateur. Le backend de test utilise une API simulée.
+
+Cette configuration prévoit une seule instance de l’API : les verrous de génération sont récupérés au redémarrage. Pour plusieurs réplicas, remplacer cette récupération par une coordination distribuée avec renouvellement des baux.

@@ -1,23 +1,80 @@
+name: chatbot_perso
+x-logs: &logs
+  driver: json-file
+  options:
+    max-size: "5m"
+    max-file: "2"
 services:
-  chat:
-    build: .
-    image: observatoir:local
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: observatoire-frontend:local
     ports:
       - "127.0.0.1:${PORT:-8080}:8080"
-    env_file: .env
-    environment:
-      HOST: 0.0.0.0
-      PORT: 8080
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [web]
     restart: unless-stopped
     init: true
     read_only: true
-    tmpfs:
-      - /tmp:size=16m,mode=1777
+    tmpfs: ["/tmp:size=32m,mode=1777"]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    mem_limit: 192m
-    logging:
-      driver: json-file
-      options:
-        max-size: "5m"
-        max-file: "2"
+    mem_limit: 96m
+    logging: *logs
+  backend:
+    build: ./backend
+    image: observatoire-backend:local
+    environment:
+      DATABASE_URL: postgres://observatoire_app:${POSTGRES_PASSWORD:?Exécuter make init}@db:5432/observatoire
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
+      QWEN_BASE_URL: ${QWEN_BASE_URL:-}
+      QWEN_API_KEY: ${QWEN_API_KEY:-}
+      QWEN_MODEL: ${QWEN_MODEL:-qwen3.8-27b-abliterated}
+      BOOTSTRAP_USERNAME: ${BOOTSTRAP_USERNAME:-}
+      BOOTSTRAP_PASSWORD: ${BOOTSTRAP_PASSWORD:-}
+      RUST_LOG: observatoire=info,tower_http=info
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [web, database]
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    stop_grace_period: 25s
+    logging: *logs
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: observatoire
+      POSTGRES_USER: observatoire_owner
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Exécuter make init}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+      APP_DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?Exécuter make init}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/postgres-init.sh:/docker-entrypoint-initdb.d/01-app-user.sh:ro
+    networks: [database]
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U observatoire_owner -d observatoire"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+    mem_limit: 512m
+    shm_size: 128m
+    security_opt: [no-new-privileges:true]
+    logging: *logs
+volumes:
+  postgres_data:
+networks:
+  web:
+  database:
+    internal: true

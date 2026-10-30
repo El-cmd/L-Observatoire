@@ -1,0 +1,17 @@
+name: Tests
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: make init
+      - run: make build
+      - run: make test
