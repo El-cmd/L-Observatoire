@@ -9,3 +9,6 @@ README.md
 backend
 backups
 .initial-admin-password
+
+**/node_modules
+frontend/dist

@@ -1,6 +1,6 @@
 # L’Observatoire
 
-Chatbot Qwen avec une interface sobre, un backend Rust et des conversations privées enregistrées dans PostgreSQL.
+Chatbot Qwen avec une interface React sobre, un backend Rust et des conversations privées enregistrées dans PostgreSQL.
 
 ## Architecture
 
@@ -14,11 +14,11 @@ flowchart LR
 
 | Service | Rôle | Accès depuis l’hôte |
 | --- | --- | --- |
-| `frontend` | HTML/CSS/JavaScript, fichiers KaTeX/Highlight.js et proxy de l’API | `127.0.0.1:8080` par défaut |
+| `frontend` | Application React/TypeScript compilée avec Vite, servie par Nginx et proxy de l’API | `127.0.0.1:8080` par défaut |
 | `backend` | Rust, Axum, SQLx : authentification, conversations, streaming Qwen | Aucun port publié |
 | `db` | PostgreSQL, sur un réseau Docker interne | Aucun port publié |
 
-Les images frontend et backend sont distinctes. Les polices et bibliothèques du navigateur sont embarquées : aucun CDN n’est requis. Le frontend et l’API utilisent la même origine via Nginx.
+Les images frontend et backend sont distinctes. Le frontend est compilé dans une étape Node 24 ; le conteneur final contient uniquement Nginx et les fichiers statiques, sans serveur Node. Les polices et bibliothèques du navigateur sont embarquées : aucun CDN n’est requis. Le frontend et l’API utilisent la même origine via Nginx.
 
 ## Démarrage
 
@@ -116,6 +116,24 @@ docker compose exec -T db pg_restore --no-owner --no-privileges \
 
 Ne pas lancer `docker compose down -v` sur l’installation courante : cette option efface le volume. Le Makefile ne l’utilise pas.
 
+## Développement du frontend React
+
+Les composants sont dans `frontend/src/components/`, la gestion des conversations et sessions dans `frontend/src/hooks/useObservatoire.ts`, et le client API, le streaming et le rendu dans `frontend/src/lib/`. Les messages sont gérés par React ; les blocs de code conservent leurs numéros de ligne et les formules utilisent KaTeX.
+
+Pour le développement hors Docker, installer Node 24 puis :
+
+```sh
+cd frontend
+npm ci
+npm run check
+npm run test
+npm run dev
+```
+
+Vite écoute sur `http://localhost:5173` et relaie `/api` vers `http://localhost:8080`. Pour ce mode de développement, définir temporairement `PUBLIC_ORIGIN=http://localhost:5173` dans `.env` et recréer l’API avec `make restart` depuis la racine. Revenir à l’origine de production après le développement. Les protections CSRF restent actives et aucun secret Qwen n’est transmis à Vite.
+
+`npm run build` vérifie TypeScript puis produit `frontend/dist/`. Les versions exactes des dépendances sont conservées dans `frontend/package-lock.json` et Docker installe avec `npm ci`.
+
 ## Tests
 
 ```sh
@@ -123,7 +141,7 @@ make build
 make test
 ```
 
-Les tests Rust couvrent les identifiants, la politique de mots de passe, Argon2id et les paramètres Qwen. Les tests d’intégration démarrent un projet Docker séparé avec une base jetable et une API Qwen simulée, sans utiliser les secrets de votre `.env` ni consommer de tokens.
+La construction du frontend exécute les tests Vitest (stream SSE, UTF-8, LaTeX et échappement du HTML), le contrôle TypeScript et la compilation Vite. Les tests Rust couvrent les identifiants, la politique de mots de passe, Argon2id et les paramètres Qwen. Les tests d’intégration démarrent un projet Docker séparé avec une base jetable et une API Qwen simulée, sans utiliser les secrets de votre `.env` ni consommer de tokens.
 
 Ils vérifient les accès anonymes, les cookies et jetons hachés, le rôle SQL, les protections Origin/CSRF, l’isolation des comptes, les conflits de version, le streaming et l’annulation, la révocation et l’expiration des sessions, les limites de connexion, la persistance après redémarrage et la restauration d’un dump. Seul le volume du projet de test est supprimé à la fin.
 

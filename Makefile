@@ -1,5 +1,5 @@
 SHELL := /bin/sh
-.PHONY: help init build up down restart logs status user first-user reset-password test backup
+.PHONY: help init build up down restart logs status user first-user reset-password test test-frontend backup
 help:
 	@printf '%s\n' 'make init            Initialiser la configuration locale' 'make up              Construire et lancer les trois services' 'make user            Créer un compte' 'make reset-password  Réinitialiser un mot de passe' 'make backup          Sauvegarder PostgreSQL' 'make down            Arrêter sans effacer les données' 'make logs            Suivre les logs' 'make test            Tests Rust et intégration'
 init:
@@ -24,6 +24,8 @@ reset-password:
 	python3 scripts/user.py --reset
 backup:
 	python3 scripts/backup.py
-test:
+test-frontend:
+	docker build --target build -f frontend/Dockerfile .
+test: test-frontend
 	docker run --rm -v "$(CURDIR)/backend:/app" -v observatoire-cargo-registry:/usr/local/cargo/registry -v observatoire-cargo-target:/app/target -w /app rust:1-slim-trixie cargo test --locked
 	python3 tests/integration/run.py
