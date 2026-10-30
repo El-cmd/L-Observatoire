@@ -6,7 +6,7 @@ export function Login({initializing, pending, error, onLogin}: {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   return <section id="auth-screen" className="auth-screen" aria-label="Connexion"><div className="auth-card">
-    <h1>L’Observatoire</h1><p className="auth-intro">Connecte-toi pour retrouver tes conversations.</p>
+    <h1>L’Observatoire</h1>
     <p id="auth-loading" role="status" hidden={!initializing}>Vérification de la session…</p>
     <form id="login-form" hidden={initializing} onSubmit={async event => {
       event.preventDefault(); if (pending) return;
@@ -17,6 +17,5 @@ export function Login({initializing, pending, error, onLogin}: {
       <p id="login-error" className="auth-error" role="alert">{error}</p>
       <button id="login-submit" className="auth-submit" type="submit" disabled={pending}>Se connecter</button>
     </form>
-    <p className="auth-footnote">Ton compte et tes conversations restent sur ton serveur.</p>
   </div></section>;
 }
