@@ -1,0 +1,14 @@
+# Surcouche pour le VPS : le frontend n'expose plus de port sur l'hôte et rejoint
+# le réseau de Nginx Proxy Manager, qui le joint sous le nom « observatoire ».
+# Activée par COMPOSE_FILE=compose.yaml:compose.prod.yaml dans le .env du serveur.
+services:
+  frontend:
+    ports: !reset []
+    networks:
+      web:
+      proxy:
+        aliases: [observatoire]
+networks:
+  proxy:
+    name: proxy-network
+    external: true

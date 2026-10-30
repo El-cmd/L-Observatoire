@@ -116,6 +116,29 @@ docker compose exec -T db pg_restore --no-owner --no-privileges \
 
 Ne pas lancer `docker compose down -v` sur l’installation courante : cette option efface le volume. Le Makefile ne l’utilise pas.
 
+## Déploiement sur le VPS
+
+En production, le service tourne sur le VPS derrière Nginx Proxy Manager (NPM), à l’adresse **https://observatoire.vloth.tech**. `compose.prod.yaml` retire le port publié du frontend et le branche sur le réseau Docker `proxy-network` sous le nom `observatoire` : dans NPM, l’hôte redirige vers `http://observatoire:8080`. Le `.env` du serveur contient :
+
+```sh
+COMPOSE_FILE=compose.yaml:compose.prod.yaml
+PUBLIC_ORIGIN=https://observatoire.vloth.tech
+```
+
+Ainsi `make up`, `make user`, `make backup` et `make logs` utilisent la configuration de production sans option supplémentaire.
+
+Chaque push sur `main` lance les tests ; s’ils passent, le workflow **Déploiement** se connecte en SSH au VPS et exécute `scripts/deploy.sh <sha>`. Le script vérifie que le commit appartient à `main`, sauvegarde PostgreSQL (dumps de plus de 30 jours supprimés), puis reconstruit et redémarre les conteneurs en attendant qu’ils soient sains. Le workflow peut aussi être lancé à la main depuis l’onglet Actions.
+
+La clé SSH de déploiement est dédiée et limitée à ce script par une commande forcée dans `~/.ssh/authorized_keys` du serveur :
+
+```
+command="/home/vloth/prod/apps/observatoire/scripts/deploy.sh",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ssh-ed25519 AAAA… github-deploy-observatoire
+```
+
+Secrets GitHub (Settings → Secrets and variables → Actions) : `VPS_SSH_KEY` (clé privée), `VPS_KNOWN_HOSTS` (sortie de `ssh-keyscan -p <port> <hôte>`), `VPS_HOST` (`vloth@<adresse>`) et `VPS_PORT`. L’adresse du VPS reste hors du dépôt public pour ne pas contourner Cloudflare.
+
+Le Nginx du frontend reprend l’adresse réelle du visiteur depuis `X-Forwarded-For` lorsque la requête vient d’un réseau Docker ou de Cloudflare, et transmet `X-Accel-Buffering: no` à NPM pour que le streaming ne soit pas retenu.
+
 ## Développement du frontend React
 
 Les composants sont dans `frontend/src/components/`, la gestion des conversations et sessions dans `frontend/src/hooks/useObservatoire.ts`, et le client API, le streaming et le rendu dans `frontend/src/lib/`. Les messages sont gérés par React ; les blocs de code conservent leurs numéros de ligne et les formules utilisent KaTeX.
