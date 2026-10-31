@@ -29,6 +29,9 @@ class Mock(BaseHTTPRequestHandler):
                 self.wfile.write(encoded[:17]); self.wfile.flush()
                 self.wfile.write(encoded[17:]); self.wfile.flush()
                 if last == 'slow': time.sleep(0.06)
+            # Like vLLM with stream_options.include_usage: a last chunk without choices.
+            usage = {'choices': [], 'usage': {'prompt_tokens': 1000 + 7*len(body['messages']), 'completion_tokens': len(text)}}
+            self.wfile.write(('data: ' + json.dumps(usage) + '\n\n').encode()); self.wfile.flush()
             self.wfile.write(b'data: [DONE]\n\n'); self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass

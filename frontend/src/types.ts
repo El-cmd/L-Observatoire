@@ -15,7 +15,7 @@ export interface Notice { message: string; retry?: boolean }
 export interface Legacy { chats?: { messages?: Message[] }[]; settings?: Partial<Settings> }
 
 export interface ContextUsage {
-  conversation_id: string; version: number; used_tokens: number; limit_tokens: number;
+  conversation_id: string; version: number; used_tokens: number; measured_tokens: number; limit_tokens: number;
   reserved_tokens: number; safety_tokens: number; auto_compact_at: number;
   estimated: boolean; source: string; can_compact: boolean; summarized_messages: number;
 }

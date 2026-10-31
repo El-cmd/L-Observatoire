@@ -35,6 +35,16 @@ pub struct Conversation {
     pub compacted_through: i32,
     pub compaction_count: i32,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// Prompt size reported by Qwen at the last generation, and the prompt prefix it covers.
+    #[sqlx(default)]
+    #[serde(skip)]
+    pub measured_tokens: i32,
+    #[sqlx(default)]
+    #[serde(skip)]
+    pub measured_messages: i32,
+    #[sqlx(default)]
+    #[serde(skip)]
+    pub measured_digest: String,
 }
 
 #[derive(Serialize, FromRow)]
@@ -299,7 +309,7 @@ pub async fn generate(
         )
     })?;
     let generation = Uuid::new_v4();
-    let row=sqlx::query_as::<_,Conversation>("UPDATE conversations SET active_generation=$3,generation_started_at=now() WHERE id=$1 AND user_id=$2 AND version=$4 AND (active_generation IS NULL OR generation_started_at<now()-interval '10 minutes') RETURNING id,title,messages,version,updated_at,context_summary,compacted_through,compaction_count")
+    let row=sqlx::query_as::<_,Conversation>("UPDATE conversations SET active_generation=$3,generation_started_at=now() WHERE id=$1 AND user_id=$2 AND version=$4 AND (active_generation IS NULL OR generation_started_at<now()-interval '10 minutes') RETURNING id,title,messages,version,updated_at,context_summary,compacted_through,compaction_count,measured_tokens,measured_messages,measured_digest")
         .bind(id).bind(user.user_id).bind(generation).bind(input.version).fetch_optional(&app.db).await?;
     let mut row = match row {
         Some(row) => row,
@@ -321,6 +331,8 @@ pub async fn generate(
         Err(_) => {release(&app,id,generation).await;return Err(Error(StatusCode::GATEWAY_TIMEOUT,"La compression du contexte a pris trop de temps. Les messages d’origine sont conservés.".into()));}
     }
     let messages = context::prompt(&row);
+    let measured_messages = messages.len() as i32;
+    let measured_digest = context::measure(&app.config.model, &messages);
     let payload = json!({"model":app.config.model,"messages":messages,"reasoning_effort":input.reasoning_effort,"temperature":input.temperature,"max_tokens":input.max_tokens,"stream":true,"stream_options":{"include_usage":true}});
     let response = app
         .http
@@ -373,6 +385,7 @@ pub async fn generate(
             reasoning: String::new(),
             interrupted: false,
         };
+        let mut prompt_tokens: Option<i32> = None;
         let mut done = false;
         let mut failed = false;
         let mut disconnected = false;
@@ -431,6 +444,15 @@ pub async fn generate(
                     failed = true;
                     break 'read;
                 }
+                // Sent in the last chunk thanks to stream_options.include_usage: Qwen's own count.
+                if let Some(tokens) = value
+                    .pointer("/usage/prompt_tokens")
+                    .and_then(Value::as_u64)
+                    .and_then(|t| i32::try_from(t).ok())
+                    .filter(|t| *t > 0)
+                {
+                    prompt_tokens = Some(tokens);
+                }
                 if let Some(delta) = value.pointer("/choices/0/delta") {
                     if let Some(content) = delta.get("content").and_then(Value::as_str) {
                         output.content.push_str(content);
@@ -473,8 +495,9 @@ pub async fn generate(
         if !output.content.is_empty() || !output.reasoning.is_empty() {
             row.messages.0.push(output);
         }
-        let saved=sqlx::query("UPDATE conversations SET messages=$3,version=version+1,active_generation=NULL,generation_started_at=NULL,updated_at=now() WHERE id=$1 AND active_generation=$2")
-            .bind(id).bind(generation).bind(row.messages).execute(&app.db).await;
+        // Without a usage chunk (interruption), the previous measurement is kept.
+        let saved=sqlx::query("UPDATE conversations SET messages=$3,version=version+1,active_generation=NULL,generation_started_at=NULL,updated_at=now(),measured_tokens=COALESCE($4,measured_tokens),measured_messages=CASE WHEN $4 IS NULL THEN measured_messages ELSE $5 END,measured_digest=CASE WHEN $4 IS NULL THEN measured_digest ELSE $6 END WHERE id=$1 AND active_generation=$2")
+            .bind(id).bind(generation).bind(row.messages).bind(prompt_tokens).bind(measured_messages).bind(&measured_digest).execute(&app.db).await;
         let persisted = matches!(saved,Ok(ref result) if result.rows_affected()==1);
         if !persisted {
             tracing::error!(conversation=%id,"could not persist generation");

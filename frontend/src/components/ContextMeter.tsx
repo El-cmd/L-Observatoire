@@ -9,6 +9,8 @@ export function ContextMeter({usage, compacting, disabled, onCompact}: {
   const circumference = 2 * Math.PI * 11;
   const canCompact = Boolean(usage?.can_compact) && !disabled && !compacting;
   const formatted = (value: number) => value.toLocaleString('fr-FR');
+  const measured = usage?.measured_tokens || 0;
+  const counting = !usage ? '' : measured ? (usage.estimated ? `Compté par Qwen, sauf ≈ ${formatted(used - measured)} tokens estimés pour les derniers messages. ` : 'Compté par Qwen. ') : usage.estimated ? 'Comptage estimé. ' : '';
   const description = compacting ? 'Résumé du début en cours…' : usage ? `${usage.estimated ? 'Environ ' : ''}${formatted(used)} tokens sur ${formatted(limit)}. ${canCompact ? 'Cliquer pour résumer le début.' : 'Les messages récents seront conservés.'}` : 'Calcul du contexte…';
   return <div className="context-control">
     <button id="context-meter" type="button" className={`context-meter${compacting ? ' is-loading' : ''}${ratio > .9 ? ' is-near-limit' : ''}`}
@@ -23,7 +25,7 @@ export function ContextMeter({usage, compacting, disabled, onCompact}: {
       <strong>Contexte de la conversation</strong>
       <span className="context-usage">{usage?.estimated ? '≈ ' : ''}{usage ? formatted(used) : '…'} <span>/ {formatted(limit)} tokens</span></span>
       {compacting ? <p>Résumé en cours. Les messages d’origine sont conservés.</p> : <>
-        <p>{usage?.estimated ? 'Comptage estimé. ' : ''}Une réserve est gardée pour la réponse.</p>
+        <p>{counting}Une réserve est gardée pour la réponse.</p>
         <p>{usage?.can_compact ? 'Cliquer sur le cercle résume les anciens échanges et garde les plus récents.' : 'Le résumé devient disponible après au moins deux échanges.'}</p>
         <small>Compression automatique avant saturation.</small>
       </>}

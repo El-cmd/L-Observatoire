@@ -132,6 +132,20 @@ class Integration(unittest.TestCase):
         other_browser = Client(); other_browser.login()
         self.assertEqual(other_browser.call(path)[1]['messages'], saved['messages'])
 
+    def test_05b_context_starts_from_qwen_prompt_count(self):
+        chat = self.alice.create('combien de tokens ?'); path = '/api/conversations/'+chat['id']
+        with self.alice.call(path+'/generate', 'POST', {'version':chat['version']}, stream=True) as response:
+            self.assertIn('data: [DONE]', response.read().decode())
+        usage = self.alice.call(path+'/context')[1]
+        self.assertEqual(usage['measured_tokens'], 1007)
+        self.assertGreater(usage['used_tokens'], 1007)
+        self.assertIn('Qwen', usage['source'])
+        self.assertLess(usage['safety_tokens'], 15_720)
+        saved = self.alice.call(path)[1]
+        edited = [{'role': 'user', 'content': 'autre question'}] + saved['messages'][1:]
+        self.assertEqual(self.alice.call(path, 'PUT', {'version': saved['version'], 'messages': edited})[0], 200)
+        self.assertEqual(self.alice.call(path+'/context')[1]['measured_tokens'], 0)
+
     def test_06_upstream_errors_release_the_generation_lease(self):
         chat = self.alice.create('upstream-error'); path = '/api/conversations/'+chat['id']
         code, result, _ = self.alice.call(path+'/generate', 'POST', {'version':chat['version']})
