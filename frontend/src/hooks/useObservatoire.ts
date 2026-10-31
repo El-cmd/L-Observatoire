@@ -14,7 +14,6 @@ function readSettings(userId: string, legacy: Legacy | null): Settings {
   return {
     effort: ['none', 'low', 'medium', 'xhigh'].includes(saved.effort || '') ? saved.effort! : 'none',
     temperature: typeof saved.temperature === 'number' && Number.isFinite(saved.temperature) && saved.temperature >= 0 && saved.temperature <= 2 ? saved.temperature : 0.7,
-    maxTokens: 4096,
   };
 }
 const normalize = (chat: Conversation): Conversation => ({...chat, message_count: chat.messages.length});
@@ -43,7 +42,7 @@ export function useObservatoire() {
   const generation = useRef<AbortController | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [prompt, setPrompt] = useState('');
-  const [settings, setSettings] = useState<Settings>({effort:'none', temperature:0.7, maxTokens:4096});
+  const [settings, setSettings] = useState<Settings>({effort:'none', temperature:0.7});
   const [canImport, setCanImport] = useState(false);
   const [importing, setImporting] = useState(false);
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
@@ -201,7 +200,8 @@ export function useObservatoire() {
     } catch (error) {if (epoch.current === account) failure(error);}
   }
 
-  async function requestAnswer(draft: Conversation, recoveryText?: string) {
+  /** With resume, the last assistant message (cut by the length limit) is extended in place. */
+  async function requestAnswer(draft: Conversation, recoveryText?: string, resume = false) {
     if (busyRef.current || !authRef.current?.configured) return;
     const account = epoch.current;
     const controller = new AbortController(); generation.current = controller;
@@ -211,22 +211,24 @@ export function useObservatoire() {
     let assistant: Message | null = null;
     let savedChat = draft;
     try {
-      savedChat = normalize(await client.json<Conversation>(`/api/conversations/${draft.id}`, {method:'PUT', body:{version:draft.version, messages:draft.messages}, signal:controller.signal}));
+      if (!resume) savedChat = normalize(await client.json<Conversation>(`/api/conversations/${draft.id}`, {method:'PUT', body:{version:draft.version, messages:draft.messages}, signal:controller.signal}));
       baseVersion = savedChat.version; savedQuestion = true;
       if (epoch.current !== account) return;
-      assistant = {role:'assistant', content:'', reasoning:''};
-      replaceChat({...savedChat, messages:[...savedChat.messages, assistant]});
+      const history = resume ? savedChat.messages.slice(0, -1) : savedChat.messages;
+      const start: Message = resume ? savedChat.messages[savedChat.messages.length - 1] : {role:'assistant', content:'', reasoning:''};
+      assistant = start;
+      replaceChat({...savedChat, messages:[...history, assistant]});
       const response = await client.response(`/api/conversations/${draft.id}/generate`, {method:'POST', signal:controller.signal,
-        body:{version:baseVersion, reasoning_effort:settings.effort, temperature:settings.temperature, max_tokens:settings.maxTokens}});
+        body:{version:baseVersion, reasoning_effort:settings.effort, temperature:settings.temperature, ...(resume ? {continue:true} : {})}});
       const result = await consumeCompletion(response, value => {
         if (epoch.current !== account) return;
-        assistant = {role:'assistant', content:value.content, reasoning:value.reasoning};
-        replaceChat({...savedChat, messages:[...savedChat.messages, assistant]});
+        assistant = {...start, content:start.content + value.content, reasoning:(start.reasoning || '') + value.reasoning};
+        replaceChat({...savedChat, messages:[...history, assistant]});
       });
       complete = true;
       if (epoch.current !== account) return;
-      if (!result.content.trim()) setNotice({message:'Le modèle n’a pas produit de réponse finale. Essaie un niveau de réflexion plus léger.', retry:true});
-      else if (result.limited) setNotice({message:'La réponse a atteint sa limite de longueur. Demande au modèle de continuer.', retry:true});
+      if (!result.content.trim() && !resume) setNotice({message:'Le modèle n’a pas produit de réponse finale. Essaie un niveau de réflexion plus léger.', retry:true});
+      else if (result.limited) setNotice({message:'La réponse a atteint la longueur maximale.', resume:true});
     } catch (error) {
       controller.abort();
       if (epoch.current !== account) return;
@@ -258,6 +260,12 @@ export function useObservatoire() {
       messages:[...chat.messages, {role:'user', content:content.trim()}], message_count:chat.messages.length+1}, content);
   }
 
+  async function continueAnswer() {
+    const chat = chatsRef.current.find(value => value.id === currentId);
+    if (!chat || busyRef.current || chat.messages[chat.messages.length - 1]?.role !== 'assistant') return;
+    await requestAnswer(chat, undefined, true);
+  }
+
   async function regenerate() {
     const chat = chatsRef.current.find(value => value.id === currentId);
     if (!chat || busyRef.current) return;
@@ -280,7 +288,7 @@ export function useObservatoire() {
 
   return {auth, initializing, loginError, signingIn, login, logout, changePassword,
     chats, current:chats.find(chat => chat.id === currentId), busy, navigating, notice, notify,
-    prompt, setPrompt, settings, setSettings, newChat, openChat, deleteChat, send, regenerate,
+    prompt, setPrompt, settings, setSettings, newChat, openChat, deleteChat, send, regenerate, continueAnswer,
     contextUsage:contextUsage && contextUsage.conversation_id === currentId && contextUsage.version === activeChat?.version ? contextUsage : null,
     compacting, compactContext, summaryFocus,
     stop:() => generation.current?.abort(), canImport, importing, importLegacy};

@@ -7,6 +7,10 @@ use std::{collections::HashMap, time::Duration};
 use uuid::Uuid;
 
 pub const LIMIT: u64 = 131_000;
+/// An answer may use up to the model's output limit, within the room left by the conversation;
+/// older exchanges are summarized only when less than MIN_OUTPUT would remain.
+pub const MAX_OUTPUT: u64 = 32_768;
+pub const MIN_OUTPUT: u64 = 8_192;
 pub const MAX_MESSAGES: usize = 10_000;
 pub const MAX_HISTORY_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
@@ -20,7 +24,7 @@ pub type TokenCache = HashMap<String,TokenCount>;
 
 #[derive(Serialize)]
 pub struct Usage {
-    conversation_id:Uuid,version:i64,used_tokens:u64,measured_tokens:u64,limit_tokens:u64,reserved_tokens:u64,
+    conversation_id:Uuid,version:i64,used_tokens:u64,measured_tokens:u64,limit_tokens:u64,reserved_tokens:u64,max_output_tokens:u64,
     safety_tokens:u64,auto_compact_at:u64,estimated:bool,source:String,
     can_compact:bool,summarized_messages:usize,
 }
@@ -93,6 +97,10 @@ pub async fn count(app:&App,messages:&[Value])->TokenCount{
 // ones against Qwen's count: a quarter of the estimated part, capped at 12 % of the window.
 fn safety(count:&TokenCount)->u64{512+(count.estimated_part/4).min(15_208)}
 fn fits(count:&TokenCount,reserve:u64)->bool{count.tokens.saturating_add(reserve).saturating_add(safety(count))<=LIMIT}
+/// Room left for the answer once the prompt and its safety margin are in the window.
+pub fn output_budget(count:&TokenCount,requested:u64)->u64{
+    requested.min(LIMIT.saturating_sub(count.tokens).saturating_sub(safety(count)))
+}
 
 pub fn cutoff(row:&Conversation,keep:usize)->usize{
     let through=row.compacted_through.max(0) as usize;
@@ -114,8 +122,8 @@ pub async fn usage(State(app):State<App>,headers:HeaderMap,Path(id):Path<Uuid>)-
     let row=fetch(&app,id,user.user_id).await?;
     let counted=count_prompt(&app,&row).await;
     let margin=safety(&counted);
-    Ok(Json(Usage{conversation_id:id,version:row.version,used_tokens:counted.tokens,measured_tokens:counted.measured,limit_tokens:LIMIT,reserved_tokens:4096,
-        safety_tokens:margin,auto_compact_at:LIMIT.saturating_sub(4096+margin),estimated:counted.estimated,source:counted.source,
+    Ok(Json(Usage{conversation_id:id,version:row.version,used_tokens:counted.tokens,measured_tokens:counted.measured,limit_tokens:LIMIT,reserved_tokens:MIN_OUTPUT,
+        max_output_tokens:output_budget(&counted,MAX_OUTPUT),safety_tokens:margin,auto_compact_at:LIMIT.saturating_sub(MIN_OUTPUT+margin),estimated:counted.estimated,source:counted.source,
         can_compact:can_compact(&row),summarized_messages:row.compacted_through.max(0) as usize}))
 }
 
@@ -150,7 +158,7 @@ async fn summarize(app:&App,row:&Conversation,end:usize)->Result<String,Error>{
             stop=start+(stop-start)/2;
         };
         let response=app.http.post(format!("{}/chat/completions",app.config.api_url)).bearer_auth(&app.config.api_key)
-            .json(&json!({"model":app.config.model,"messages":messages,"reasoning_effort":"none","temperature":0.1,"max_tokens":SUMMARY_TOKENS,"stream":false}))
+            .timeout(Duration::from_secs(200)).json(&json!({"model":app.config.model,"messages":messages,"reasoning_effort":"none","temperature":0.1,"max_tokens":SUMMARY_TOKENS,"stream":false}))
             .send().await.map_err(|_|Error(StatusCode::BAD_GATEWAY,"Le serveur Qwen est inaccessible pour le résumé.".into()))?;
         if !response.status().is_success(){return Err(Error(StatusCode::BAD_GATEWAY,format!("Le résumé a échoué (HTTP {}). Aucun message n’a été supprimé.",response.status().as_u16())));}
         let result:Value=response.json().await.map_err(|_|Error(StatusCode::BAD_GATEWAY,"Réponse de résumé invalide.".into()))?;
@@ -177,14 +185,17 @@ pub async fn compact_memory(app:&App,row:&mut Conversation,generation:Uuid,end:u
 }
 
 /// Make room before contacting Qwen, keeping the latest exchanges verbatim.
-pub async fn prepare(app:&App,row:&mut Conversation,generation:Uuid,reserve:u64)->Result<(),Error>{
+/// Returns the size of the prompt that will be sent.
+pub async fn prepare(app:&App,row:&mut Conversation,generation:Uuid,reserve:u64)->Result<TokenCount,Error>{
     for keep in [8,4,2,1]{
-        if fits(&count_prompt(app,row).await,reserve){return Ok(());}
+        let counted=count_prompt(app,row).await;
+        if fits(&counted,reserve){return Ok(counted);}
         let end=cutoff(row,keep);
         if end>row.compacted_through as usize{compact_memory(app,row,generation,end).await?;}
     }
-    if !fits(&count_prompt(app,row).await,reserve){return Err(Error::bad("Le dernier message est trop long pour le contexte de 131 000 tokens. Raccourcis-le avant de réessayer."));}
-    Ok(())
+    let counted=count_prompt(app,row).await;
+    if !fits(&counted,reserve){return Err(Error::bad("Le dernier message est trop long pour le contexte de 131 000 tokens. Raccourcis-le avant de réessayer."));}
+    Ok(counted)
 }
 
 #[derive(Deserialize)]
@@ -194,7 +205,7 @@ pub async fn compact(State(app):State<App>,headers:HeaderMap,Path(id):Path<Uuid>
     if app.config.api_key.is_empty()||app.config.api_url.is_empty(){return Err(Error(StatusCode::SERVICE_UNAVAILABLE,"L’API Qwen n’est pas configurée.".into()));}
     let _permit=app.generations.clone().try_acquire_owned().map_err(|_|Error(StatusCode::TOO_MANY_REQUESTS,"Le serveur est occupé. Réessaie dans un instant.".into()))?;
     let generation=Uuid::new_v4();
-    let row=sqlx::query_as::<_,Conversation>("UPDATE conversations SET active_generation=$3,generation_started_at=now() WHERE id=$1 AND user_id=$2 AND version=$4 AND (active_generation IS NULL OR generation_started_at<now()-interval '10 minutes') RETURNING id,title,messages,version,updated_at,context_summary,compacted_through,compaction_count")
+    let row=sqlx::query_as::<_,Conversation>("UPDATE conversations SET active_generation=$3,generation_started_at=now() WHERE id=$1 AND user_id=$2 AND version=$4 AND (active_generation IS NULL OR generation_started_at<now()-interval '35 minutes') RETURNING id,title,messages,version,updated_at,context_summary,compacted_through,compaction_count")
         .bind(id).bind(user.user_id).bind(generation).bind(input.version).fetch_optional(&app.db).await?;
     let mut row=match row{Some(row)=>row,None=>return Err(crate::chat::not_found_or_conflict(&app,id,user.user_id).await)};
     let recent=if row.messages.0.len().saturating_sub(row.compacted_through as usize)>10{6}else{2};
@@ -215,6 +226,13 @@ mod tests{
         assert_eq!(safety(&exact),512);assert!(fits(&exact,4096));assert!(!fits(&TokenCount{tokens:exact.tokens+1,..exact.clone()},4096));
         let anchored=TokenCount{tokens:120_000,estimated:true,estimated_part:2_000,measured:118_000,source:"test".into()};
         assert_eq!(safety(&anchored),1_012);assert!(fits(&anchored,4096));
+    }
+    #[test] fn answers_get_the_room_left_up_to_the_model_limit(){
+        let short=TokenCount{tokens:2_000,estimated:false,estimated_part:0,measured:2_000,source:"test".into()};
+        assert_eq!(output_budget(&short,MAX_OUTPUT),32_768);
+        let long=TokenCount{tokens:110_000,..short.clone()};
+        assert_eq!(output_budget(&long,MAX_OUTPUT),131_000-110_000-512);assert!(fits(&long,MIN_OUTPUT));
+        assert!(!fits(&TokenCount{tokens:122_297,..short},MIN_OUTPUT));
     }
     #[test] fn measurement_covers_only_an_unchanged_prefix(){
         let a=[json!({"role":"user","content":"Bonjour"})];let b=[json!({"role":"user","content":"Bonsoir"})];

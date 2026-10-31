@@ -146,6 +146,20 @@ class Integration(unittest.TestCase):
         self.assertEqual(self.alice.call(path, 'PUT', {'version': saved['version'], 'messages': edited})[0], 200)
         self.assertEqual(self.alice.call(path+'/context')[1]['measured_tokens'], 0)
 
+    def test_05c_answers_get_the_room_left_and_can_be_resumed(self):
+        chat = self.alice.create('longue réponse'); path = '/api/conversations/'+chat['id']
+        self.assertEqual(self.alice.call(path+'/generate', 'POST', {'version':chat['version'], 'continue':True})[0], 400)
+        with self.alice.call(path+'/generate', 'POST', {'version':chat['version']}, stream=True) as response:
+            self.assertIn('data: [DONE]', response.read().decode())
+        saved = self.alice.call(path)[1]; first = saved['messages'][-1]['content']
+        self.assertEqual(json.loads(first)['max_tokens'], 32768)
+        self.assertEqual(self.alice.call(path+'/context')[1]['max_output_tokens'], 32768)
+        with self.alice.call(path+'/generate', 'POST', {'version':saved['version'], 'continue':True}, stream=True) as response:
+            self.assertIn('data: [DONE]', response.read().decode())
+        resumed = self.alice.call(path)[1]
+        self.assertEqual(len(resumed['messages']), len(saved['messages']))
+        self.assertEqual(resumed['messages'][-1]['content'], first + ' (suite)')
+
     def test_06_upstream_errors_release_the_generation_lease(self):
         chat = self.alice.create('upstream-error'); path = '/api/conversations/'+chat['id']
         code, result, _ = self.alice.call(path+'/generate', 'POST', {'version':chat['version']})

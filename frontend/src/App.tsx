@@ -37,7 +37,7 @@ export default function App() {
         </header>
         <MessageList chat={chat.current} busy={chat.busy} summaryFocus={chat.summaryFocus} onRegenerate={() => {void chat.regenerate();}} onError={chat.notify}/>
         <Composer prompt={chat.prompt} onPrompt={chat.setPrompt} onSend={value => {void chat.send(value);}} onStop={chat.stop}
-          onRegenerate={() => {void chat.regenerate();}} settings={chat.settings} onSettings={chat.setSettings} busy={chat.busy}
+          onRegenerate={() => {void chat.regenerate();}} onContinue={() => {void chat.continueAnswer();}} settings={chat.settings} onSettings={chat.setSettings} busy={chat.busy}
           contextUsage={chat.contextUsage} compacting={chat.compacting} onCompact={() => {void chat.compactContext();}}
           disabled={!chat.auth.configured || chat.navigating || chat.compacting || !chat.current} notice={chat.notice} chatId={chat.current?.id}/>
       </div>

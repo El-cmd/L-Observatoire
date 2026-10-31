@@ -25,7 +25,7 @@ export function ContextMeter({usage, compacting, disabled, onCompact}: {
       <strong>Contexte de la conversation</strong>
       <span className="context-usage">{usage?.estimated ? '≈ ' : ''}{usage ? formatted(used) : '…'} <span>/ {formatted(limit)} tokens</span></span>
       {compacting ? <p>Résumé en cours. Les messages d’origine sont conservés.</p> : <>
-        <p>{counting}Une réserve est gardée pour la réponse.</p>
+        <p>{counting}{usage ? `Prochaine réponse : jusqu’à ${formatted(usage.max_output_tokens)} tokens.` : 'Une réserve est gardée pour la réponse.'}</p>
         <p>{usage?.can_compact ? 'Cliquer sur le cercle résume les anciens échanges et garde les plus récents.' : 'Le résumé devient disponible après au moins deux échanges.'}</p>
         <small>Compression automatique avant saturation.</small>
       </>}

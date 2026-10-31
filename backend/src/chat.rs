@@ -179,7 +179,7 @@ pub async fn update(
     let keep_memory=input.messages.len()>=through && previous.messages.0.get(..through)==input.messages.get(..through);
     let memory=if keep_memory{previous.context_summary}else{String::new()};
     let compacted=if keep_memory{previous.compacted_through}else{0};
-    let row=sqlx::query_as::<_,Conversation>("UPDATE conversations SET title=$3,messages=$4,context_summary=$6,compacted_through=$7,version=version+1,updated_at=now() WHERE id=$1 AND user_id=$2 AND version=$5 AND (active_generation IS NULL OR generation_started_at<now()-interval '10 minutes') RETURNING id,title,messages,version,updated_at,context_summary,compacted_through,compaction_count")
+    let row=sqlx::query_as::<_,Conversation>("UPDATE conversations SET title=$3,messages=$4,context_summary=$6,compacted_through=$7,version=version+1,updated_at=now() WHERE id=$1 AND user_id=$2 AND version=$5 AND (active_generation IS NULL OR generation_started_at<now()-interval '35 minutes') RETURNING id,title,messages,version,updated_at,context_summary,compacted_through,compaction_count")
         .bind(id).bind(user.user_id).bind(title(&input.messages)).bind(DbJson(input.messages)).bind(input.version).bind(memory).bind(compacted).fetch_optional(&app.db).await?;
     match row {
         Some(row) => Ok(Json(row)),
@@ -193,7 +193,7 @@ pub async fn delete(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, Error> {
     let user = session(&app, &headers, true).await?;
-    let result=sqlx::query("DELETE FROM conversations WHERE id=$1 AND user_id=$2 AND (active_generation IS NULL OR generation_started_at<now()-interval '10 minutes')").bind(id).bind(user.user_id).execute(&app.db).await?;
+    let result=sqlx::query("DELETE FROM conversations WHERE id=$1 AND user_id=$2 AND (active_generation IS NULL OR generation_started_at<now()-interval '35 minutes')").bind(id).bind(user.user_id).execute(&app.db).await?;
     if result.rows_affected() == 0 {
         return Err(not_found_or_conflict(&app, id, user.user_id).await);
     }
@@ -257,7 +257,7 @@ fn default_temperature() -> f64 {
     0.7
 }
 fn default_tokens() -> u32 {
-    4096
+    context::MAX_OUTPUT as u32
 }
 #[derive(Deserialize)]
 pub struct Generate {
@@ -266,8 +266,12 @@ pub struct Generate {
     reasoning_effort: String,
     #[serde(default = "default_temperature")]
     temperature: f64,
+    /// Upper bound; the answer actually gets the room left in the context window.
     #[serde(default = "default_tokens")]
     max_tokens: u32,
+    /// Resume the last assistant message where the length limit cut it.
+    #[serde(default, rename = "continue")]
+    resume: bool,
 }
 impl Generate {
     fn validate(&self) -> Result<(), Error> {
@@ -276,7 +280,7 @@ impl Generate {
             "none" | "low" | "medium" | "xhigh"
         ) || !self.temperature.is_finite()
             || !(0.0..=2.0).contains(&self.temperature)
-            || !(128..=8192).contains(&self.max_tokens)
+            || !(128..=context::MAX_OUTPUT as u32).contains(&self.max_tokens)
         {
             return Err(Error::bad("Réglages de génération invalides."));
         }
@@ -309,35 +313,50 @@ pub async fn generate(
         )
     })?;
     let generation = Uuid::new_v4();
-    let row=sqlx::query_as::<_,Conversation>("UPDATE conversations SET active_generation=$3,generation_started_at=now() WHERE id=$1 AND user_id=$2 AND version=$4 AND (active_generation IS NULL OR generation_started_at<now()-interval '10 minutes') RETURNING id,title,messages,version,updated_at,context_summary,compacted_through,compaction_count,measured_tokens,measured_messages,measured_digest")
+    let row=sqlx::query_as::<_,Conversation>("UPDATE conversations SET active_generation=$3,generation_started_at=now() WHERE id=$1 AND user_id=$2 AND version=$4 AND (active_generation IS NULL OR generation_started_at<now()-interval '35 minutes') RETURNING id,title,messages,version,updated_at,context_summary,compacted_through,compaction_count,measured_tokens,measured_messages,measured_digest")
         .bind(id).bind(user.user_id).bind(generation).bind(input.version).fetch_optional(&app.db).await?;
     let mut row = match row {
         Some(row) => row,
         None => return Err(not_found_or_conflict(&app, id, user.user_id).await),
     };
+    let expected = if input.resume { "assistant" } else { "user" };
+    let resumable = !input.resume
+        || row.messages.0.last().is_some_and(|m| !m.interrupted && !m.content.trim().is_empty());
     if row.messages.0.is_empty()
         || row.messages.0.len() >= context::MAX_MESSAGES
-        || row.messages.0.last().is_none_or(|m| m.role != "user")
+        || row.messages.0.last().is_none_or(|m| m.role != expected)
+        || !resumable
     {
         release(&app, id, generation).await;
-        return Err(Error::bad(
-            "Ajoute une question avant de demander une réponse.",
-        ));
+        return Err(Error::bad(if input.resume {
+            "Il n’y a pas de réponse à continuer."
+        } else {
+            "Ajoute une question avant de demander une réponse."
+        }));
     }
-    let prepared = tokio::time::timeout(std::time::Duration::from_secs(210), context::prepare(&app, &mut row, generation, input.max_tokens as u64)).await;
-    match prepared {
-        Ok(Ok(())) => {},
+    let reserve = (input.max_tokens as u64).min(context::MIN_OUTPUT);
+    let prepared = tokio::time::timeout(std::time::Duration::from_secs(210), context::prepare(&app, &mut row, generation, reserve)).await;
+    let counted = match prepared {
+        Ok(Ok(counted)) => counted,
         Ok(Err(error)) => {release(&app,id,generation).await;return Err(error);},
         Err(_) => {release(&app,id,generation).await;return Err(Error(StatusCode::GATEWAY_TIMEOUT,"La compression du contexte a pris trop de temps. Les messages d’origine sont conservés.".into()));}
-    }
+    };
+    let max_tokens = context::output_budget(&counted, input.max_tokens as u64);
     let messages = context::prompt(&row);
     let measured_messages = messages.len() as i32;
     let measured_digest = context::measure(&app.config.model, &messages);
-    let payload = json!({"model":app.config.model,"messages":messages,"reasoning_effort":input.reasoning_effort,"temperature":input.temperature,"max_tokens":input.max_tokens,"stream":true,"stream_options":{"include_usage":true}});
+    let mut payload = json!({"model":app.config.model,"messages":messages,"reasoning_effort":input.reasoning_effort,"temperature":input.temperature,"max_tokens":max_tokens,"stream":true,"stream_options":{"include_usage":true}});
+    if input.resume {
+        // vLLM extension: extend the final assistant message instead of starting a new turn.
+        payload["continue_final_message"] = json!(true);
+        payload["add_generation_prompt"] = json!(false);
+        payload["reasoning_effort"] = json!("none");
+    }
     let response = app
         .http
         .post(format!("{}/chat/completions", app.config.api_url))
         .bearer_auth(&app.config.api_key)
+        .timeout(std::time::Duration::from_secs(30 * 60))
         .json(&payload)
         .send()
         .await;
@@ -367,6 +386,9 @@ pub async fn generate(
             ));
         }
     };
+    // A resumed answer grows the last message in place; it is not a new Qwen measurement point.
+    let resume = input.resume;
+    let resumed = if resume { row.messages.0.pop() } else { None };
     let existing_bytes: usize = row
         .messages
         .0
@@ -379,12 +401,12 @@ pub async fn generate(
         let mut source = upstream.bytes_stream();
         let mut shutdown = app.shutdown.clone();
         let mut buffer = Vec::<u8>::new();
-        let mut output = Message {
+        let mut output = resumed.unwrap_or(Message {
             role: "assistant".into(),
             content: String::new(),
             reasoning: String::new(),
             interrupted: false,
-        };
+        });
         let mut prompt_tokens: Option<i32> = None;
         let mut done = false;
         let mut failed = false;
@@ -466,8 +488,8 @@ pub async fn generate(
                         output.reasoning.push_str(reasoning);
                     }
                 }
-                if output.content.len() > 100_000
-                    || output.reasoning.len() > 100_000
+                if output.content.len() > context::MAX_MESSAGE_BYTES
+                    || output.reasoning.len() > context::MAX_MESSAGE_BYTES
                     || existing_bytes + output.content.len() + output.reasoning.len() > context::MAX_HISTORY_BYTES
                 {
                     failed = true;
@@ -487,17 +509,17 @@ pub async fn generate(
         drop(source);
         output.interrupted = !done || failed || disconnected;
         let budget = context::MAX_HISTORY_BYTES.saturating_sub(existing_bytes);
-        truncate_utf8(&mut output.content, 100_000.min(budget));
+        truncate_utf8(&mut output.content, context::MAX_MESSAGE_BYTES.min(budget));
         truncate_utf8(
             &mut output.reasoning,
-            100_000.min(budget.saturating_sub(output.content.len())),
+            context::MAX_MESSAGE_BYTES.min(budget.saturating_sub(output.content.len())),
         );
         if !output.content.is_empty() || !output.reasoning.is_empty() {
             row.messages.0.push(output);
         }
         // Without a usage chunk (interruption), the previous measurement is kept.
         let saved=sqlx::query("UPDATE conversations SET messages=$3,version=version+1,active_generation=NULL,generation_started_at=NULL,updated_at=now(),measured_tokens=COALESCE($4,measured_tokens),measured_messages=CASE WHEN $4 IS NULL THEN measured_messages ELSE $5 END,measured_digest=CASE WHEN $4 IS NULL THEN measured_digest ELSE $6 END WHERE id=$1 AND active_generation=$2")
-            .bind(id).bind(generation).bind(row.messages).bind(prompt_tokens).bind(measured_messages).bind(&measured_digest).execute(&app.db).await;
+            .bind(id).bind(generation).bind(row.messages).bind(prompt_tokens.filter(|_| !resume)).bind(measured_messages).bind(&measured_digest).execute(&app.db).await;
         let persisted = matches!(saved,Ok(ref result) if result.rows_affected()==1);
         if !persisted {
             tracing::error!(conversation=%id,"could not persist generation");
@@ -552,7 +574,8 @@ mod tests {
                     version: 0,
                     reasoning_effort: level.into(),
                     temperature: 0.7,
-                    max_tokens: 4096
+                    max_tokens: 4096,
+                    resume: false
                 }
                 .validate()
                 .is_ok()
@@ -563,7 +586,8 @@ mod tests {
                 version: 0,
                 reasoning_effort: "high".into(),
                 temperature: 0.7,
-                max_tokens: 4096
+                max_tokens: 4096,
+                resume: false
             }
             .validate()
             .is_err()

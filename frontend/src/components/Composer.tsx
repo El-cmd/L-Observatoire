@@ -5,9 +5,9 @@ import {ContextMeter} from './ContextMeter';
 
 const effortLabels = {none:'désactivée', low:'légère', medium:'intermédiaire', xhigh:'approfondie'};
 
-export function Composer({prompt, onPrompt, onSend, onStop, onRegenerate, settings, onSettings, busy, disabled, notice, chatId, contextUsage, compacting, onCompact}: {
+export function Composer({prompt, onPrompt, onSend, onStop, onRegenerate, onContinue, settings, onSettings, busy, disabled, notice, chatId, contextUsage, compacting, onCompact}: {
   prompt: string; onPrompt: (value: string) => void; onSend: (value: string) => void; onStop: () => void;
-  onRegenerate: () => void; settings: Settings; onSettings: (value: Settings) => void; busy: boolean;
+  onRegenerate: () => void; onContinue: () => void; settings: Settings; onSettings: (value: Settings) => void; busy: boolean;
   disabled: boolean; notice: Notice | null; chatId?: string;
   contextUsage: ContextUsage | null; compacting: boolean; onCompact: () => void;
 }) {
@@ -31,7 +31,7 @@ export function Composer({prompt, onPrompt, onSend, onStop, onRegenerate, settin
   }, [open]);
   const temperature = settings.temperature.toLocaleString('fr-FR', {minimumFractionDigits:1, maximumFractionDigits:1});
   return <div className="composer-area">
-    <div id="error" className="error" role="alert" hidden={!notice}>{notice?.message}{notice?.retry && <button type="button" onClick={onRegenerate}>Réessayer</button>}</div>
+    <div id="error" className="error" role="alert" hidden={!notice}>{notice?.message}{notice?.resume && <button type="button" onClick={onContinue}>Continuer</button>}{notice?.retry && <button type="button" onClick={onRegenerate}>Réessayer</button>}</div>
     <section id="generation-settings" className="generation-settings" aria-label="Réglages de génération" hidden={!open} ref={panel}>
       <div className="generation-heading"><span>Réglages</span><button id="generation-close" type="button" className="icon-button" aria-label="Fermer les réglages" onClick={() => {setOpen(false); toggle.current?.focus();}}><Icon name="close"/></button></div>
       <label htmlFor="effort">Réflexion</label>

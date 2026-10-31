@@ -183,7 +183,9 @@ async fn main() -> Result<()> {
         http: reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(190))
+            // Idle limit rather than a total one: a long answer keeps streaming for many minutes.
+            // Non-streaming calls set their own total timeout.
+            .read_timeout(Duration::from_secs(300))
             .build()?,
         config: Arc::new(config),
         generations: Arc::new(Semaphore::new(4)),

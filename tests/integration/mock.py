@@ -18,7 +18,11 @@ class Mock(BaseHTTPRequestHandler):
         self.send_header('Connection', 'close')
         self.end_headers()
         text = json.dumps({'reply': 'Bonjour, été !', 'temperature': body['temperature'],
-                           'effort': body['reasoning_effort'], 'question': last}, ensure_ascii=False)
+                           'effort': body['reasoning_effort'], 'question': last, 'max_tokens': body['max_tokens']}, ensure_ascii=False)
+        if body.get('continue_final_message'):
+            # vLLM extends the final assistant message: only accept a well-formed resume.
+            resumable = body['messages'][-1]['role'] == 'assistant' and body.get('add_generation_prompt') is False
+            text = ' (suite)' if resumable else ' (reprise invalide)'
         if last == 'slow':
             text = 'Réponse lente. ' * 30
         try:

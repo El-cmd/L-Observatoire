@@ -1,5 +1,5 @@
 export type Effort = 'none' | 'low' | 'medium' | 'xhigh';
-export interface Settings { effort: Effort; temperature: number; maxTokens: number }
+export interface Settings { effort: Effort; temperature: number }
 export interface User { id: string; username: string; is_admin: boolean }
 export interface Auth { user: User; csrf_token: string; configured: boolean }
 export interface Message {
@@ -11,11 +11,11 @@ export interface Conversation {
   context_summary: string; compacted_through: number; compaction_count: number;
 }
 export type ConversationSummary = Omit<Conversation, 'messages'>;
-export interface Notice { message: string; retry?: boolean }
+export interface Notice { message: string; retry?: boolean; resume?: boolean }
 export interface Legacy { chats?: { messages?: Message[] }[]; settings?: Partial<Settings> }
 
 export interface ContextUsage {
-  conversation_id: string; version: number; used_tokens: number; measured_tokens: number; limit_tokens: number;
+  conversation_id: string; version: number; used_tokens: number; measured_tokens: number; limit_tokens: number; max_output_tokens: number;
   reserved_tokens: number; safety_tokens: number; auto_compact_at: number;
   estimated: boolean; source: string; can_compact: boolean; summarized_messages: number;
 }
