@@ -1,7 +1,8 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {APIClient, APIError, errorMessage} from '../lib/api';
 import {consumeCompletion} from '../lib/stream';
-import type {Activity, Auth, Conversation, ConversationSummary, Legacy, Message, Notice, Settings, ContextUsage} from '../types';
+import {MAX_IMAGES, prepareImage, thumbnailURL} from '../lib/images';
+import type {Activity, AttachmentRef, Auth, Conversation, ConversationSummary, Legacy, Library, Message, Notice, PendingImage, Settings, ContextUsage} from '../types';
 
 function readLegacy(): Legacy | null {
   try { return JSON.parse(localStorage.getItem('observatoir-chat-v1') || localStorage.getItem('qwen-chat-v1') || 'null') as Legacy | null; }
@@ -45,6 +46,11 @@ export function useObservatoire() {
   // Notices belong to a conversation; '' holds the ones about the account.
   const [notices, setNotices] = useState<Record<string, Notice>>({});
   const [prompt, setPrompt] = useState('');
+  const [pending, setPendingState] = useState<PendingImage[]>([]);
+  const pendingRef = useRef<PendingImage[]>([]);
+  const [library, setLibrary] = useState<Library | null>(null);
+  // The browser keeps images shown in the page in memory: deleted ones are hidden from here.
+  const [removedImages, setRemovedImages] = useState<ReadonlySet<string>>(() => new Set());
   const [settings, setSettings] = useState<Settings>({effort:'none', temperature:0.7});
   const [canImport, setCanImport] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -64,6 +70,9 @@ export function useObservatoire() {
     activityRef.current = {}; setActivityState({});
   }, []);
   const selectChat = useCallback((id?: string) => { currentRef.current = id; setCurrentId(id); }, []);
+  const setPending = useCallback((update: (previous: PendingImage[]) => PendingImage[]) => {
+    pendingRef.current = update(pendingRef.current); setPendingState(pendingRef.current);
+  }, []);
   const replaceChats = useCallback((value: Conversation[]) => { chatsRef.current = value; setChats(value); }, []);
   const replaceChat = useCallback((chat: Conversation) => {
     const exists = chatsRef.current.some(c => c.id === chat.id);
@@ -74,10 +83,10 @@ export function useObservatoire() {
   const clearSession = useCallback((message = '') => {
     epoch.current++; abortAll(); navigation.current.controller?.abort();
     authRef.current = null; client.setCSRF('');
-    setAuth(null); replaceChats([]); selectChat(undefined); setPrompt('');
+    setAuth(null); replaceChats([]); selectChat(undefined); setPrompt(''); setPending(() => []); setLibrary(null);
     creating.current = false; loadingList.current = false; setNavigating(false);
     setNotices({}); setCanImport(false); setContextUsage(null); setLoginError(message); setInitializing(false);
-  }, [client, replaceChats, abortAll, selectChat]);
+  }, [client, replaceChats, abortAll, selectChat, setPending]);
 
   const failure = useCallback((error: unknown, id = currentRef.current ?? '') => {
     if (error instanceof APIError && error.status === 401) clearSession('Ta session a expiré. Reconnecte-toi.');
@@ -222,7 +231,7 @@ export function useObservatoire() {
   }
 
   /** With resume, the last assistant message (cut by the length limit) is extended in place. */
-  async function requestAnswer(draft: Conversation, recoveryText?: string, resume = false) {
+  async function requestAnswer(draft: Conversation, recoveryText?: string, recoveryImages: PendingImage[] = [], resume = false) {
     const id = draft.id;
     if (activityRef.current[id] || !authRef.current?.configured) return;
     const account = epoch.current;
@@ -260,7 +269,10 @@ export function useObservatoire() {
       if (epoch.current !== account) return;
       if (error instanceof APIError && error.status === 401) failure(error, id);
       else setNotice(id, {message:aborted(error) ? 'Génération arrêtée.' : errorMessage(error), retry:true});
-      if (!savedQuestion && recoveryText && currentRef.current === id) setPrompt(recoveryText);
+      if (!savedQuestion && currentRef.current === id) {
+        if (recoveryText) setPrompt(recoveryText);
+        if (recoveryImages.length) setPending(() => recoveryImages);
+      }
     } finally {
       if (epoch.current === account) {
         try {
@@ -289,19 +301,79 @@ export function useObservatoire() {
     } catch (error) {if (epoch.current === account) failure(error);}
   }
 
+  /** Each image is prepared in the browser, then sent to the library as soon as it is chosen. */
+  async function addImages(files: File[]) {
+    if (!authRef.current) return;
+    const room = MAX_IMAGES - pendingRef.current.length;
+    if (files.length > room) notify(`${MAX_IMAGES} images au maximum par message.`);
+    const account = epoch.current;
+    await Promise.all(files.slice(0, Math.max(0, room)).map(async file => {
+      const key = crypto.randomUUID(); const preview = URL.createObjectURL(file);
+      setPending(list => [...list, {key, name:file.name || 'image', preview, status:'uploading'}]);
+      try {
+        const blob = await prepareImage(file);
+        const ref = await client.json<AttachmentRef>(`/api/attachments?name=${encodeURIComponent(file.name || 'image')}`, {method:'POST', body:blob});
+        if (epoch.current !== account) return;
+        setPending(list => list.map(item => item.key === key ? {...item, status:'ready', ref, preview:thumbnailURL(ref.id)} : item));
+        setLibrary(null);
+      } catch (error) {
+        if (epoch.current !== account) return;
+        if (error instanceof APIError && error.status === 401) failure(error);
+        setPending(list => list.map(item => item.key === key ? {...item, status:'error', error:errorMessage(error)} : item));
+      } finally { URL.revokeObjectURL(preview); }
+    }));
+  }
+
+  function addFromLibrary(refs: AttachmentRef[]) {
+    const room = MAX_IMAGES - pendingRef.current.length;
+    if (refs.length > room) notify(`${MAX_IMAGES} images au maximum par message.`);
+    setPending(list => [...list, ...refs.slice(0, Math.max(0, room)).filter(ref => !list.some(item => item.ref?.id === ref.id))
+      .map(ref => ({key:crypto.randomUUID(), name:ref.name, preview:thumbnailURL(ref.id), status:'ready' as const, ref}))]);
+  }
+
+  const removePending = (key: string) => setPending(list => list.filter(item => item.key !== key));
+
   async function send(content: string) {
     const chat = chatsRef.current.find(value => value.id === currentRef.current);
-    if (!chat || activityRef.current[chat.id] || navigating || !content.trim()) return;
+    const images = pendingRef.current;
+    if (!chat || activityRef.current[chat.id] || navigating || !content.trim() && !images.length) return;
+    if (images.some(item => item.status === 'uploading')) {notify('Attends la fin de l’envoi des images.'); return;}
+    if (images.some(item => item.status === 'error')) {notify('Retire les images refusées avant d’envoyer.'); return;}
     if (chat.messages.length >= 9998) {notify('Cette conversation est longue. Ouvre un nouveau chat pour continuer.'); return;}
-    setPrompt('');
-    await requestAnswer({...chat, title:chat.messages.length ? chat.title : content.slice(0,80),
-      messages:[...chat.messages, {role:'user', content:content.trim()}], message_count:chat.messages.length+1}, content);
+    const attachments = images.map(item => item.ref!);
+    setPrompt(''); setPending(() => []);
+    const question: Message = {role:'user', content:content.trim(), ...(attachments.length ? {attachments} : {})};
+    await requestAnswer({...chat, title:chat.messages.length ? chat.title : (content.trim() || attachments[0].name).slice(0,80),
+      messages:[...chat.messages, question], message_count:chat.messages.length+1}, content, images);
   }
+
+  async function loadLibrary() {
+    if (!authRef.current) return;
+    const account = epoch.current;
+    try {
+      const value = await client.json<Library>('/api/attachments');
+      if (epoch.current === account) setLibrary(value);
+    } catch (error) {if (epoch.current === account) failure(error);}
+  }
+
+  async function deleteImage(id: string) {
+    if (!authRef.current || !confirm('Supprimer cette image de ta bibliothèque ? Elle sera remplacée par « Image supprimée » dans les conversations.')) return;
+    const account = epoch.current;
+    try {
+      await client.json(`/api/attachments/${id}`, {method:'DELETE'});
+      if (epoch.current !== account) return;
+      setPending(list => list.filter(item => item.ref?.id !== id));
+      setRemovedImages(previous => new Set(previous).add(id));
+      await loadLibrary();
+    } catch (error) {if (epoch.current === account) failure(error);}
+  }
+
+  const imageConversations = (id: string) => client.json<{id: string; title: string}[]>(`/api/attachments/${id}/conversations`);
 
   async function continueAnswer() {
     const chat = chatsRef.current.find(value => value.id === currentRef.current);
     if (!chat || activityRef.current[chat.id] || chat.messages[chat.messages.length - 1]?.role !== 'assistant') return;
-    await requestAnswer(chat, undefined, true);
+    await requestAnswer(chat, undefined, [], true);
   }
 
   async function regenerate() {
@@ -330,7 +402,8 @@ export function useObservatoire() {
   return {auth, initializing, loginError, signingIn, login, logout, changePassword,
     chats, current:activeChat, activity, busy:currentActivity === 'generating', navigating,
     notice:(currentId && notices[currentId]) || notices[''] || null, notify,
-    prompt, setPrompt, settings, setSettings, newChat, openChat, deleteChat, renameChat, send, regenerate, continueAnswer,
+    prompt, setPrompt, pending, addImages, addFromLibrary, removePending, library, loadLibrary, deleteImage, imageConversations, removedImages,
+    settings, setSettings, newChat, openChat, deleteChat, renameChat, send, regenerate, continueAnswer,
     contextUsage:contextUsage && contextUsage.conversation_id === currentId && contextUsage.version === activeChat?.version ? contextUsage : null,
     compacting:currentActivity === 'compacting', compactContext, summaryFocus,
     stop:() => {if (currentRef.current) controllers.current.get(currentRef.current)?.abort();}, canImport, importing, importLegacy};

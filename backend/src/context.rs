@@ -1,5 +1,5 @@
 //! Context memory is separate from the immutable original message archive.
-use crate::{App, Error, chat::{Conversation, Message}, session};
+use crate::{App, Error, attachments, chat::{Conversation, Message}, session};
 use axum::{Json, extract::{Path, State}, http::{HeaderMap, StatusCode}};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -33,9 +33,57 @@ pub fn prompt(row:&Conversation)->Vec<Value>{
     let mut result=Vec::new();
     if !row.context_summary.is_empty(){result.push(json!({"role":"system","content":format!("{MEMORY_PREFIX}{}",row.context_summary)}));}
     result.extend(row.messages.0.iter().skip(row.compacted_through.max(0) as usize)
-        .filter(|m|!m.interrupted&&!m.content.trim().is_empty())
-        .map(|m|json!({"role":m.role,"content":m.content})));
+        .filter(|m|!m.interrupted&&(!m.content.trim().is_empty()||!m.attachments.is_empty()))
+        .map(message));
     result
+}
+
+const IMAGE_REF:&str="observatoire-image:";
+
+/// Images stay references here (counting, fingerprint of the prompt); `resolve` loads them.
+fn message(m:&Message)->Value{
+    if m.attachments.is_empty(){return json!({"role":m.role,"content":m.content});}
+    let mut parts=Vec::new();
+    if !m.content.trim().is_empty(){parts.push(json!({"type":"text","text":m.content}));}
+    parts.extend(m.attachments.iter().map(|a|json!({"type":"image_url","image_url":{"url":format!("{IMAGE_REF}{}",a.id)},"width":a.width,"height":a.height,"name":a.name})));
+    json!({"role":m.role,"content":parts})
+}
+
+fn reference(part:&Value)->Option<Uuid>{part.pointer("/image_url/url")?.as_str()?.strip_prefix(IMAGE_REF)?.parse().ok()}
+
+/// Replaces image references with the images just before calling Qwen; a deleted image
+/// becomes a mention.
+pub async fn resolve(app:&App,user:Uuid,mut messages:Vec<Value>)->Result<Vec<Value>,Error>{
+    let ids:Vec<Uuid>=messages.iter().filter_map(|m|m.get("content").and_then(Value::as_array)).flatten().filter_map(reference).collect();
+    if ids.is_empty(){return Ok(messages);}
+    let stored=attachments::load(app,user,&ids).await?;
+    for part in messages.iter_mut().filter_map(|m|m.get_mut("content").and_then(Value::as_array_mut)).flatten(){
+        let Some(id)=reference(part) else{continue};
+        *part=match stored.get(&id){
+            Some(image)=>json!({"type":"image_url","image_url":{"url":attachments::data_url(image)}}),
+            None=>json!({"type":"text","text":format!("[image supprimée : {}]",part.get("name").and_then(Value::as_str).unwrap_or("image"))}),
+        };
+    }
+    Ok(messages)
+}
+
+/// Text sent to the token counter, and the cost of the images measured on Qwen.
+fn split_images(messages:&[Value])->(Vec<Value>,u64){
+    let mut images=0;
+    let text=messages.iter().map(|m|match m.get("content").and_then(Value::as_array){
+        Some(parts)=>{
+            let mut texts=Vec::new();
+            for part in parts{
+                if reference(part).is_some(){
+                    let side=|key:&str|part.get(key).and_then(Value::as_u64).unwrap_or(1024) as u32;
+                    images+=attachments::image_tokens(side("width"),side("height"));
+                }else if let Some(text)=part.get("text").and_then(Value::as_str){texts.push(text);}
+            }
+            json!({"role":m.get("role"),"content":texts.join("\n")})
+        }
+        None=>m.clone(),
+    }).collect();
+    (text,images)
 }
 
 pub fn fallback_count(messages:&[Value])->u64{
@@ -68,6 +116,17 @@ pub async fn count(app:&App,messages:&[Value])->TokenCount{
     if messages.is_empty(){return TokenCount{tokens:0,estimated:false,estimated_part:0,measured:0,source:"estimation".into()};}
     let key=crate::auth::digest(&json!({"model":app.config.model,"messages":messages}).to_string());
     if let Some(cached)=app.token_counts.lock().await.get(&key).cloned(){return cached;}
+    let (text,images)=split_images(messages);
+    let mut result=count_text(app,&text).await;
+    if images>0{result=TokenCount{tokens:result.tokens+images,estimated:true,estimated_part:result.estimated_part+images,..result};}
+    let mut cache=app.token_counts.lock().await;
+    if cache.len()>=256{cache.clear();}
+    // Failed counters are not cached, so a recovered tokenizer is used immediately.
+    if result.source!="estimation prudente"{cache.insert(key,result.clone());}
+    result
+}
+
+async fn count_text(app:&App,messages:&[Value])->TokenCount{
     let base=app.config.api_url.strip_suffix("/v1").unwrap_or(&app.config.api_url);
     let response=app.http.post(format!("{base}/utils/token_counter")).bearer_auth(&app.config.api_key)
         .timeout(Duration::from_secs(8)).json(&json!({"model":app.config.model,"messages":messages})).send().await;
@@ -86,10 +145,6 @@ pub async fn count(app:&App,messages:&[Value])->TokenCount{
             }
         }
     }
-    let mut cache=app.token_counts.lock().await;
-    if cache.len()>=256{cache.clear();}
-    // Failed counters are not cached, so a recovered tokenizer is used immediately.
-    if result.source!="estimation prudente"{cache.insert(key,result.clone());}
     result
 }
 
@@ -141,11 +196,17 @@ fn summary_prompt(previous:&str,messages:&[Value])->Vec<Value>{
         json!({"role":"user","content":json!({"resume_precedent":previous,"anciens_messages":messages}).to_string()})]
 }
 
-async fn summarize(app:&App,row:&Conversation,end:usize)->Result<String,Error>{
+async fn summarize(app:&App,user:Uuid,row:&Conversation,end:usize)->Result<String,Error>{
     let mut segments=Vec::new();
     for message in row.messages.0.iter().take(end).skip(row.compacted_through as usize){
-        if message.interrupted||message.content.trim().is_empty(){continue;}
-        for (index,part) in split_text(&message.content).iter().enumerate(){segments.push(json!({"role":message.role,"partie":index+1,"content":part}));}
+        if message.interrupted||(message.content.trim().is_empty()&&message.attachments.is_empty()){continue;}
+        // Images leave the context only now: Qwen transcribes them once for the summary.
+        let mut text=message.content.clone();
+        for image in &message.attachments{
+            let seen=attachments::transcript(app,user,image).await.unwrap_or_else(||"contenu indisponible (image supprimée ou illisible)".into());
+            text.push_str(&format!("\n\n[Image « {} » : {}]",image.name,seen));
+        }
+        for (index,part) in split_text(&text).iter().enumerate(){segments.push(json!({"role":message.role,"partie":index+1,"content":part}));}
     }
     if segments.is_empty(){return Err(Error::bad("Il n’y a pas encore d’échanges à résumer."));}
     let mut summary=row.context_summary.clone();let mut start=0;
@@ -177,21 +238,21 @@ async fn save_memory(app:&App,row:&mut Conversation,generation:Uuid,summary:Stri
     Ok(())
 }
 
-pub async fn compact_memory(app:&App,row:&mut Conversation,generation:Uuid,end:usize)->Result<(),Error>{
+pub async fn compact_memory(app:&App,user:Uuid,row:&mut Conversation,generation:Uuid,end:usize)->Result<(),Error>{
     if end<=row.compacted_through as usize{return Err(Error::bad("Il faut au moins deux échanges pour résumer le début en gardant les messages récents."));}
-    let summary=tokio::time::timeout(Duration::from_secs(210),summarize(app,row,end)).await
+    let summary=tokio::time::timeout(Duration::from_secs(210),summarize(app,user,row,end)).await
         .map_err(|_|Error(StatusCode::GATEWAY_TIMEOUT,"Le résumé a pris trop de temps. La conversation reste intacte.".into()))??;
     save_memory(app,row,generation,summary,end).await
 }
 
 /// Make room before contacting Qwen, keeping the latest exchanges verbatim.
 /// Returns the size of the prompt that will be sent.
-pub async fn prepare(app:&App,row:&mut Conversation,generation:Uuid,reserve:u64)->Result<TokenCount,Error>{
+pub async fn prepare(app:&App,user:Uuid,row:&mut Conversation,generation:Uuid,reserve:u64)->Result<TokenCount,Error>{
     for keep in [8,4,2,1]{
         let counted=count_prompt(app,row).await;
         if fits(&counted,reserve){return Ok(counted);}
         let end=cutoff(row,keep);
-        if end>row.compacted_through as usize{compact_memory(app,row,generation,end).await?;}
+        if end>row.compacted_through as usize{compact_memory(app,user,row,generation,end).await?;}
     }
     let counted=count_prompt(app,row).await;
     if !fits(&counted,reserve){return Err(Error::bad("Le dernier message est trop long pour le contexte de 131 000 tokens. Raccourcis-le avant de réessayer."));}
@@ -210,7 +271,7 @@ pub async fn compact(State(app):State<App>,headers:HeaderMap,Path(id):Path<Uuid>
     let mut row=match row{Some(row)=>row,None=>return Err(crate::chat::not_found_or_conflict(&app,id,user.user_id).await)};
     let recent=if row.messages.0.len().saturating_sub(row.compacted_through as usize)>10{6}else{2};
     let end=cutoff(&row,recent);
-    let result=compact_memory(&app,&mut row,generation,end).await;
+    let result=compact_memory(&app,user.user_id,&mut row,generation,end).await;
     crate::chat::release(&app,id,generation).await;
     result?;
     Ok(Json(fetch(&app,id,user.user_id).await?))

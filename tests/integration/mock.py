@@ -10,6 +10,11 @@ class Mock(BaseHTTPRequestHandler):
             self.send_error(401)
             return
         last = body['messages'][-1]['content']
+        images = []
+        if isinstance(last, list):
+            # Mixed message: text parts and images (data URLs sent by the API).
+            images = [part['image_url']['url'] for part in last if part.get('type') == 'image_url']
+            last = '\n'.join(part['text'] for part in last if part.get('type') == 'text')
         if last == 'upstream-error':
             self.send_error(503, 'Private upstream detail: integration-test-key')
             return
@@ -29,7 +34,8 @@ class Mock(BaseHTTPRequestHandler):
         self.send_header('Connection', 'close')
         self.end_headers()
         text = json.dumps({'reply': 'Bonjour, été !', 'temperature': body['temperature'],
-                           'effort': body['reasoning_effort'], 'question': last, 'max_tokens': body['max_tokens']}, ensure_ascii=False)
+                           'effort': body['reasoning_effort'], 'question': last, 'max_tokens': body['max_tokens'],
+                           'images': [url[:40] for url in images]}, ensure_ascii=False)
         if body.get('continue_final_message'):
             # vLLM extends the final assistant message: only accept a well-formed resume.
             resumable = body['messages'][-1]['role'] == 'assistant' and body.get('add_generation_prompt') is False

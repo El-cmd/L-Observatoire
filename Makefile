@@ -28,4 +28,5 @@ test-frontend:
 	docker build --target build -f frontend/Dockerfile .
 test: test-frontend
 	docker run --rm -v "$(CURDIR)/backend:/app" -v observatoire-cargo-registry:/usr/local/cargo/registry -v observatoire-cargo-target:/app/target -w /app rust:1-slim-trixie cargo test --locked
+	docker run --rm -v "$(CURDIR)/image-guard:/app" -v observatoire-cargo-registry:/usr/local/cargo/registry -v observatoire-guard-target:/app/target -w /app rust:1-slim-trixie cargo test --locked
 	python3 tests/integration/run.py

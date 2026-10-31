@@ -7,7 +7,14 @@ export interface Message {
   role: 'user' | 'assistant'; content: string; reasoning?: string; interrupted?: boolean;
   /** Cut by the length limit: the answer can be continued. */
   truncated?: boolean;
+  /** Images of the user's library shown with a question. */
+  attachments?: AttachmentRef[];
 }
+export interface AttachmentRef { id: string; name: string; width: number; height: number }
+export interface LibraryItem extends AttachmentRef { mime: string; size: number; created_at: string }
+export interface Library { items: LibraryItem[]; used_bytes: number; quota_bytes: number }
+/** An image chosen for the next message: uploading, ready (in the library) or refused. */
+export interface PendingImage { key: string; name: string; preview: string; status: 'uploading' | 'ready' | 'error'; ref?: AttachmentRef; error?: string }
 export interface Conversation {
   id: string; title: string; version: number; messages: Message[];
   message_count: number; updated_at: string;

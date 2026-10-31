@@ -1,4 +1,4 @@
-use crate::{App, Error, context, session};
+use crate::{App, Error, attachments::{self, AttachmentRef}, context, session};
 use axum::{
     Json,
     body::Body,
@@ -26,6 +26,9 @@ pub struct Message {
     /// Cut by the length limit (finish_reason "length"): the answer can be resumed.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub truncated: bool,
+    /// Images of the user's library shown with a question.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<AttachmentRef>,
 }
 
 #[derive(Serialize, FromRow)]
@@ -72,7 +75,10 @@ fn validate_messages(messages: &[Message]) -> Result<(), Error> {
         if !matches!(m.role.as_str(), "user" | "assistant")
             || m.content.len() > context::MAX_MESSAGE_BYTES
             || m.reasoning.len() > context::MAX_MESSAGE_BYTES
-            || (m.content.trim().is_empty() && (m.role == "user" || m.reasoning.is_empty()))
+            || (m.content.trim().is_empty() && m.attachments.is_empty() && (m.role == "user" || m.reasoning.is_empty()))
+            || (m.role != "user" && !m.attachments.is_empty())
+            || m.attachments.len() > attachments::MAX_PER_MESSAGE
+            || m.attachments.iter().any(|a| a.name.chars().count() > 120 || a.width == 0 || a.height == 0 || a.width > 4096 || a.height > 4096)
         {
             return Err(Error::bad(
                 "Un message est vide, trop long ou son rôle est invalide.",
@@ -92,7 +98,10 @@ fn title(messages: &[Message]) -> String {
     messages
         .iter()
         .find(|m| m.role == "user")
-        .map(|m| m.content.chars().take(80).collect())
+        .map(|m| match (m.content.trim().is_empty(), m.attachments.first()) {
+            (true, Some(image)) => image.name.chars().take(80).collect(),
+            _ => m.content.chars().take(80).collect(),
+        })
         .unwrap_or_else(|| "Nouveau chat".into())
 }
 
@@ -257,6 +266,11 @@ pub async fn update(
     validate_messages(&input.messages)?;
     let previous=sqlx::query_as::<_,Conversation>("SELECT id,title,messages,version,updated_at,context_summary,compacted_through,compaction_count FROM conversations WHERE id=$1 AND user_id=$2")
         .bind(id).bind(user.user_id).fetch_optional(&app.db).await?.ok_or_else(Error::missing)?;
+    // New references must point to the user's own library; kept ones may be deleted images.
+    let known: std::collections::HashSet<Uuid> = previous.messages.0.iter().flat_map(|m| m.attachments.iter().map(|a| a.id)).collect();
+    let mut added: Vec<Uuid> = input.messages.iter().flat_map(|m| m.attachments.iter().map(|a| a.id)).filter(|id| !known.contains(id)).collect();
+    added.sort(); added.dedup();
+    attachments::check_owned(&app, user.user_id, &added).await?;
     let through=previous.compacted_through as usize;
     let keep_memory=input.messages.len()>=through && previous.messages.0.get(..through)==input.messages.get(..through);
     let memory=if keep_memory{previous.context_summary}else{String::new()};
@@ -303,6 +317,9 @@ pub async fn import(
     }
     for chat in &input.chats {
         validate_messages(&chat.messages)?;
+        if chat.messages.iter().any(|m| !m.attachments.is_empty()) {
+            return Err(Error::bad("L’import ne prend pas les images."));
+        }
     }
     let mut tx = app.db.begin().await?;
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
@@ -424,7 +441,7 @@ pub async fn generate(
         }));
     }
     let reserve = (input.max_tokens as u64).min(context::MIN_OUTPUT);
-    let prepared = tokio::time::timeout(std::time::Duration::from_secs(210), context::prepare(&app, &mut row, generation, reserve)).await;
+    let prepared = tokio::time::timeout(std::time::Duration::from_secs(210), context::prepare(&app, user.user_id, &mut row, generation, reserve)).await;
     let counted = match prepared {
         Ok(Ok(counted)) => counted,
         Ok(Err(error)) => {release(&app,id,generation).await;return Err(error);},
@@ -436,12 +453,21 @@ pub async fn generate(
     let measured_digest = context::measure(&app.config.model, &messages);
     // Qwen names the conversation from its first question while the answer streams.
     let mut naming = (row.title_source == "question" && !input.resume)
-        .then(|| row.messages.0.iter().find(|m| m.role == "user").map(|m| m.content.clone()))
+        .then(|| row.messages.0.iter().find(|m| m.role == "user").map(|m| m.content.clone()).filter(|q| !q.trim().is_empty()))
         .flatten()
         .map(|question| {
             let app = app.clone();
             tokio::spawn(async move { generated_title(&app, &question).await })
         });
+    // The fingerprint above covers image references; Qwen gets the images themselves.
+    let messages = match context::resolve(&app, user.user_id, messages).await {
+        Ok(messages) => messages,
+        Err(error) => {
+            if let Some(task) = naming.take() { task.abort(); }
+            release(&app, id, generation).await;
+            return Err(error);
+        }
+    };
     let mut payload = json!({"model":app.config.model,"messages":messages,"reasoning_effort":input.reasoning_effort,"temperature":input.temperature,"max_tokens":max_tokens,"stream":true,"stream_options":{"include_usage":true}});
     if input.resume {
         // vLLM extension: extend the final assistant message instead of starting a new turn.
@@ -504,6 +530,7 @@ pub async fn generate(
             reasoning: String::new(),
             interrupted: false,
             truncated: false,
+            attachments: Vec::new(),
         });
         output.truncated = false;
         let mut prompt_tokens: Option<i32> = None;
@@ -692,6 +719,7 @@ mod tests {
             reasoning: String::new(),
             interrupted: false,
             truncated: false,
+            attachments: Vec::new(),
         };
         assert!(validate_messages(&[m.clone()]).is_ok());
         m.role = "system".into();

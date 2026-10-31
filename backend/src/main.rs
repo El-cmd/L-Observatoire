@@ -1,3 +1,4 @@
+mod attachments;
 mod auth;
 mod chat;
 mod context;
@@ -33,6 +34,8 @@ pub struct Config {
     pub api_url: String,
     pub api_key: String,
     pub model: String,
+    /// Isolated service that re-encodes images sent by users.
+    pub image_guard: String,
     pub origin: String,
     pub secure_cookie: bool,
 }
@@ -97,7 +100,10 @@ pub async fn session(app: &App, headers: &HeaderMap, write: bool) -> Result<auth
 async fn security(request: axum::extract::Request, next: Next) -> Response {
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
-    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    // Library images set their own private cache; everything else is never stored.
+    if !headers.contains_key(header::CACHE_CONTROL) {
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
     headers.insert(
         "x-content-type-options",
         HeaderValue::from_static("nosniff"),
@@ -165,6 +171,10 @@ async fn main() -> Result<()> {
             .to_string(),
         api_key: env::var("QWEN_API_KEY").unwrap_or_default(),
         model: env::var("QWEN_MODEL").unwrap_or_else(|_| "qwen3.8-27b-abliterated".into()),
+        image_guard: env::var("IMAGE_GUARD_URL")
+            .unwrap_or_else(|_| "http://image-guard:8080".into())
+            .trim_end_matches('/')
+            .to_string(),
         secure_cookie: parsed.scheme() == "https",
         origin,
     };
@@ -224,6 +234,10 @@ async fn main() -> Result<()> {
         )
         .route("/api/conversations/{id}/generate", post(chat::generate))
         .route("/api/conversations/{id}/title", put(chat::rename).layer(DefaultBodyLimit::max(8192)))
+        .route("/api/attachments", get(attachments::list).post(attachments::upload).layer(DefaultBodyLimit::max(attachments::MAX_UPLOAD)))
+        .route("/api/attachments/{id}", get(attachments::file).delete(attachments::delete))
+        .route("/api/attachments/{id}/thumbnail", get(attachments::thumbnail))
+        .route("/api/attachments/{id}/conversations", get(attachments::conversations))
         .route("/api/conversations/{id}/context", get(context::usage))
         .route("/api/conversations/{id}/compact", post(context::compact))
         .fallback(|| async { Error(StatusCode::NOT_FOUND, "Route introuvable.".into()) })

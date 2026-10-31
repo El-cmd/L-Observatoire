@@ -8,6 +8,7 @@ publish = false
 anyhow = "1"
 argon2 = "0.5"
 axum = { version = "0.8", features = ["macros"] }
+base64 = "0.22"
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"

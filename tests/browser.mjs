@@ -1,4 +1,13 @@
 import assert from 'node:assert/strict';
+import {deflateSync} from 'node:zlib';
+function png(width, height) {
+  const crcTable = Array.from({length:256}, (_, n) => {let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0;});
+  const crc = bytes => {let c = 0xffffffff; for (const b of bytes) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0;};
+  const chunk = (type, data) => {const head = Buffer.alloc(4); head.writeUInt32BE(data.length); const body = Buffer.concat([Buffer.from(type), data]); const tail = Buffer.alloc(4); tail.writeUInt32BE(crc(body)); return Buffer.concat([head, body, tail]);};
+  const header = Buffer.alloc(13); header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4); header.set([8, 2, 0, 0, 0], 8);
+  const rows = Buffer.concat(Array.from({length:height}, (_, y) => Buffer.from([0, ...Array.from({length:width * 3}, (_, i) => (i * 7 + y * 13) % 256)])));
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+}
 const {chromium} = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const url = process.env.TEST_BASE_URL;
 if (!url) throw new Error('Run through tests/integration/run.py with OBSERVATOIRE_BROWSER=1.');
@@ -44,6 +53,24 @@ try {
   await page.getByRole('button',{name:'Continuer la réponse'}).click();
   await page.waitForFunction(()=>document.querySelector('#stop').hidden&&document.querySelector('.assistant .message-content')?.textContent.includes('(suite)'));
   assert.equal(await page.getByRole('button',{name:'Continuer la réponse'}).count(),0);
+  // Images: sent with a question, shown in the message, received by Qwen, kept in the library.
+  await page.locator('#new-chat').click();
+  await page.locator('#attach-files').setInputFiles({name:'schema.png', mimeType:'image/png', buffer:png(48, 32)});
+  await page.locator('.pending-image.is-ready').waitFor({state:'visible'});
+  await page.locator('#prompt').fill('Que montre ce schéma ?');await page.locator('#send').click();
+  await page.waitForFunction(()=>document.querySelector('#stop').hidden&&document.querySelector('.assistant .message-content')?.textContent.includes('data:image/png;base64'));
+  assert.equal(await page.locator('.pending-image').count(),0);
+  await page.locator('.message-image img').waitFor({state:'visible'});
+  await page.locator('.message-image').click();await page.locator('.image-viewer img').waitFor({state:'visible'});await page.keyboard.press('Escape');
+  await page.locator('#library-link').click();await page.locator('.library-item').first().waitFor({state:'visible'});
+  assert.equal(await page.locator('.library-name',{hasText:'schema.png'}).count(),1);
+  await page.locator('#new-chat').click();await page.locator('#attach-toggle').click();await page.getByRole('menuitem',{name:'Depuis la bibliothèque'}).click();
+  await page.getByRole('button',{name:'Choisir schema.png'}).click();await page.getByRole('button',{name:'Ajouter (1)'}).click();
+  await page.locator('.pending-image.is-ready').waitFor({state:'visible'});await page.locator('.pending-remove').click();
+  await page.locator('#library-link').click();page.once('dialog',dialog=>dialog.accept());
+  await page.getByRole('button',{name:'Supprimer schema.png'}).click();await page.locator('.library-name',{hasText:'schema.png'}).waitFor({state:'detached'});
+  await page.getByRole('button',{name:'Sujet Que montre ce schéma ?',exact:true}).click();
+  await page.locator('.message-image.is-missing').waitFor({state:'visible'});
   await page.reload();await page.locator('#chat-app').waitFor({state:'visible'});await page.getByRole('button',{name:'Sujet Question privée Alice',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('.user .message-content')?.textContent==='Question privée Alice');
   await page.locator('#account-toggle').click();assert.equal(await page.locator('#import-legacy').isVisible(),true);
@@ -65,5 +92,5 @@ try {
   await page.locator('#login-form').waitFor({state:'visible'});assert.match(await page.locator('#login-error').innerText(),/modifié/);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   assert.deepEqual(errors,[]);
-  console.log('Browser OK: login, history in PostgreSQL, settings, copy, parallel conversations, titles and rename, continue after reload, opt-in import, account isolation, logout, password change, mobile.');
+  console.log('Browser OK: login, history in PostgreSQL, settings, copy, parallel conversations, titles and rename, continue after reload, images and library, opt-in import, account isolation, logout, password change, mobile.');
 } finally {await browser.close();}

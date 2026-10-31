@@ -1,16 +1,27 @@
-import {lazy, memo, Suspense, useLayoutEffect, useRef} from 'react';
-import type {Conversation, Message} from '../types';
+import {lazy, memo, Suspense, useLayoutEffect, useRef, useState} from 'react';
+import type {AttachmentRef, Conversation, Message} from '../types';
+import {thumbnailURL} from '../lib/images';
 import {CopyButton} from './CopyButton';
 const Markdown = lazy(() => import('./Markdown').then(module => ({default:module.Markdown})));
 import {Icon} from './Icon';
 
-const MessageItem = memo(function MessageItem({message, streaming, last, onRegenerate, onContinue, onError}: {
-  message: Message; streaming: boolean; last: boolean; onRegenerate: () => void; onContinue: () => void; onError: (message: string) => void;
+function MessageImage({image, removed, onOpen}: {image: AttachmentRef; removed: boolean; onOpen: (image: AttachmentRef) => void}) {
+  const [missing, setMissing] = useState(false);
+  if (missing || removed) return <span className="message-image is-missing" title={image.name}>Image supprimée</span>;
+  return <button type="button" className="message-image" aria-label={`Agrandir ${image.name}`} title={image.name} onClick={() => onOpen(image)}>
+    <img src={thumbnailURL(image.id)} alt={image.name} loading="lazy" width={image.width} height={image.height} onError={() => setMissing(true)}/>
+  </button>;
+}
+
+const MessageItem = memo(function MessageItem({message, streaming, last, removedImages, onRegenerate, onContinue, onOpenImage, onError}: {
+  message: Message; streaming: boolean; last: boolean; removedImages: ReadonlySet<string>; onRegenerate: () => void; onContinue: () => void;
+  onOpenImage: (image: AttachmentRef) => void; onError: (message: string) => void;
 }) {
   const user = message.role === 'user';
   return <article className={`message ${message.role}${streaming ? ' streaming' : ''}`}>
     {!user && <div className="assistant-heading">L’Observatoire</div>}
-    <div className="message-content">{user ? message.content : message.content ? <Suspense fallback={<span className="typing">Affichage de la réponse…</span>}><Markdown content={message.content} onError={onError}/></Suspense> : <span className="typing">{streaming ? 'L’Observatoire prépare sa réponse…' : 'Aucune réponse finale reçue.'}</span>}</div>
+    {user && message.attachments?.length ? <div className="message-images">{message.attachments.map(image => <MessageImage key={image.id} image={image} removed={removedImages.has(image.id)} onOpen={onOpenImage}/>)}</div> : null}
+    {(!user || message.content) && <div className="message-content">{user ? message.content : message.content ? <Suspense fallback={<span className="typing">Affichage de la réponse…</span>}><Markdown content={message.content} onError={onError}/></Suspense> : <span className="typing">{streaming ? 'L’Observatoire prépare sa réponse…' : 'Aucune réponse finale reçue.'}</span>}</div>}
     {!streaming && <div className="message-footer">
       <CopyButton text={message.content} label={user ? 'Copier la question' : 'Copier la réponse'} onError={onError}/>
       {!user && last && message.truncated && <button className="message-action continue-response" type="button" title="La réponse a atteint la longueur maximale" onClick={onContinue}>Continuer la réponse</button>}
@@ -19,8 +30,9 @@ const MessageItem = memo(function MessageItem({message, streaming, last, onRegen
   </article>;
 });
 
-export function MessageList({chat, busy, summaryFocus, onRegenerate, onContinue, onError}: {
-  chat?: Conversation; busy: boolean; summaryFocus: number; onRegenerate: () => void; onContinue: () => void; onError: (message: string) => void;
+export function MessageList({chat, busy, summaryFocus, removedImages, onRegenerate, onContinue, onOpenImage, onError}: {
+  chat?: Conversation; busy: boolean; summaryFocus: number; removedImages: ReadonlySet<string>; onRegenerate: () => void; onContinue: () => void;
+  onOpenImage: (image: AttachmentRef) => void; onError: (message: string) => void;
 }) {
   const scroll = useRef<HTMLElement>(null);
   const atBottom = useRef(true);
@@ -50,12 +62,12 @@ export function MessageList({chat, busy, summaryFocus, onRegenerate, onContinue,
           <div className="message-content"><Suspense fallback={<span className="typing">Chargement du résumé…</span>}><Markdown content={chat.context_summary} onError={onError}/></Suspense></div>
         </details>
         <details className="archived-messages"><summary>Voir les {through} messages d’origine</summary>
-          {messages.slice(0, through).map((message, index) => <MessageItem key={`${chat.id}:${index}`} message={message} streaming={false} last={false} onRegenerate={onRegenerate} onContinue={onContinue} onError={onError}/>)}
+          {messages.slice(0, through).map((message, index) => <MessageItem key={`${chat.id}:${index}`} message={message} streaming={false} last={false} removedImages={removedImages} onRegenerate={onRegenerate} onContinue={onContinue} onOpenImage={onOpenImage} onError={onError}/>)}
         </details>
       </div>}
       {messages.slice(through).map((message, offset) => {const index = through + offset; return <MessageItem key={`${chat?.id}:${index}`} message={message}
         last={index === messages.length - 1} streaming={busy && message.role === 'assistant' && index === messages.length - 1}
-        onRegenerate={onRegenerate} onContinue={onContinue} onError={onError}/>;})}
+        removedImages={removedImages} onRegenerate={onRegenerate} onContinue={onContinue} onOpenImage={onOpenImage} onError={onError}/>;})}
     </div>
   </main>;
 }

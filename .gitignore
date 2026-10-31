@@ -9,6 +9,7 @@ node_modules/
 .DS_Store
 
 backend/target/
+image-guard/target/
 backups/
 .initial-admin-password
 *.dump

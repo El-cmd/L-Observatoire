@@ -35,11 +35,14 @@ services:
       QWEN_MODEL: ${QWEN_MODEL:-qwen3.8-27b-abliterated}
       BOOTSTRAP_USERNAME: ${BOOTSTRAP_USERNAME:-}
       BOOTSTRAP_PASSWORD: ${BOOTSTRAP_PASSWORD:-}
+      IMAGE_GUARD_URL: http://image-guard:8080
       RUST_LOG: observatoire=info,tower_http=info
     depends_on:
       db:
         condition: service_healthy
-    networks: [web, database]
+      image-guard:
+        condition: service_started
+    networks: [web, database, guard]
     restart: unless-stopped
     init: true
     read_only: true
@@ -48,6 +51,20 @@ services:
     security_opt: [no-new-privileges:true]
     mem_limit: 512m
     stop_grace_period: 25s
+    logging: *logs
+  # Only service that decodes images sent by users: no outbound network, no data, no secrets.
+  image-guard:
+    build: ./image-guard
+    image: observatoire-image-guard:local
+    networks: [guard]
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 64
     logging: *logs
   db:
     image: postgres:17-alpine
@@ -77,4 +94,6 @@ volumes:
 networks:
   web:
   database:
+    internal: true
+  guard:
     internal: true

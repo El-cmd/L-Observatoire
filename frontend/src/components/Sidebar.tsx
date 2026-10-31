@@ -2,9 +2,9 @@ import {useEffect, useRef, useState} from 'react';
 import type {Activity, Conversation, User} from '../types';
 import {Icon} from './Icon';
 
-export function Sidebar({user, chats, activity, currentId, open, collapsed, navigating, canImport, importing, onClose, onNew,
+export function Sidebar({user, chats, activity, currentId, libraryOpen, open, collapsed, navigating, canImport, importing, onClose, onNew, onLibrary,
   onSelect, onRename, onDelete, onImport, onPassword, onLogout}: {
-  user: User; chats: Conversation[]; activity: Record<string, Activity>; currentId?: string; open: boolean; collapsed: boolean; navigating: boolean;
+  user: User; chats: Conversation[]; activity: Record<string, Activity>; currentId?: string; libraryOpen: boolean; onLibrary: () => void; open: boolean; collapsed: boolean; navigating: boolean;
   canImport: boolean; importing: boolean; onClose: () => void; onNew: () => void;
   onSelect: (id: string) => void; onRename: (id: string, title: string) => void; onDelete: (id: string) => void; onImport: () => void;
   onPassword: () => void; onLogout: () => void;
@@ -31,10 +31,11 @@ export function Sidebar({user, chats, activity, currentId, open, collapsed, navi
   return <aside className={`sidebar${open ? ' open' : ''}${collapsed ? ' collapsed' : ''}`} id="sidebar" aria-label="Conversations">
     <div className="sidebar-header"><a className="brand" href="/">L’Observatoire</a><button id="sidebar-close" type="button" className="icon-button" aria-label="Fermer la barre latérale" title="Fermer la barre latérale" onClick={onClose}><Icon name="sidebar"/></button></div>
     <button className="new-chat" id="new-chat" type="button" title="Ctrl / Cmd + Maj + N" disabled={navigating} onClick={onNew}><Icon name="new"/><span>Nouveau chat</span></button>
+    <button className={`library-link${libraryOpen ? ' active' : ''}`} id="library-link" type="button" aria-current={libraryOpen ? 'page' : undefined} onClick={onLibrary}><Icon name="image"/><span>Bibliothèque</span></button>
     <div className="history-label">Conversations</div>
     <div className="history" id="history" aria-label="Historique des conversations">
       {!visible.length && <p className="history-empty">Vos conversations apparaîtront ici.</p>}
-      {visible.map(chat => <div className={`history-row${chat.id === currentId ? ' active' : ''}`} key={chat.id}>
+      {visible.map(chat => <div className={`history-row${chat.id === currentId && !libraryOpen ? ' active' : ''}`} key={chat.id}>
         {editing === chat.id
           ? <input className="history-rename" aria-label="Nouveau titre de la conversation" maxLength={80} autoFocus value={draft}
               onChange={event => setDraft(event.target.value)} onFocus={event => event.target.select()} onBlur={() => finishRename(chat)}

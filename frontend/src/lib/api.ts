@@ -12,12 +12,14 @@ export class APIClient {
   async response(path: string, options: Options = {}): Promise<Response> {
     const method = options.method ?? 'GET';
     const headers: Record<string, string> = {};
-    if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+    // A Blob (an image) is sent as is; anything else as JSON.
+    const raw = options.body instanceof Blob;
+    if (options.body !== undefined) headers['Content-Type'] = raw ? 'application/octet-stream' : 'application/json';
     if (!['GET', 'HEAD'].includes(method) && this.csrf) headers['X-CSRF-Token'] = this.csrf;
     let response: Response;
     try {
       response = await fetch(path, {method, headers, credentials: 'same-origin', signal: options.signal,
-        body: options.body === undefined ? undefined : JSON.stringify(options.body)});
+        body: options.body === undefined ? undefined : raw ? options.body as Blob : JSON.stringify(options.body)});
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') throw error;
       throw new APIError('Impossible de joindre le serveur.', 0);

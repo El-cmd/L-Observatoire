@@ -9,6 +9,7 @@ flowchart LR
     Browser[Navigateur] -->|HTTP local / HTTPS via votre proxy| Front[Frontend Nginx]
     Front -->|/api — réseau Docker| API[API Rust / Axum]
     API --> DB[(PostgreSQL 17)]
+    API -->|réseau interne, sans Internet| Guard[image-guard]
     API --> Qwen[Votre API Qwen]
 ```
 
@@ -17,6 +18,7 @@ flowchart LR
 | `frontend` | Application React/TypeScript compilée avec Vite, servie par Nginx et proxy de l’API | `127.0.0.1:8080` par défaut |
 | `backend` | Rust, Axum, SQLx : authentification, conversations, streaming Qwen | Aucun port publié |
 | `db` | PostgreSQL, sur un réseau Docker interne | Aucun port publié |
+| `image-guard` | Seul service qui décode les images envoyées : vérifie et réencode, sans réseau sortant ni données | Aucun port publié |
 
 Les images frontend et backend sont distinctes. Le frontend est compilé dans une étape Node 24 ; le conteneur final contient uniquement Nginx et les fichiers statiques, sans serveur Node. Les polices et bibliothèques du navigateur sont embarquées : aucun CDN n’est requis. Le frontend et l’API utilisent la même origine via Nginx.
 
@@ -88,6 +90,15 @@ Pour un accès hors de la machine, placer le frontend derrière un proxy HTTPS e
 - HTML du modèle échappé ; commandes KaTeX de confiance désactivées.
 
 L’API lit l’historique en base pour construire les requêtes Qwen. Le raisonnement n’est pas réinjecté dans le contexte. Le backend sauvegarde la réponse avant de signaler la fin au navigateur et conserve la partie reçue lors d’une interruption. Le contexte et les quotas du serveur Qwen restent applicables. L’interface est limitée au texte.
+
+## Images et bibliothèque
+
+Le bouton **+** de la saisie ajoute des images depuis l’ordinateur ou depuis la bibliothèque ; le glisser-déposer et le collage d’une capture fonctionnent aussi. Cinq images au plus par message. Formats : JPEG, PNG, WebP, GIF (première image), AVIF et BMP, plus HEIC et TIFF depuis Safari ; SVG refusé.
+
+- Le navigateur réduit l’image à 1 600 px de côté et la réencode : les métadonnées (position GPS comprise) ne quittent pas l’appareil.
+- Côté serveur, l’API ne décode jamais un fichier reçu : elle le transmet à **image-guard**, conteneur sans réseau sortant (réseau Docker `guard` interne), sans base, secrets ni volume, en lecture seule, non root, sans capacités, limité en mémoire, CPU et processus. Il vérifie le format réel (PNG, JPEG, WebP, GIF, décodeurs en Rust pur), refuse les bombes de décompression, réencode depuis les pixels et renvoie l’image propre et sa miniature. Une image qui bloquerait le décodeur fait redémarrer le conteneur.
+- Seule la copie nettoyée est stockée (PostgreSQL), affichée et envoyée à Qwen. Elle appartient à la **bibliothèque** du compte (500 Mo) : la même image n’est stockée qu’une fois, elle survit à la suppression d’une conversation, et sa suppression la remplace par « Image supprimée » dans les messages.
+- Qwen lit les images lui-même (modèle multimodal). Elles restent envoyées telles quelles tant que la conversation tient dans le contexte : une image coûte un token par carré de 32 px (environ 1 900 pour 1 600 × 1 200). Quand le contexte est plein, Qwen transcrit une fois les images des messages résumés ; la transcription sert au résumé.
 
 ## Migration de l’ancienne version
 

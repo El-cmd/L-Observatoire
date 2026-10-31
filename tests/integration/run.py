@@ -8,12 +8,15 @@ import os
 from pathlib import Path
 import secrets
 import socket
+import struct
 import subprocess
 import tempfile
 import time
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
+import zlib
 
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT = 'observatoire-test-' + secrets.token_hex(4)
@@ -81,6 +84,21 @@ class Client:
         code, chat, _ = self.call('/api/conversations/'+chat['id'], 'PUT', {'version': chat['version'], 'messages': [{'role': 'user', 'content': question}]})
         assert code == 200, (code, chat)
         return chat
+
+
+def png(width=40, height=30, extra=b''):
+    rows = b''.join(b'\x00' + bytes((x * 5 + y) % 256 for x in range(width) for _ in range(3)) for y in range(height))
+    chunk = lambda kind, data: struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b'') + extra)
+
+
+def upload(client, data, name='capture.png'):
+    request = urllib.request.Request(ORIGIN + '/api/attachments?name=' + urllib.parse.quote(name), data=data, method='POST',
+                                     headers={'Origin': ORIGIN, 'Content-Type': 'application/octet-stream', 'X-CSRF-Token': client.csrf})
+    try: response = client.opener.open(request, timeout=60)
+    except urllib.error.HTTPError as error: response = error
+    with response: return response.status, json.loads(response.read() or b'null')
 
 
 class Integration(unittest.TestCase):
@@ -187,6 +205,65 @@ class Integration(unittest.TestCase):
         self.assertEqual(self.alice.call(path, 'PUT', {'version': saved['version'], 'messages': edited})[1]['title'], 'Mon titre')
         listed = {item['id']: item['title'] for item in self.alice.call('/api/conversations')[1]}
         self.assertEqual(listed[chat['id']], 'Mon titre')
+
+    def test_05f_images_live_in_the_library_and_reach_qwen(self):
+        code, image = upload(self.alice, png(extra=b'<script>alert(1)</script>'))
+        self.assertEqual(code, 201, image); self.assertEqual((image['width'], image['height'], image['name']), (40, 30, 'capture.png'))
+        self.assertEqual(upload(self.alice, png(extra=b'<script>alert(1)</script>'))[1]['id'], image['id'])
+        self.assertEqual(upload(self.alice, b'%PDF-1.7 pas une image')[0], 400)
+        raw = self.alice.opener.open(ORIGIN + '/api/attachments/' + image['id'], timeout=20)
+        body = raw.read(); etag = raw.headers['ETag']
+        self.assertTrue(body.startswith(b'\x89PNG')); self.assertNotIn(b'<script>', body)
+        self.assertEqual(raw.headers['Content-Type'], 'image/png'); self.assertIn('sandbox', raw.headers['Content-Security-Policy'])
+        cached = urllib.request.Request(ORIGIN + '/api/attachments/' + image['id'], headers={'If-None-Match': etag})
+        with self.assertRaises(urllib.error.HTTPError) as unchanged: self.alice.opener.open(cached, timeout=20)
+        self.assertEqual(unchanged.exception.code, 304)
+        self.assertTrue(self.alice.opener.open(ORIGIN + '/api/attachments/' + image['id'] + '/thumbnail', timeout=20).read().startswith(b'\xff\xd8'))
+        self.assertEqual(self.bob.call('/api/attachments/' + image['id'])[0], 404)
+        self.assertEqual(self.bob.call('/api/attachments')[1]['items'], [])
+        listed = self.alice.call('/api/attachments')[1]
+        self.assertIn(image['id'], [item['id'] for item in listed['items']]); self.assertGreater(listed['used_bytes'], 0)
+        # A message showing the image: Qwen receives the clean image, the conversation is listed.
+        chat = self.alice.call('/api/conversations', 'POST')[1]; path = '/api/conversations/' + chat['id']
+        ref = {key: image[key] for key in ('id', 'name', 'width', 'height')}
+        _, bob_image = upload(self.bob, png(8, 8))
+        foreign = {'id': bob_image['id'], 'name': 'x.png', 'width': 8, 'height': 8}
+        self.assertEqual(self.alice.call(path, 'PUT', {'version': chat['version'], 'messages': [{'role': 'user', 'content': '', 'attachments': [foreign]}]})[0], 400)
+        code, chat, _ = self.alice.call(path, 'PUT', {'version': chat['version'], 'messages': [{'role': 'user', 'content': 'Que vois-tu ?', 'attachments': [ref]}]})
+        self.assertEqual(code, 200, chat)
+        usage = self.alice.call(path + '/context')[1]; self.assertGreaterEqual(usage['used_tokens'], 66)
+        with self.alice.call(path + '/generate', 'POST', {'version': chat['version']}, stream=True) as response:
+            self.assertIn('data: [DONE]', response.read().decode())
+        saved = self.alice.call(path)[1]; reply = json.loads(saved['messages'][-1]['content'])
+        self.assertEqual(len(reply['images']), 1); self.assertTrue(reply['images'][0].startswith('data:image/png;base64,iVBORw0KGgo'))
+        self.assertEqual(saved['messages'][0]['attachments'], [ref])
+        self.assertEqual(self.alice.call('/api/attachments/' + image['id'] + '/conversations')[1][0]['id'], chat['id'])
+        # Deleting the image leaves a mention for Qwen; deleting a conversation keeps its images.
+        self.assertEqual(self.alice.call('/api/attachments/' + image['id'], 'DELETE')[0], 204)
+        regenerate = {'version': saved['version'], 'messages': saved['messages'][:1]}
+        chat = self.alice.call(path, 'PUT', regenerate)[1]
+        with self.alice.call(path + '/generate', 'POST', {'version': chat['version']}, stream=True) as response: response.read()
+        reply = json.loads(self.alice.call(path)[1]['messages'][-1]['content'])
+        self.assertEqual(reply['images'], []); self.assertIn('[image supprimée : capture.png]', reply['question'])
+        _, kept = upload(self.alice, png(12, 12), 'gardée.png')
+        other = self.alice.call('/api/conversations', 'POST')[1]
+        self.alice.call('/api/conversations/' + other['id'], 'PUT', {'version': other['version'], 'messages': [{'role': 'user', 'content': '', 'attachments': [{key: kept[key] for key in ('id', 'name', 'width', 'height')}]}]})
+        self.assertEqual(self.alice.call('/api/conversations/' + other['id'], 'DELETE')[0], 204)
+        self.assertIn(kept['id'], [item['id'] for item in self.alice.call('/api/attachments')[1]['items']])
+
+    def test_05g_images_are_transcribed_only_when_summarized(self):
+        _, image = upload(self.alice, png(24, 24), 'tableau.png')
+        ref = {key: image[key] for key in ('id', 'name', 'width', 'height')}
+        chat = self.alice.call('/api/conversations', 'POST')[1]; path = '/api/conversations/' + chat['id']
+        messages = [{'role': 'user', 'content': 'Lis ce tableau', 'attachments': [ref]}, {'role': 'assistant', 'content': 'Lu.'},
+                    {'role': 'user', 'content': 'Et ensuite ?'}, {'role': 'assistant', 'content': 'Suite.'},
+                    {'role': 'user', 'content': 'Dernière question'}, {'role': 'assistant', 'content': 'Fin.'}]
+        chat = self.alice.call(path, 'PUT', {'version': chat['version'], 'messages': messages})[1]
+        self.assertEqual(sql(f"SELECT coalesce(transcript, 'aucune') FROM attachments WHERE id='{image['id']}'"), 'aucune')
+        code, compacted, _ = self.alice.call(path + '/compact', 'POST', {'version': chat['version']})
+        self.assertEqual(code, 200, compacted); self.assertEqual(compacted['context_summary'], 'Résumé simulé.')
+        self.assertEqual(sql(f"SELECT transcript FROM attachments WHERE id='{image['id']}'"), 'Résumé simulé.')
+        self.assertEqual(compacted['messages'][0]['attachments'], [ref])
 
     def test_06_upstream_errors_release_the_generation_lease(self):
         chat = self.alice.create('upstream-error'); path = '/api/conversations/'+chat['id']
