@@ -127,6 +127,7 @@ class Integration(unittest.TestCase):
             self.assertIn('data: [DONE]', raw)
         saved = self.alice.call(path)[1]
         self.assertGreater(saved['version'], chat['version'])
+        self.assertEqual(saved['title'], 'Sujet question été')
         reply = json.loads(saved['messages'][-1]['content'])
         self.assertEqual(reply['temperature'], 1.2); self.assertEqual(reply['effort'], 'xhigh'); self.assertEqual(reply['question'], 'question été')
         other_browser = Client(); other_browser.login()
@@ -172,6 +173,20 @@ class Integration(unittest.TestCase):
         finally:
             for stream in streams:
                 with stream: stream.read()
+
+    def test_05e_renamed_titles_are_kept(self):
+        chat = self.alice.create('à renommer'); path = '/api/conversations/'+chat['id']
+        self.assertEqual(self.alice.call(path+'/title', 'PUT', {'title': '  \n '})[0], 400)
+        self.assertEqual(self.bob.call(path+'/title', 'PUT', {'title': 'Intrus'})[0], 404)
+        code, renamed, _ = self.alice.call(path+'/title', 'PUT', {'title': ' Mon titre '})
+        self.assertEqual((code, renamed['title']), (200, 'Mon titre'))
+        with self.alice.call(path+'/generate', 'POST', {'version':chat['version']}, stream=True) as response:
+            self.assertIn('data: [DONE]', response.read().decode())
+        saved = self.alice.call(path)[1]; self.assertEqual(saved['title'], 'Mon titre')
+        edited = saved['messages'] + [{'role': 'user', 'content': 'suite'}]
+        self.assertEqual(self.alice.call(path, 'PUT', {'version': saved['version'], 'messages': edited})[1]['title'], 'Mon titre')
+        listed = {item['id']: item['title'] for item in self.alice.call('/api/conversations')[1]}
+        self.assertEqual(listed[chat['id']], 'Mon titre')
 
     def test_06_upstream_errors_release_the_generation_lease(self):
         chat = self.alice.create('upstream-error'); path = '/api/conversations/'+chat['id']

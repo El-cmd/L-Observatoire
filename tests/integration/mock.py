@@ -13,6 +13,17 @@ class Mock(BaseHTTPRequestHandler):
         if last == 'upstream-error':
             self.send_error(503, 'Private upstream detail: integration-test-key')
             return
+        if body.get('stream') is False:
+            # Non-streaming calls: conversation title (formatted like a model would) or summary.
+            system = body['messages'][0]['content'] if body['messages'][0]['role'] == 'system' else ''
+            content = f'**Titre : Sujet {last}.**' if 'titre' in system else 'Résumé simulé.'
+            payload = json.dumps({'choices': [{'message': {'role': 'assistant', 'content': content}}]}, ensure_ascii=False).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
         self.send_header('Connection', 'close')

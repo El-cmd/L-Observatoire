@@ -78,6 +78,8 @@ Pour un accès hors de la machine, placer le frontend derrière un proxy HTTPS e
 ## Interface et conversations
 
 - Conversations dans la barre latérale ; copie des questions et réponses.
+- Titre court donné par Qwen à partir de la première question, pendant la réponse ; renommage avec le crayon ou un double-clic (un titre choisi n’est plus remplacé). Au démarrage, l’API nomme les conversations encore intitulées d’après leur question.
+- Plusieurs conversations peuvent écrire en même temps (six générations au total sur le serveur).
 - Réponses en streaming ; arrêt et nouvelle génération.
 - Réponses jusqu’à 32 768 tokens, dans la place laissée par la conversation ; les anciens échanges ne sont résumés que s’il reste moins de 8 192 tokens pour répondre. Une réponse coupée par la limite se poursuit dans le même message avec **Continuer**.
 - Réglage de température et réflexion (`none`, `low`, `medium`, `xhigh`). Réglages mémorisés dans ce navigateur, séparément pour chaque compte.

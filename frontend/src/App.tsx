@@ -28,7 +28,7 @@ export default function App() {
         navigating={chat.navigating} canImport={chat.canImport} importing={chat.importing} onClose={() => {if (innerWidth <= 760) setSidebarOpen(false); else setSidebarCollapsed(true);}}
         onNew={() => {void chat.newChat().then(() => setSidebarOpen(false));}}
         onSelect={id => {void chat.openChat(id).then(() => setSidebarOpen(false));}}
-        onDelete={id => {void chat.deleteChat(id);}} onImport={() => {void chat.importLegacy();}}
+        onRename={(id, title) => {void chat.renameChat(id, title);}} onDelete={id => {void chat.deleteChat(id);}} onImport={() => {void chat.importLegacy();}}
         onPassword={() => setPasswordOpen(true)} onLogout={() => {void chat.logout();}}/>
       <button id="sidebar-backdrop" className="sidebar-backdrop" aria-label="Fermer les conversations" tabIndex={-1} onClick={() => setSidebarOpen(false)}/>
       <div className={`workspace${empty ? ' empty' : ''}`} id="workspace">

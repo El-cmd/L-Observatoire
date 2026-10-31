@@ -17,6 +17,14 @@ describe('Qwen streaming', () => {
     const result = await consumeCompletion(response(text), () => {});
     expect(result).toEqual({content:'Bonjour, été 🌍 !', reasoning:'Réflexion', limited:true});
   });
+  it('reads the conversation title sent by the API between Qwen chunks', async () => {
+    const text = 'data: {"choices":[{"delta":{"content":"Bon"}}]}\n\ndata: {"observatoire":{"title":"Salutations"}}\n\n'
+      + 'data: {"choices":[{"delta":{"content":"jour"}}]}\n\ndata: [DONE]\n\n';
+    const titles: (string | undefined)[] = [];
+    const result = await consumeCompletion(response(text, 7), value => titles.push(value.title));
+    expect(result).toEqual({content:'Bonjour', reasoning:'', limited:false, title:'Salutations'});
+    expect(titles.at(-1)).toBe('Salutations');
+  });
   it('reports a prematurely closed stream while delivering its partial text', async () => {
     let partial = '';
     await expect(consumeCompletion(response('data: {"choices":[{"delta":{"content":"Partiel"}}]}\n\n'), value => {partial = value.content;})).rejects.toThrow('interrompue');

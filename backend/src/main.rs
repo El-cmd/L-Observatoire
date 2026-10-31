@@ -207,6 +207,9 @@ async fn main() -> Result<()> {
             .await;
         }
     });
+    if !app.config.api_url.is_empty() && !app.config.api_key.is_empty() {
+        tokio::spawn(chat::name_untitled(app.clone()));
+    }
     let router = Router::new()
         .route("/api/health", get(health))
         .route("/api/auth/login", post(auth::login).layer(DefaultBodyLimit::max(8192)))
@@ -220,6 +223,7 @@ async fn main() -> Result<()> {
             get(chat::get_one).put(chat::update).delete(chat::delete),
         )
         .route("/api/conversations/{id}/generate", post(chat::generate))
+        .route("/api/conversations/{id}/title", put(chat::rename).layer(DefaultBodyLimit::max(8192)))
         .route("/api/conversations/{id}/context", get(context::usage))
         .route("/api/conversations/{id}/compact", post(context::compact))
         .fallback(|| async { Error(StatusCode::NOT_FOUND, "Route introuvable.".into()) })

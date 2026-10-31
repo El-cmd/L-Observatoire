@@ -3,13 +3,22 @@ import type {Activity, Conversation, User} from '../types';
 import {Icon} from './Icon';
 
 export function Sidebar({user, chats, activity, currentId, open, collapsed, navigating, canImport, importing, onClose, onNew,
-  onSelect, onDelete, onImport, onPassword, onLogout}: {
+  onSelect, onRename, onDelete, onImport, onPassword, onLogout}: {
   user: User; chats: Conversation[]; activity: Record<string, Activity>; currentId?: string; open: boolean; collapsed: boolean; navigating: boolean;
   canImport: boolean; importing: boolean; onClose: () => void; onNew: () => void;
-  onSelect: (id: string) => void; onDelete: (id: string) => void; onImport: () => void;
+  onSelect: (id: string) => void; onRename: (id: string, title: string) => void; onDelete: (id: string) => void; onImport: () => void;
   onPassword: () => void; onLogout: () => void;
 }) {
   const [accountOpen, setAccountOpen] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const cancelled = useRef(false);
+  function startRename(chat: Conversation) {cancelled.current = false; setDraft(chat.title); setEditing(chat.id);}
+  // Enter and Escape blur the field; the blur commits unless the edit was cancelled.
+  function finishRename(chat: Conversation) {
+    setEditing(null);
+    if (!cancelled.current && draft.trim() && draft.trim() !== chat.title) onRename(chat.id, draft);
+  }
   const account = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!accountOpen) return;
@@ -26,7 +35,15 @@ export function Sidebar({user, chats, activity, currentId, open, collapsed, navi
     <div className="history" id="history" aria-label="Historique des conversations">
       {!visible.length && <p className="history-empty">Vos conversations apparaîtront ici.</p>}
       {visible.map(chat => <div className={`history-row${chat.id === currentId ? ' active' : ''}`} key={chat.id}>
-        <button type="button" className="history-item" title={chat.title} onClick={() => onSelect(chat.id)}>{chat.title}</button>
+        {editing === chat.id
+          ? <input className="history-rename" aria-label="Nouveau titre de la conversation" maxLength={80} autoFocus value={draft}
+              onChange={event => setDraft(event.target.value)} onFocus={event => event.target.select()} onBlur={() => finishRename(chat)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {event.preventDefault(); event.currentTarget.blur();}
+                if (event.key === 'Escape') {event.stopPropagation(); cancelled.current = true; event.currentTarget.blur();}
+              }}/>
+          : <button type="button" className="history-item" title={chat.title} onClick={() => onSelect(chat.id)} onDoubleClick={() => startRename(chat)}>{chat.title}</button>}
+        {editing !== chat.id && <button type="button" className="rename-conversation" aria-label={`Renommer ${chat.title}`} title="Renommer la conversation" onClick={() => startRename(chat)}><Icon name="edit"/></button>}
         {activity[chat.id]
           ? <span className="history-activity" role="status" aria-label={activity[chat.id] === 'compacting' ? 'Résumé en cours' : 'Réponse en cours'} title={activity[chat.id] === 'compacting' ? 'Résumé en cours' : 'Réponse en cours'}/>
           : <button type="button" className="delete-conversation" aria-label={`Supprimer ${chat.title}`} title="Supprimer la conversation" onClick={() => onDelete(chat.id)}><Icon name="trash"/></button>}

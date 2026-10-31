@@ -242,10 +242,14 @@ export function useObservatoire() {
       replaceChat({...savedChat, messages:[...history, assistant]});
       const response = await client.response(`/api/conversations/${id}/generate`, {method:'POST', signal:controller.signal,
         body:{version:baseVersion, reasoning_effort:settings.effort, temperature:settings.temperature, ...(resume ? {continue:true} : {})}});
+      // The title Qwen chose is applied once; a rename made meanwhile in the sidebar is kept.
+      let named: string | undefined;
       const result = await consumeCompletion(response, value => {
         if (epoch.current !== account) return;
+        let title = chatsRef.current.find(chat => chat.id === id)?.title ?? savedChat.title;
+        if (value.title && value.title !== named) {named = value.title; title = value.title;}
         assistant = {...start, content:start.content + value.content, reasoning:(start.reasoning || '') + value.reasoning};
-        replaceChat({...savedChat, messages:[...history, assistant]});
+        replaceChat({...savedChat, title, messages:[...history, assistant]});
       });
       complete = true;
       if (epoch.current !== account) return;
@@ -271,6 +275,18 @@ export function useObservatoire() {
         if (epoch.current === account) {controllers.current.delete(id); setActivity(id);}
       }
     }
+  }
+
+  async function renameChat(id: string, title: string) {
+    const name = title.trim(); const chat = chatsRef.current.find(value => value.id === id);
+    if (!chat || !name || name === chat.title || !authRef.current) return;
+    const account = epoch.current;
+    try {
+      const saved = await client.json<{title: string}>(`/api/conversations/${id}/title`, {method:'PUT', body:{title:name}});
+      if (epoch.current !== account) return;
+      const latest = chatsRef.current.find(value => value.id === id);
+      if (latest) replaceChat({...latest, title:saved.title});
+    } catch (error) {if (epoch.current === account) failure(error);}
   }
 
   async function send(content: string) {
@@ -314,7 +330,7 @@ export function useObservatoire() {
   return {auth, initializing, loginError, signingIn, login, logout, changePassword,
     chats, current:activeChat, activity, busy:currentActivity === 'generating', navigating,
     notice:(currentId && notices[currentId]) || notices[''] || null, notify,
-    prompt, setPrompt, settings, setSettings, newChat, openChat, deleteChat, send, regenerate, continueAnswer,
+    prompt, setPrompt, settings, setSettings, newChat, openChat, deleteChat, renameChat, send, regenerate, continueAnswer,
     contextUsage:contextUsage && contextUsage.conversation_id === currentId && contextUsage.version === activeChat?.version ? contextUsage : null,
     compacting:currentActivity === 'compacting', compactContext, summaryFocus,
     stop:() => {if (currentRef.current) controllers.current.get(currentRef.current)?.abort();}, canImport, importing, importLegacy};

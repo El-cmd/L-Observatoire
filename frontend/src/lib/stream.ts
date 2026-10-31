@@ -1,6 +1,8 @@
-export interface Completion { content: string; reasoning: string; limited: boolean }
+/** title: the conversation name chosen by Qwen, sent by the API during the stream. */
+export interface Completion { content: string; reasoning: string; limited: boolean; title?: string }
 interface Packet {
   error?: {message?: string};
+  observatoire?: {title?: string};
   choices?: {delta?: {content?: string; reasoning_content?: string; reasoning?: string;
     provider_specific_fields?: {reasoning?: string}}; finish_reason?: string}[];
 }
@@ -18,6 +20,7 @@ export async function consumeCompletion(response: Response, onUpdate: (value: Co
     if (raw.trim() === '[DONE]') { complete = true; return; }
     const packet = JSON.parse(raw) as Packet;
     if (packet.error) throw new Error(packet.error.message || 'Le flux Qwen a rencontré une erreur.');
+    if (typeof packet.observatoire?.title === 'string') result.title = packet.observatoire.title;
     const choice = packet.choices?.[0]; const delta = choice?.delta;
     if (typeof delta?.content === 'string') result.content += delta.content;
     const reasoning = delta?.reasoning_content ?? delta?.reasoning ?? delta?.provider_specific_fields?.reasoning;
