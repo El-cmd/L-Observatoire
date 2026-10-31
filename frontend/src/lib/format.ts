@@ -1,7 +1,18 @@
 import hljs from 'highlight.js/lib/common';
 import katex from 'katex';
+import MarkdownIt from 'markdown-it';
 
 const escape = (text: string) => text.replace(/[&<>"']/g, char => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[char]!));
+
+// Model HTML stays escaped (html: false) and javascript: links are refused by markdown-it.
+// Images are off (the CSP only allows same-origin ones), and so are indented code blocks:
+// fenced code is split out before this renderer, indentation in answers is rarely code.
+const markdown = new MarkdownIt({html: false, linkify: true, breaks: true}).disable(['image', 'code']);
+markdown.renderer.rules.link_open = (tokens, index, options, _env, self) => {
+  tokens[index].attrSet('target', '_blank');
+  tokens[index].attrSet('rel', 'noopener noreferrer nofollow');
+  return self.renderToken(tokens, index, options);
+};
 
 export function highlightCode(source: string, hint: string) {
   const language = hint.toLowerCase().split(/\s+/)[0];
@@ -29,14 +40,7 @@ export function formatProse(text: string): string {
     }
     return prefix + (fragments.push(html) - 1) + 'END';
   });
-  const inline = (value: string) => escape(value).replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
-  let html = protectedText.split(/\n\s*\n/).filter(Boolean).map(paragraph => {
-    if (/^#{1,6} /.test(paragraph)) return `<h3>${inline(paragraph.replace(/^#{1,6} /, ''))}</h3>`;
-    const lines = paragraph.split('\n');
-    if (lines.every(line => /^[-*•] /.test(line))) return `<ul>${lines.map(line => `<li>${inline(line.slice(2))}</li>`).join('')}</ul>`;
-    if (lines.every(line => /^\d+\. /.test(line))) return `<ol>${lines.map(line => `<li>${inline(line.replace(/^\d+\. /, ''))}</li>`).join('')}</ol>`;
-    return `<p>${inline(paragraph)}</p>`;
-  }).join('');
+  let html = markdown.render(protectedText);
   fragments.forEach((fragment, index) => { html = html.split(prefix + index + 'END').join(fragment); });
   return html;
 }

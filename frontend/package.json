@@ -11,15 +11,17 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
+    "highlight.js": "11.11.1",
     "katex": "0.19.1",
-    "highlight.js": "11.11.1"
+    "markdown-it": "14.3.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@types/katex": "^0.16.7",
+    "@types/markdown-it": "^14.2.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
-    "@types/katex": "^0.16.7",
     "typescript": "6.0.3",
     "vite": "8.3.5",
     "vitest": "^4.1.0"
