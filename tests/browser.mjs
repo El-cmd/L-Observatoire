@@ -61,9 +61,15 @@ try {
   await page.waitForFunction(()=>document.querySelector('#stop').hidden&&document.querySelector('.assistant .message-content')?.textContent.includes('data:image/png;base64'));
   assert.equal(await page.locator('.pending-image').count(),0);
   await page.locator('.message-image img').waitFor({state:'visible'});
-  await page.locator('.message-image').click();await page.locator('.image-viewer img').waitFor({state:'visible'});await page.keyboard.press('Escape');
+  await page.locator('.message-image-open').click();await page.locator('.image-viewer img').waitFor({state:'visible'});await page.keyboard.press('Escape');
+  await page.getByRole('button',{name:'Poser une question sur schema.png'}).click();await page.locator('.pending-image.is-ready').waitFor({state:'visible'});
+  await page.waitForFunction(()=>document.activeElement?.id==='prompt');await page.locator('.pending-remove').click();
   await page.locator('#library-link').click();await page.locator('.library-item').first().waitFor({state:'visible'});
   assert.equal(await page.locator('.library-name',{hasText:'schema.png'}).count(),1);
+  assert.notEqual(await page.locator('.library-actions a.icon-button svg').first().evaluate(svg=>getComputedStyle(svg).stroke),'none');
+  await page.getByRole('button',{name:'Nouvelle conversation avec schema.png'}).click();
+  await page.locator('.pending-image.is-ready').waitFor({state:'visible'});assert.equal(await page.locator('.message').count(),0);
+  await page.locator('.pending-remove').click();await page.locator('#library-link').click();await page.locator('.library-item').first().waitFor({state:'visible'});
   await page.locator('#new-chat').click();await page.locator('#attach-toggle').click();await page.getByRole('menuitem',{name:'Depuis la bibliothèque'}).click();
   await page.getByRole('button',{name:'Choisir schema.png'}).click();await page.getByRole('button',{name:'Ajouter (1)'}).click();
   await page.locator('.pending-image.is-ready').waitFor({state:'visible'});await page.locator('.pending-remove').click();

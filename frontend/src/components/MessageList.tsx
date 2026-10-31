@@ -5,22 +5,27 @@ import {CopyButton} from './CopyButton';
 const Markdown = lazy(() => import('./Markdown').then(module => ({default:module.Markdown})));
 import {Icon} from './Icon';
 
-function MessageImage({image, removed, onOpen}: {image: AttachmentRef; removed: boolean; onOpen: (image: AttachmentRef) => void}) {
+function MessageImage({image, removed, onOpen, onAsk}: {image: AttachmentRef; removed: boolean; onOpen: (image: AttachmentRef) => void; onAsk: (image: AttachmentRef) => void}) {
   const [missing, setMissing] = useState(false);
   if (missing || removed) return <span className="message-image is-missing" title={image.name}>Image supprimée</span>;
-  return <button type="button" className="message-image" aria-label={`Agrandir ${image.name}`} title={image.name} onClick={() => onOpen(image)}>
-    <img src={thumbnailURL(image.id)} alt={image.name} loading="lazy" width={image.width} height={image.height} onError={() => setMissing(true)}/>
-  </button>;
+  // At most 360 px wide and 240 px high, in the image's own proportions.
+  const width = Math.max(48, Math.round(Math.min(360, 240 * image.width / image.height)));
+  return <div className="message-image" style={{width:`min(${width}px, 100%)`, aspectRatio:`${image.width} / ${image.height}`}}>
+    <button type="button" className="message-image-open" aria-label={`Agrandir ${image.name}`} title={image.name} onClick={() => onOpen(image)}>
+      <img src={thumbnailURL(image.id)} alt={image.name} loading="lazy" onError={() => setMissing(true)}/>
+    </button>
+    <button type="button" className="message-image-ask" aria-label={`Poser une question sur ${image.name}`} title="Poser une question sur cette image" onClick={() => onAsk(image)}><Icon name="ask"/></button>
+  </div>;
 }
 
-const MessageItem = memo(function MessageItem({message, streaming, last, removedImages, onRegenerate, onContinue, onOpenImage, onError}: {
+const MessageItem = memo(function MessageItem({message, streaming, last, removedImages, onRegenerate, onContinue, onOpenImage, onAskImage, onError}: {
   message: Message; streaming: boolean; last: boolean; removedImages: ReadonlySet<string>; onRegenerate: () => void; onContinue: () => void;
-  onOpenImage: (image: AttachmentRef) => void; onError: (message: string) => void;
+  onOpenImage: (image: AttachmentRef) => void; onAskImage: (image: AttachmentRef) => void; onError: (message: string) => void;
 }) {
   const user = message.role === 'user';
   return <article className={`message ${message.role}${streaming ? ' streaming' : ''}`}>
     {!user && <div className="assistant-heading">L’Observatoire</div>}
-    {user && message.attachments?.length ? <div className="message-images">{message.attachments.map(image => <MessageImage key={image.id} image={image} removed={removedImages.has(image.id)} onOpen={onOpenImage}/>)}</div> : null}
+    {user && message.attachments?.length ? <div className="message-images">{message.attachments.map(image => <MessageImage key={image.id} image={image} removed={removedImages.has(image.id)} onOpen={onOpenImage} onAsk={onAskImage}/>)}</div> : null}
     {(!user || message.content) && <div className="message-content">{user ? message.content : message.content ? <Suspense fallback={<span className="typing">Affichage de la réponse…</span>}><Markdown content={message.content} onError={onError}/></Suspense> : <span className="typing">{streaming ? 'L’Observatoire prépare sa réponse…' : 'Aucune réponse finale reçue.'}</span>}</div>}
     {!streaming && <div className="message-footer">
       <CopyButton text={message.content} label={user ? 'Copier la question' : 'Copier la réponse'} onError={onError}/>
@@ -30,9 +35,9 @@ const MessageItem = memo(function MessageItem({message, streaming, last, removed
   </article>;
 });
 
-export function MessageList({chat, busy, summaryFocus, removedImages, onRegenerate, onContinue, onOpenImage, onError}: {
+export function MessageList({chat, busy, summaryFocus, removedImages, onRegenerate, onContinue, onOpenImage, onAskImage, onError}: {
   chat?: Conversation; busy: boolean; summaryFocus: number; removedImages: ReadonlySet<string>; onRegenerate: () => void; onContinue: () => void;
-  onOpenImage: (image: AttachmentRef) => void; onError: (message: string) => void;
+  onOpenImage: (image: AttachmentRef) => void; onAskImage: (image: AttachmentRef) => void; onError: (message: string) => void;
 }) {
   const scroll = useRef<HTMLElement>(null);
   const atBottom = useRef(true);
@@ -62,12 +67,12 @@ export function MessageList({chat, busy, summaryFocus, removedImages, onRegenera
           <div className="message-content"><Suspense fallback={<span className="typing">Chargement du résumé…</span>}><Markdown content={chat.context_summary} onError={onError}/></Suspense></div>
         </details>
         <details className="archived-messages"><summary>Voir les {through} messages d’origine</summary>
-          {messages.slice(0, through).map((message, index) => <MessageItem key={`${chat.id}:${index}`} message={message} streaming={false} last={false} removedImages={removedImages} onRegenerate={onRegenerate} onContinue={onContinue} onOpenImage={onOpenImage} onError={onError}/>)}
+          {messages.slice(0, through).map((message, index) => <MessageItem key={`${chat.id}:${index}`} message={message} streaming={false} last={false} removedImages={removedImages} onRegenerate={onRegenerate} onContinue={onContinue} onOpenImage={onOpenImage} onAskImage={onAskImage} onError={onError}/>)}
         </details>
       </div>}
       {messages.slice(through).map((message, offset) => {const index = through + offset; return <MessageItem key={`${chat?.id}:${index}`} message={message}
         last={index === messages.length - 1} streaming={busy && message.role === 'assistant' && index === messages.length - 1}
-        removedImages={removedImages} onRegenerate={onRegenerate} onContinue={onContinue} onOpenImage={onOpenImage} onError={onError}/>;})}
+        removedImages={removedImages} onRegenerate={onRegenerate} onContinue={onContinue} onOpenImage={onOpenImage} onAskImage={onAskImage} onError={onError}/>;})}
     </div>
   </main>;
 }

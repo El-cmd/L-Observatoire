@@ -141,7 +141,7 @@ PUBLIC_ORIGIN=https://observatoire.vloth.tech
 
 Ainsi `make up`, `make user`, `make backup` et `make logs` utilisent la configuration de production sans option supplémentaire.
 
-Chaque push sur `main` lance les tests ; s’ils passent, le workflow **Déploiement** se connecte en SSH au VPS et exécute `scripts/deploy.sh <sha>`. Le script vérifie que le commit appartient à `main`, sauvegarde PostgreSQL (dumps de plus de 30 jours supprimés), puis reconstruit et redémarre les conteneurs en attendant qu’ils soient sains. Le workflow peut aussi être lancé à la main depuis l’onglet Actions.
+Chaque push sur `main` lance les tests ; s’ils passent, le workflow **Déploiement** se connecte en SSH au VPS et exécute `scripts/deploy.sh <sha>`. Le script vérifie que le commit appartient à `main`, sauvegarde PostgreSQL (seules les 7 dernières sauvegardes sont gardées), puis reconstruit et redémarre les conteneurs en attendant qu’ils soient sains. Le workflow peut aussi être lancé à la main depuis l’onglet Actions.
 
 La clé SSH de déploiement est dédiée et limitée à ce script par une commande forcée dans `~/.ssh/authorized_keys` du serveur :
 

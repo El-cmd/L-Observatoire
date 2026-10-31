@@ -29,6 +29,8 @@ export default function App() {
   }, [chat.newChat]);
   if (!chat.auth) return <Login initializing={chat.initializing} pending={chat.signingIn} error={chat.loginError} onLogin={chat.login}/>;
   const empty = library === 'closed' && !chat.current?.messages.length;
+  // The chosen image waits above the input: the user only has to type the question.
+  const askAbout = () => document.getElementById('prompt')?.focus();
   return <>
     <div className="app" id="chat-app">
       <Sidebar user={chat.auth.user} chats={chat.chats} activity={chat.activity} currentId={chat.current?.id} libraryOpen={library === 'browse'}
@@ -45,9 +47,10 @@ export default function App() {
         </header>
         {library !== 'closed' ? <LibraryView library={chat.library} picking={library === 'pick'} room={MAX_IMAGES - chat.pending.length}
           onLoad={() => {void chat.loadLibrary();}} onClose={() => setLibrary('closed')} onOpen={setViewer} onDelete={id => {void chat.deleteImage(id);}}
-          onPick={images => {chat.addFromLibrary(images); setLibrary('closed');}} onOpenChat={id => {setLibrary('closed'); void chat.openChat(id);}}
+          onPick={images => {chat.addFromLibrary(images); setLibrary('closed');}}
+          onStartChat={image => {setLibrary('closed'); void chat.newChat().then(() => {chat.addFromLibrary([image]); askAbout();});}} onOpenChat={id => {setLibrary('closed'); void chat.openChat(id);}}
           findConversations={chat.imageConversations} onError={chat.notify}/> : <>
-        <MessageList chat={chat.current} busy={chat.busy} summaryFocus={chat.summaryFocus} removedImages={chat.removedImages} onRegenerate={() => {void chat.regenerate();}} onContinue={() => {void chat.continueAnswer();}} onOpenImage={setViewer} onError={chat.notify}/>
+        <MessageList chat={chat.current} busy={chat.busy} summaryFocus={chat.summaryFocus} removedImages={chat.removedImages} onRegenerate={() => {void chat.regenerate();}} onContinue={() => {void chat.continueAnswer();}} onOpenImage={setViewer} onAskImage={image => {chat.addFromLibrary([image]); askAbout();}} onError={chat.notify}/>
         <Composer prompt={chat.prompt} onPrompt={chat.setPrompt} pending={chat.pending} onAddImages={files => {void chat.addImages(files);}}
           onRemovePending={chat.removePending} onOpenLibrary={() => setLibrary('pick')} onSend={value => {void chat.send(value);}} onStop={chat.stop}
           onRegenerate={() => {void chat.regenerate();}} onContinue={() => {void chat.continueAnswer();}} settings={chat.settings} onSettings={chat.setSettings} busy={chat.busy}

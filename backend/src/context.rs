@@ -32,22 +32,33 @@ pub struct Usage {
 pub fn prompt(row:&Conversation)->Vec<Value>{
     let mut result=Vec::new();
     if !row.context_summary.is_empty(){result.push(json!({"role":"system","content":format!("{MEMORY_PREFIX}{}",row.context_summary)}));}
-    result.extend(row.messages.0.iter().skip(row.compacted_through.max(0) as usize)
-        .filter(|m|!m.interrupted&&(!m.content.trim().is_empty()||!m.attachments.is_empty()))
-        .map(message));
+    let mut shown=std::collections::HashSet::new();
+    for m in row.messages.0.iter().skip(row.compacted_through.max(0) as usize)
+        .filter(|m|!m.interrupted&&(!m.content.trim().is_empty()||!m.attachments.is_empty())){
+        result.push(message(m,&mut shown));
+    }
     result
 }
 
 const IMAGE_REF:&str="observatoire-image:";
 
 /// Images stay references here (counting, fingerprint of the prompt); `resolve` loads them.
-fn message(m:&Message)->Value{
+/// An image already shown earlier in the context is not sent twice: a mention points to it.
+fn message(m:&Message,shown:&mut std::collections::HashSet<Uuid>)->Value{
     if m.attachments.is_empty(){return json!({"role":m.role,"content":m.content});}
     let mut parts=Vec::new();
     if !m.content.trim().is_empty(){parts.push(json!({"type":"text","text":m.content}));}
-    parts.extend(m.attachments.iter().map(|a|json!({"type":"image_url","image_url":{"url":format!("{IMAGE_REF}{}",a.id)},"width":a.width,"height":a.height,"name":a.name})));
+    parts.extend(m.attachments.iter().map(|a|if shown.insert(a.id){
+        json!({"type":"image_url","image_url":{"url":format!("{IMAGE_REF}{}",a.id)},"width":a.width,"height":a.height,"name":a.name})
+    }else{
+        json!({"type":"text","text":format!("[Question sur l’image « {} », montrée plus haut dans la conversation]",a.name)})
+    }));
     json!({"role":m.role,"content":parts})
 }
+
+/// Images sent in one request, the most recent first: keeps the API's memory and the request
+/// size (the tunnel to Qwen limits it) bounded in conversations full of screenshots.
+const MAX_IMAGE_BYTES:usize=40*1024*1024;
 
 fn reference(part:&Value)->Option<Uuid>{part.pointer("/image_url/url")?.as_str()?.strip_prefix(IMAGE_REF)?.parse().ok()}
 
@@ -57,11 +68,17 @@ pub async fn resolve(app:&App,user:Uuid,mut messages:Vec<Value>)->Result<Vec<Val
     let ids:Vec<Uuid>=messages.iter().filter_map(|m|m.get("content").and_then(Value::as_array)).flatten().filter_map(reference).collect();
     if ids.is_empty(){return Ok(messages);}
     let stored=attachments::load(app,user,&ids).await?;
-    for part in messages.iter_mut().filter_map(|m|m.get_mut("content").and_then(Value::as_array_mut)).flatten(){
+    let mut budget=MAX_IMAGE_BYTES;
+    for part in messages.iter_mut().rev().filter_map(|m|m.get_mut("content").and_then(Value::as_array_mut)).flat_map(|parts|parts.iter_mut().rev()){
         let Some(id)=reference(part) else{continue};
+        let name=part.get("name").and_then(Value::as_str).unwrap_or("image").to_string();
         *part=match stored.get(&id){
-            Some(image)=>json!({"type":"image_url","image_url":{"url":attachments::data_url(image)}}),
-            None=>json!({"type":"text","text":format!("[image supprimée : {}]",part.get("name").and_then(Value::as_str).unwrap_or("image"))}),
+            Some(image) if image.data.len()<=budget=>{budget-=image.data.len();json!({"type":"image_url","image_url":{"url":attachments::data_url(image)}})},
+            Some(image)=>json!({"type":"text","text":match &image.transcript{
+                Some(seen)=>format!("[Image « {name} » envoyée plus tôt : {seen}]"),
+                None=>format!("[Image « {name} » envoyée plus tôt, non renvoyée pour limiter la taille de la requête]"),
+            }}),
+            None=>json!({"type":"text","text":format!("[image supprimée : {name}]")}),
         };
     }
     Ok(messages)

@@ -22,7 +22,8 @@ main() {
     python3 scripts/init_env.py
     if [ -n "$(docker compose ps --status running -q db)" ]; then
         python3 scripts/backup.py
-        find backups -name 'observatoire-*.dump' -mtime +30 -delete
+        # Images make dumps large: only the seven most recent are kept.
+        ls -1t backups/observatoire-*.dump | tail -n +8 | xargs -r rm --
     fi
     docker compose up -d --build --remove-orphans --wait --wait-timeout 300
     docker image prune -f >/dev/null

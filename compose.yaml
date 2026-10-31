@@ -49,7 +49,8 @@ services:
     tmpfs: ["/tmp:size=16m,mode=1777"]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    mem_limit: 512m
+    # Holds the images of the requests being generated (40 MB at most each).
+    mem_limit: 1g
     stop_grace_period: 25s
     logging: *logs
   # Only service that decodes images sent by users: no outbound network, no data, no secrets.

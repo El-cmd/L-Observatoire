@@ -1,4 +1,4 @@
-type Name = 'copy' | 'check' | 'retry' | 'sidebar' | 'new' | 'edit' | 'plus' | 'image' | 'download' | 'link' | 'trash' | 'user' | 'settings' | 'send' | 'stop' | 'close';
+type Name = 'copy' | 'check' | 'retry' | 'sidebar' | 'new' | 'edit' | 'plus' | 'image' | 'download' | 'link' | 'ask' | 'trash' | 'user' | 'settings' | 'send' | 'stop' | 'close';
 export function Icon({name}: {name: Name}) {
   const paths = {
     copy: <><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></>,
@@ -11,6 +11,7 @@ export function Icon({name}: {name: Name}) {
     image: <><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5-9 9"/></>,
     download: <path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/>,
     link: <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>,
+    ask: <><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 4v-4h0A1.5 1.5 0 0 1 4 14.5z"/><path d="M10 8.6a2 2 0 1 1 2.9 1.8c-.6.3-.9.8-.9 1.4M12 13.6h.01"/></>,
     trash: <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5"/>,
     user: <><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></>,
     settings: <><path d="M4 7h6m4 0h6M4 17h10m4 0h2"/><circle cx="12" cy="7" r="2"/><circle cx="16" cy="17" r="2"/></>,

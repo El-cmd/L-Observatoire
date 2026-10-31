@@ -6,9 +6,9 @@ import {Icon} from './Icon';
 type Links = {id: string; items: {id: string; title: string}[] | null};
 
 /** The user's images; in picking mode, a selection to attach to the next message. */
-export function LibraryView({library, picking, room, onLoad, onClose, onOpen, onDelete, onPick, onOpenChat, findConversations, onError}: {
+export function LibraryView({library, picking, room, onLoad, onClose, onOpen, onDelete, onPick, onStartChat, onOpenChat, findConversations, onError}: {
   library: Library | null; picking: boolean; room: number; onLoad: () => void; onClose: () => void;
-  onOpen: (image: AttachmentRef) => void; onDelete: (id: string) => void; onPick: (images: AttachmentRef[]) => void;
+  onOpen: (image: AttachmentRef) => void; onDelete: (id: string) => void; onPick: (images: AttachmentRef[]) => void; onStartChat: (image: AttachmentRef) => void;
   onOpenChat: (id: string) => void; findConversations: (id: string) => Promise<{id: string; title: string}[]>; onError: (message: string) => void;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
@@ -46,6 +46,7 @@ export function LibraryView({library, picking, room, onLoad, onClose, onOpen, on
             <span>{new Date(item.created_at).toLocaleDateString('fr-FR')} · {formatBytes(item.size)}</span>
           </div>
           {!picking && <div className="library-actions">
+            <button type="button" className="icon-button" aria-label={`Nouvelle conversation avec ${item.name}`} title="Nouvelle conversation avec cette image" onClick={() => onStartChat(ref(item))}><Icon name="ask"/></button>
             <a className="icon-button" href={`${imageURL(item.id)}?download=1`} download={item.name} aria-label={`Télécharger ${item.name}`} title="Télécharger"><Icon name="download"/></a>
             <button type="button" className="icon-button" aria-label={`Conversations avec ${item.name}`} title="Conversations" aria-expanded={links?.id === item.id} onClick={() => {void showLinks(item.id);}}><Icon name="link"/></button>
             <button type="button" className="icon-button library-delete" aria-label={`Supprimer ${item.name}`} title="Supprimer" onClick={() => onDelete(item.id)}><Icon name="trash"/></button>

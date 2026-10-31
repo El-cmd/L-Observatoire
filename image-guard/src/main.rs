@@ -22,7 +22,7 @@ use tokio::sync::Semaphore;
 const MAX_INPUT: usize = 12 * 1024 * 1024;
 const MAX_PIXELS: u64 = 40_000_000;
 const MAX_SIDE: u32 = 2048;
-const THUMB_SIDE: u32 = 320;
+const THUMB_SIDE: u32 = 640;
 /// A PNG larger than this once re-encoded is stored as JPEG instead.
 const MAX_PNG: usize = 3 * 1024 * 1024;
 

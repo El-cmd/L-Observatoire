@@ -238,6 +238,12 @@ class Integration(unittest.TestCase):
         self.assertEqual(len(reply['images']), 1); self.assertTrue(reply['images'][0].startswith('data:image/png;base64,iVBORw0KGgo'))
         self.assertEqual(saved['messages'][0]['attachments'], [ref])
         self.assertEqual(self.alice.call('/api/attachments/' + image['id'] + '/conversations')[1][0]['id'], chat['id'])
+        # Asking again about the same image does not send it twice.
+        again = self.alice.call(path, 'PUT', {'version': saved['version'], 'messages': saved['messages'] + [{'role': 'user', 'content': 'Et la couleur ?', 'attachments': [ref]}]})[1]
+        with self.alice.call(path + '/generate', 'POST', {'version': again['version']}, stream=True) as response: response.read()
+        repeated = json.loads(self.alice.call(path)[1]['messages'][-1]['content'])
+        self.assertEqual(repeated['images'], []); self.assertIn('montrée plus haut', repeated['question'])
+        saved = self.alice.call(path)[1]
         # Deleting the image leaves a mention for Qwen; deleting a conversation keeps its images.
         self.assertEqual(self.alice.call('/api/attachments/' + image['id'], 'DELETE')[0], 204)
         regenerate = {'version': saved['version'], 'messages': saved['messages'][:1]}
