@@ -53,6 +53,10 @@ try {
   await page.getByRole('button',{name:'Continuer la réponse'}).click();
   await page.waitForFunction(()=>document.querySelector('#stop').hidden&&document.querySelector('.assistant .message-content')?.textContent.includes('(suite)'));
   assert.equal(await page.getByRole('button',{name:'Continuer la réponse'}).count(),0);
+  // The brand leads home: a new, empty chat.
+  await page.locator('#library-link').click();await page.locator('#library').waitFor({state:'visible'});
+  await page.locator('#brand').click();await page.locator('#welcome').waitFor({state:'visible'});
+  assert.equal(await page.locator('#library').count(),0);assert.equal(await page.locator('.message').count(),0);
   // Images: sent with a question, shown in the message, received by Qwen, kept in the library.
   await page.locator('#new-chat').click();
   await page.locator('#attach-files').setInputFiles({name:'schema.png', mimeType:'image/png', buffer:png(48, 32)});

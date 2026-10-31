@@ -29,7 +29,11 @@ export function Sidebar({user, chats, activity, currentId, libraryOpen, open, co
   }, [accountOpen]);
   const visible = chats.filter(chat => chat.message_count || chat.messages.length);
   return <aside className={`sidebar${open ? ' open' : ''}${collapsed ? ' collapsed' : ''}`} id="sidebar" aria-label="Conversations">
-    <div className="sidebar-header"><a className="brand" href="/">L’Observatoire</a><button id="sidebar-close" type="button" className="icon-button" aria-label="Fermer la barre latérale" title="Fermer la barre latérale" onClick={onClose}><Icon name="sidebar"/></button></div>
+    <div className="sidebar-header"><a className="brand" id="brand" href="/" title="Accueil : nouveau chat" onClick={event => {
+      // The home page is a new chat, without reloading; Ctrl/middle click still opens a tab.
+      if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      event.preventDefault(); onNew();
+    }}>L’Observatoire</a><button id="sidebar-close" type="button" className="icon-button" aria-label="Fermer la barre latérale" title="Fermer la barre latérale" onClick={onClose}><Icon name="sidebar"/></button></div>
     <button className="new-chat" id="new-chat" type="button" title="Ctrl / Cmd + Maj + N" disabled={navigating} onClick={onNew}><Icon name="new"/><span>Nouveau chat</span></button>
     <button className={`library-link${libraryOpen ? ' active' : ''}`} id="library-link" type="button" aria-current={libraryOpen ? 'page' : undefined} onClick={onLibrary}><Icon name="image"/><span>Bibliothèque</span></button>
     <div className="history-label">Conversations</div>
