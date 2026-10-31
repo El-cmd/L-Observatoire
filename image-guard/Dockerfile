@@ -2,8 +2,10 @@ FROM rust:1-slim-trixie AS build
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/build/target \
+# Backend and image-guard build in parallel: the shared registry is locked while in use,
+# and each has its own target directory.
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=image-guard-target,target=/build/target \
     cargo build --release --locked && cp target/release/image-guard /image-guard
 
 # No network access, no secrets, no volume: see compose.yaml.

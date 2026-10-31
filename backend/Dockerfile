@@ -3,8 +3,10 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock build.rs ./
 COPY migrations ./migrations
 COPY src ./src
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/build/target \
+# Backend and image-guard build in parallel: the shared registry is locked while in use,
+# and each has its own target directory.
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=observatoire-backend-target,target=/build/target \
     cargo build --release --locked && cp target/release/observatoire /observatoire
 
 FROM debian:trixie-slim
