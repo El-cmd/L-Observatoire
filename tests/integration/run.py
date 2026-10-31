@@ -153,12 +153,25 @@ class Integration(unittest.TestCase):
             self.assertIn('data: [DONE]', response.read().decode())
         saved = self.alice.call(path)[1]; first = saved['messages'][-1]['content']
         self.assertEqual(json.loads(first)['max_tokens'], 32768)
+        self.assertTrue(saved['messages'][-1]['truncated'])
         self.assertEqual(self.alice.call(path+'/context')[1]['max_output_tokens'], 32768)
         with self.alice.call(path+'/generate', 'POST', {'version':saved['version'], 'continue':True}, stream=True) as response:
             self.assertIn('data: [DONE]', response.read().decode())
         resumed = self.alice.call(path)[1]
         self.assertEqual(len(resumed['messages']), len(saved['messages']))
         self.assertEqual(resumed['messages'][-1]['content'], first + ' (suite)')
+        self.assertNotIn('truncated', resumed['messages'][-1])
+
+    def test_05d_six_conversations_can_stream_at_once(self):
+        chats = [self.alice.create('slow') for _ in range(7)]
+        streams = [self.alice.call('/api/conversations/'+chat['id']+'/generate', 'POST', {'version':chat['version']}, stream=True) for chat in chats[:6]]
+        try:
+            self.assertEqual([stream.status for stream in streams], [200]*6)
+            code, body, _ = self.alice.call('/api/conversations/'+chats[6]['id']+'/generate', 'POST', {'version':chats[6]['version']})
+            self.assertEqual(code, 429); self.assertIn('six', body['error'])
+        finally:
+            for stream in streams:
+                with stream: stream.read()
 
     def test_06_upstream_errors_release_the_generation_lease(self):
         chat = self.alice.create('upstream-error'); path = '/api/conversations/'+chat['id']

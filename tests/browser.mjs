@@ -25,6 +25,22 @@ try {
   await page.getByRole('button',{name:'Copier la question',exact:true}).click();assert.equal(await page.evaluate(()=>globalThis.copied),'Question privée Alice');
   assert.equal(await page.evaluate(()=>document.cookie.includes('observatoire_session')),false);
   const keys = await page.evaluate(()=>Object.keys(localStorage));assert.equal(keys.some(key=>key.includes('session')||key.includes('csrf')),false);
+  // Two conversations write at once: the first keeps streaming while another one is used.
+  await page.locator('#new-chat').click();await page.locator('#prompt').fill('slow');await page.locator('#send').click();
+  await page.locator('.history-activity').waitFor({state:'visible'});
+  await page.locator('#new-chat').click();await page.locator('#prompt').fill('Question parallèle');await page.locator('#send').click();
+  await page.waitForFunction(()=>document.querySelector('#stop').hidden&&document.querySelector('.assistant .message-content')?.textContent.includes('Question parallèle'));
+  assert.equal(await page.locator('.history-activity').count(),1);
+  await page.locator('.history-row:has(.history-activity) .history-item').click();
+  assert.equal(await page.locator('.user .message-content').innerText(),'slow');
+  await page.waitForFunction(()=>!document.querySelector('.history-activity')&&document.querySelector('#stop').hidden&&document.querySelector('.assistant .message-content')?.textContent.includes('Réponse lente'));
+  // An answer cut by the length limit can still be continued after a reload.
+  await page.locator('#new-chat').click();await page.locator('#prompt').fill('longue réponse');await page.locator('#send').click();
+  await page.getByRole('button',{name:'Continuer la réponse'}).waitFor({state:'visible'});
+  await page.reload();await page.locator('#chat-app').waitFor({state:'visible'});await page.getByRole('button',{name:'longue réponse',exact:true}).first().click();
+  await page.getByRole('button',{name:'Continuer la réponse'}).click();
+  await page.waitForFunction(()=>document.querySelector('#stop').hidden&&document.querySelector('.assistant .message-content')?.textContent.includes('(suite)'));
+  assert.equal(await page.getByRole('button',{name:'Continuer la réponse'}).count(),0);
   await page.reload();await page.locator('#chat-app').waitFor({state:'visible'});await page.getByRole('button',{name:'Question privée Alice',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('.user .message-content')?.textContent==='Question privée Alice');
   await page.locator('#account-toggle').click();assert.equal(await page.locator('#import-legacy').isVisible(),true);
@@ -46,5 +62,5 @@ try {
   await page.locator('#login-form').waitFor({state:'visible'});assert.match(await page.locator('#login-error').innerText(),/modifié/);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   assert.deepEqual(errors,[]);
-  console.log('Browser OK: login, history in PostgreSQL, settings, copy, opt-in import, account isolation, logout, password change, mobile.');
+  console.log('Browser OK: login, history in PostgreSQL, settings, copy, parallel conversations, continue after reload, opt-in import, account isolation, logout, password change, mobile.');
 } finally {await browser.close();}

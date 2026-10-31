@@ -23,6 +23,9 @@ pub struct Message {
     pub reasoning: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub interrupted: bool,
+    /// Cut by the length limit (finish_reason "length"): the answer can be resumed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
 }
 
 #[derive(Serialize, FromRow)]
@@ -309,7 +312,7 @@ pub async fn generate(
     let permit = app.generations.clone().try_acquire_owned().map_err(|_| {
         Error(
             StatusCode::TOO_MANY_REQUESTS,
-            "Le serveur traite déjà quatre réponses. Réessaie dans un instant.".into(),
+            "Le serveur traite déjà six réponses. Réessaie dans un instant.".into(),
         )
     })?;
     let generation = Uuid::new_v4();
@@ -406,7 +409,9 @@ pub async fn generate(
             content: String::new(),
             reasoning: String::new(),
             interrupted: false,
+            truncated: false,
         });
+        output.truncated = false;
         let mut prompt_tokens: Option<i32> = None;
         let mut done = false;
         let mut failed = false;
@@ -475,6 +480,9 @@ pub async fn generate(
                 {
                     prompt_tokens = Some(tokens);
                 }
+                if value.pointer("/choices/0/finish_reason").and_then(Value::as_str) == Some("length") {
+                    output.truncated = true;
+                }
                 if let Some(delta) = value.pointer("/choices/0/delta") {
                     if let Some(content) = delta.get("content").and_then(Value::as_str) {
                         output.content.push_str(content);
@@ -508,6 +516,7 @@ pub async fn generate(
         // Dropping source cancels the upstream HTTP request before persisting the result.
         drop(source);
         output.interrupted = !done || failed || disconnected;
+        output.truncated &= !output.interrupted;
         let budget = context::MAX_HISTORY_BYTES.saturating_sub(existing_bytes);
         truncate_utf8(&mut output.content, context::MAX_MESSAGE_BYTES.min(budget));
         truncate_utf8(
@@ -558,6 +567,7 @@ mod tests {
             content: "Bonjour".into(),
             reasoning: String::new(),
             interrupted: false,
+            truncated: false,
         };
         assert!(validate_messages(&[m.clone()]).is_ok());
         m.role = "system".into();

@@ -188,7 +188,7 @@ async fn main() -> Result<()> {
             .read_timeout(Duration::from_secs(300))
             .build()?,
         config: Arc::new(config),
-        generations: Arc::new(Semaphore::new(4)),
+        generations: Arc::new(Semaphore::new(6)),
         password_work: Arc::new(Semaphore::new(4)),
         dummy_hash: Arc::new(auth::hash_password("dummy-not-a-real-user-password".into()).await?),
     };

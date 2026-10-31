@@ -24,8 +24,8 @@ export default function App() {
   const empty = !chat.current?.messages.length;
   return <>
     <div className="app" id="chat-app">
-      <Sidebar user={chat.auth.user} chats={chat.chats} currentId={chat.current?.id} open={sidebarOpen} collapsed={sidebarCollapsed}
-        navigating={chat.navigating || chat.compacting} canImport={chat.canImport} importing={chat.importing} onClose={() => {if (innerWidth <= 760) setSidebarOpen(false); else setSidebarCollapsed(true);}}
+      <Sidebar user={chat.auth.user} chats={chat.chats} activity={chat.activity} currentId={chat.current?.id} open={sidebarOpen} collapsed={sidebarCollapsed}
+        navigating={chat.navigating} canImport={chat.canImport} importing={chat.importing} onClose={() => {if (innerWidth <= 760) setSidebarOpen(false); else setSidebarCollapsed(true);}}
         onNew={() => {void chat.newChat().then(() => setSidebarOpen(false));}}
         onSelect={id => {void chat.openChat(id).then(() => setSidebarOpen(false));}}
         onDelete={id => {void chat.deleteChat(id);}} onImport={() => {void chat.importLegacy();}}
@@ -35,7 +35,7 @@ export default function App() {
         <header className="topbar"><button id="menu" className="icon-button" aria-label="Ouvrir les conversations" title="Conversations" onClick={() => {if (innerWidth <= 760) setSidebarOpen(value => !value); else setSidebarCollapsed(value => !value);}}><Icon name="sidebar"/></button>
           <span className="topbar-title">L’Observatoire</span><span id="connection" className="sr-only" role="status">{chat.navigating ? 'Chargement…' : chat.auth.configured ? 'API configurée' : 'Configuration requise'}</span>
         </header>
-        <MessageList chat={chat.current} busy={chat.busy} summaryFocus={chat.summaryFocus} onRegenerate={() => {void chat.regenerate();}} onError={chat.notify}/>
+        <MessageList chat={chat.current} busy={chat.busy} summaryFocus={chat.summaryFocus} onRegenerate={() => {void chat.regenerate();}} onContinue={() => {void chat.continueAnswer();}} onError={chat.notify}/>
         <Composer prompt={chat.prompt} onPrompt={chat.setPrompt} onSend={value => {void chat.send(value);}} onStop={chat.stop}
           onRegenerate={() => {void chat.regenerate();}} onContinue={() => {void chat.continueAnswer();}} settings={chat.settings} onSettings={chat.setSettings} busy={chat.busy}
           contextUsage={chat.contextUsage} compacting={chat.compacting} onCompact={() => {void chat.compactContext();}}

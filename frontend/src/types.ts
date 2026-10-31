@@ -1,9 +1,12 @@
 export type Effort = 'none' | 'low' | 'medium' | 'xhigh';
+export type Activity = 'generating' | 'compacting';
 export interface Settings { effort: Effort; temperature: number }
 export interface User { id: string; username: string; is_admin: boolean }
 export interface Auth { user: User; csrf_token: string; configured: boolean }
 export interface Message {
   role: 'user' | 'assistant'; content: string; reasoning?: string; interrupted?: boolean;
+  /** Cut by the length limit: the answer can be continued. */
+  truncated?: boolean;
 }
 export interface Conversation {
   id: string; title: string; version: number; messages: Message[];
