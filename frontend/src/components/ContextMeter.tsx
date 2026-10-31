@@ -10,7 +10,7 @@ export function ContextMeter({usage, compacting, disabled, onCompact}: {
   const canCompact = Boolean(usage?.can_compact) && !disabled && !compacting;
   const formatted = (value: number) => value.toLocaleString('fr-FR');
   const measured = usage?.measured_tokens || 0;
-  const counting = !usage ? '' : measured ? (usage.estimated ? `Compté par Qwen, sauf ≈ ${formatted(used - measured)} tokens estimés pour les derniers messages. ` : 'Compté par Qwen. ') : usage.estimated ? 'Comptage estimé. ' : '';
+  const counting = !usage ? '' : measured ? (usage.estimated ? `Compté par Qwen, sauf ≈ ${formatted(used - measured)} tokens estimés pour les derniers messages. ` : 'Compté par Qwen. ') : '';
   const description = compacting ? 'Résumé du début en cours…' : usage ? `${usage.estimated ? 'Environ ' : ''}${formatted(used)} tokens sur ${formatted(limit)}. ${canCompact ? 'Cliquer pour résumer le début.' : 'Les messages récents seront conservés.'}` : 'Calcul du contexte…';
   return <div className="context-control">
     <button id="context-meter" type="button" className={`context-meter${compacting ? ' is-loading' : ''}${ratio > .9 ? ' is-near-limit' : ''}`}
