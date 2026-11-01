@@ -1,4 +1,4 @@
-type Name = 'copy' | 'check' | 'retry' | 'sidebar' | 'new' | 'edit' | 'plus' | 'image' | 'download' | 'link' | 'ask' | 'trash' | 'user' | 'settings' | 'send' | 'stop' | 'close';
+type Name = 'copy' | 'check' | 'retry' | 'sidebar' | 'new' | 'edit' | 'plus' | 'image' | 'download' | 'link' | 'ask' | 'trash' | 'user' | 'settings' | 'send' | 'stop' | 'close' | 'news';
 export function Icon({name}: {name: Name}) {
   const paths = {
     copy: <><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></>,
@@ -18,6 +18,7 @@ export function Icon({name}: {name: Name}) {
     send: <path d="M12 19V5m-6 6 6-6 6 6"/>,
     stop: <rect x="7" y="7" width="10" height="10" rx="1"/>,
     close: <path d="m6 6 12 12M18 6 6 18"/>,
+    news: <path d="M12 3.5 13.9 9l5.6 1.9-5.6 1.9L12 18.5l-1.9-5.7-5.6-1.9L10.1 9zM18.5 3v3.5M16.8 4.8h3.5"/>,
   };
   return <svg viewBox="0 0 24 24" aria-hidden="true">{paths[name]}</svg>;
 }

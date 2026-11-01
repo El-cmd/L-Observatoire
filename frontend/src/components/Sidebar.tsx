@@ -2,9 +2,9 @@ import {useEffect, useRef, useState} from 'react';
 import type {Activity, Conversation, User} from '../types';
 import {Icon} from './Icon';
 
-export function Sidebar({user, chats, activity, currentId, libraryOpen, open, collapsed, navigating, canImport, importing, onClose, onNew, onLibrary,
+export function Sidebar({user, chats, activity, currentId, libraryOpen, newsOpen, unreadNews, open, collapsed, navigating, canImport, importing, onClose, onNew, onLibrary, onNews,
   onSelect, onRename, onDelete, onImport, onPassword, onLogout}: {
-  user: User; chats: Conversation[]; activity: Record<string, Activity>; currentId?: string; libraryOpen: boolean; onLibrary: () => void; open: boolean; collapsed: boolean; navigating: boolean;
+  user: User; chats: Conversation[]; activity: Record<string, Activity>; currentId?: string; libraryOpen: boolean; onLibrary: () => void; newsOpen: boolean; unreadNews: boolean; onNews: () => void; open: boolean; collapsed: boolean; navigating: boolean;
   canImport: boolean; importing: boolean; onClose: () => void; onNew: () => void;
   onSelect: (id: string) => void; onRename: (id: string, title: string) => void; onDelete: (id: string) => void; onImport: () => void;
   onPassword: () => void; onLogout: () => void;
@@ -39,7 +39,7 @@ export function Sidebar({user, chats, activity, currentId, libraryOpen, open, co
     <div className="history-label">Conversations</div>
     <div className="history" id="history" aria-label="Historique des conversations">
       {!visible.length && <p className="history-empty">Vos conversations apparaîtront ici.</p>}
-      {visible.map(chat => <div className={`history-row${chat.id === currentId && !libraryOpen ? ' active' : ''}`} key={chat.id}>
+      {visible.map(chat => <div className={`history-row${chat.id === currentId && !libraryOpen && !newsOpen ? ' active' : ''}`} key={chat.id}>
         {editing === chat.id
           ? <input className="history-rename" aria-label="Nouveau titre de la conversation" maxLength={80} autoFocus value={draft}
               onChange={event => setDraft(event.target.value)} onFocus={event => event.target.select()} onBlur={() => finishRename(chat)}
@@ -60,6 +60,9 @@ export function Sidebar({user, chats, activity, currentId, libraryOpen, open, co
         <button id="change-password" type="button" onClick={() => {setAccountOpen(false); onPassword();}}>Changer mon mot de passe</button>
         <button id="logout" type="button" onClick={() => {setAccountOpen(false); onLogout();}}>Se déconnecter</button>
       </div>
+      <button className={`news-link${newsOpen ? ' active' : ''}`} id="news-link" type="button" aria-current={newsOpen ? 'page' : undefined} onClick={onNews}>
+        <Icon name="news"/><span>Nouveautés</span>{unreadNews && <span className="news-unread" id="news-unread" role="status" aria-label="Nouveautés non lues" title="Nouveautés non lues"/>}
+      </button>
       <button id="account-toggle" className="account-toggle" type="button" aria-label="Mon compte" aria-expanded={accountOpen} aria-controls="account-panel" onClick={() => setAccountOpen(value => !value)}>
         <Icon name="user"/><span id="account-name">{user.username}</span><span className="account-dots">···</span>
       </button>

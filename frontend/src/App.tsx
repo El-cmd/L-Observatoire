@@ -8,6 +8,8 @@ import {PasswordDialog} from './components/PasswordDialog';
 import {Icon} from './components/Icon';
 import {ImageViewer} from './components/ImageViewer';
 import {LibraryView} from './components/LibraryView';
+import {NewsView} from './components/NewsView';
+import {hasUnreadNews, markNewsRead} from './lib/news';
 import {MAX_IMAGES} from './lib/images';
 import type {AttachmentRef} from './types';
 
@@ -19,25 +21,32 @@ export default function App() {
   // The library replaces the conversation in the workspace: to browse it, or to pick images.
   const [library, setLibrary] = useState<'closed' | 'browse' | 'pick'>('closed');
   const [viewer, setViewer] = useState<AttachmentRef | null>(null);
-  useEffect(() => {setSidebarOpen(false); setPasswordOpen(false); setLibrary('closed'); setViewer(null);}, [chat.auth?.user.id]);
+  const [news, setNews] = useState(false);
+  const [unreadNews, setUnreadNews] = useState(false);
+  const userId = chat.auth?.user.id;
+  useEffect(() => {
+    setSidebarOpen(false); setPasswordOpen(false); setLibrary('closed'); setViewer(null); setNews(false);
+    setUnreadNews(userId ? hasUnreadNews(userId) : false);
+  }, [userId]);
   useEffect(() => {
     function key(event: KeyboardEvent) {
       if (event.key === 'Escape') setSidebarOpen(false);
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'n') {event.preventDefault(); void chat.newChat();}
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'n') {event.preventDefault(); setLibrary('closed'); setNews(false); void chat.newChat();}
     }
     document.addEventListener('keydown', key); return () => document.removeEventListener('keydown', key);
   }, [chat.newChat]);
   if (!chat.auth) return <Login initializing={chat.initializing} pending={chat.signingIn} error={chat.loginError} onLogin={chat.login}/>;
-  const empty = library === 'closed' && !chat.current?.messages.length;
+  const empty = library === 'closed' && !news && !chat.current?.messages.length;
   // The chosen image waits above the input: the user only has to type the question.
   const askAbout = () => document.getElementById('prompt')?.focus();
   return <>
     <div className="app" id="chat-app">
       <Sidebar user={chat.auth.user} chats={chat.chats} activity={chat.activity} currentId={chat.current?.id} libraryOpen={library === 'browse'}
-        onLibrary={() => {setLibrary('browse'); setSidebarOpen(false);}} open={sidebarOpen} collapsed={sidebarCollapsed}
+        onLibrary={() => {setNews(false); setLibrary('browse'); setSidebarOpen(false);}} newsOpen={news} unreadNews={unreadNews}
+        onNews={() => {setLibrary('closed'); setNews(true); setSidebarOpen(false); markNewsRead(chat.auth!.user.id); setUnreadNews(false);}} open={sidebarOpen} collapsed={sidebarCollapsed}
         navigating={chat.navigating} canImport={chat.canImport} importing={chat.importing} onClose={() => {if (innerWidth <= 760) setSidebarOpen(false); else setSidebarCollapsed(true);}}
-        onNew={() => {setLibrary('closed'); void chat.newChat().then(() => setSidebarOpen(false));}}
-        onSelect={id => {setLibrary('closed'); void chat.openChat(id).then(() => setSidebarOpen(false));}}
+        onNew={() => {setLibrary('closed'); setNews(false); void chat.newChat().then(() => setSidebarOpen(false));}}
+        onSelect={id => {setLibrary('closed'); setNews(false); void chat.openChat(id).then(() => setSidebarOpen(false));}}
         onRename={(id, title) => {void chat.renameChat(id, title);}} onDelete={id => {void chat.deleteChat(id);}} onImport={() => {void chat.importLegacy();}}
         onPassword={() => setPasswordOpen(true)} onLogout={() => {void chat.logout();}}/>
       <button id="sidebar-backdrop" className="sidebar-backdrop" aria-label="Fermer les conversations" tabIndex={-1} onClick={() => setSidebarOpen(false)}/>
@@ -45,7 +54,7 @@ export default function App() {
         <header className="topbar"><button id="menu" className="icon-button" aria-label="Ouvrir les conversations" title="Conversations" onClick={() => {if (innerWidth <= 760) setSidebarOpen(value => !value); else setSidebarCollapsed(value => !value);}}><Icon name="sidebar"/></button>
           <span className="topbar-title">L’Observatoire</span><span id="connection" className="sr-only" role="status">{chat.navigating ? 'Chargement…' : chat.auth.configured ? 'API configurée' : 'Configuration requise'}</span>
         </header>
-        {library !== 'closed' ? <LibraryView library={chat.library} picking={library === 'pick'} room={MAX_IMAGES - chat.pending.length}
+        {news ? <NewsView onClose={() => setNews(false)}/> : library !== 'closed' ? <LibraryView library={chat.library} picking={library === 'pick'} room={MAX_IMAGES - chat.pending.length}
           onLoad={() => {void chat.loadLibrary();}} onClose={() => setLibrary('closed')} onOpen={setViewer} onDelete={id => {void chat.deleteImage(id);}}
           onPick={images => {chat.addFromLibrary(images); setLibrary('closed');}}
           onStartChat={image => {setLibrary('closed'); void chat.newChat().then(() => {chat.addFromLibrary([image]); askAbout();});}} onOpenChat={id => {setLibrary('closed'); void chat.openChat(id);}}
