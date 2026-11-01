@@ -1,8 +1,8 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {APIClient, APIError, errorMessage} from '../lib/api';
 import {consumeCompletion} from '../lib/stream';
-import {MAX_IMAGES, prepareImage, thumbnailURL} from '../lib/images';
-import type {Activity, AttachmentRef, Auth, Conversation, ConversationSummary, Legacy, Library, Message, Notice, PendingImage, Settings, ContextUsage} from '../types';
+import {MAX_IMAGES, documentSize, isDocument, isImage, prepareImage, thumbnailURL, toRef} from '../lib/images';
+import type {Activity, AttachmentRef, Auth, Conversation, ConversationSummary, Legacy, Library, LibraryItem, Message, Notice, PendingImage, Settings, ContextUsage} from '../types';
 
 function readLegacy(): Legacy | null {
   try { return JSON.parse(localStorage.getItem('observatoir-chat-v1') || localStorage.getItem('qwen-chat-v1') || 'null') as Legacy | null; }
@@ -301,13 +301,40 @@ export function useObservatoire() {
     } catch (error) {if (epoch.current === account) failure(error);}
   }
 
+  /** A document is sent as it is; the server reads it (a PDF page by page with Qwen), and its
+   *  progress is followed until it is ready to be attached. */
+  async function addDocument(file: File, account: number) {
+    const key = crypto.randomUUID();
+    const update = (change: Partial<PendingImage>) => setPending(list => list.map(item => item.key === key ? {...item, ...change} : item));
+    setPending(list => [...list, {key, name:file.name || 'document', document:true, status:'uploading'}]);
+    try {
+      let item = await client.json<LibraryItem>(`/api/attachments?name=${encodeURIComponent(file.name || 'document')}`, {method:'POST', body:file});
+      setLibrary(null);
+      while (item.status === 'reading') {
+        if (epoch.current !== account || !pendingRef.current.some(value => value.key === key)) return;
+        update({status:'reading', progress:`${item.progress} / ${item.pages} pages`});
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        item = await client.json<LibraryItem>(`/api/attachments/${item.id}/status`);
+      }
+      if (epoch.current !== account) return;
+      setLibrary(null);
+      if (item.status === 'failed') update({status:'error', error:item.error || 'Ce document n’a pas pu être lu.'});
+      else update({status:'ready', ref:toRef(item), progress:documentSize(toRef(item))});
+    } catch (error) {
+      if (epoch.current !== account) return;
+      if (error instanceof APIError && error.status === 401) failure(error);
+      update({status:'error', error:errorMessage(error)});
+    }
+  }
+
   /** Each image is prepared in the browser, then sent to the library as soon as it is chosen. */
   async function addImages(files: File[]) {
     if (!authRef.current) return;
     const room = MAX_IMAGES - pendingRef.current.length;
-    if (files.length > room) notify(`${MAX_IMAGES} images au maximum par message.`);
+    if (files.length > room) notify(`${MAX_IMAGES} fichiers au maximum par message.`);
     const account = epoch.current;
     await Promise.all(files.slice(0, Math.max(0, room)).map(async file => {
+      if (!isImage(file)) return addDocument(file, account);
       const key = crypto.randomUUID(); const preview = URL.createObjectURL(file);
       setPending(list => [...list, {key, name:file.name || 'image', preview, status:'uploading'}]);
       try {
@@ -326,9 +353,10 @@ export function useObservatoire() {
 
   function addFromLibrary(refs: AttachmentRef[]) {
     const room = MAX_IMAGES - pendingRef.current.length;
-    if (refs.length > room) notify(`${MAX_IMAGES} images au maximum par message.`);
+    if (refs.length > room) notify(`${MAX_IMAGES} fichiers au maximum par message.`);
     setPending(list => [...list, ...refs.slice(0, Math.max(0, room)).filter(ref => !list.some(item => item.ref?.id === ref.id))
-      .map(ref => ({key:crypto.randomUUID(), name:ref.name, preview:thumbnailURL(ref.id), status:'ready' as const, ref}))]);
+      .map(ref => isDocument(ref) ? {key:crypto.randomUUID(), name:ref.name, document:true, status:'ready' as const, ref, progress:documentSize(ref)}
+        : {key:crypto.randomUUID(), name:ref.name, preview:thumbnailURL(ref.id), status:'ready' as const, ref})]);
   }
 
   const removePending = (key: string) => setPending(list => list.filter(item => item.key !== key));
@@ -337,8 +365,9 @@ export function useObservatoire() {
     const chat = chatsRef.current.find(value => value.id === currentRef.current);
     const images = pendingRef.current;
     if (!chat || activityRef.current[chat.id] || navigating || !content.trim() && !images.length) return;
-    if (images.some(item => item.status === 'uploading')) {notify('Attends la fin de l’envoi des images.'); return;}
-    if (images.some(item => item.status === 'error')) {notify('Retire les images refusées avant d’envoyer.'); return;}
+    if (images.some(item => item.status === 'uploading')) {notify('Attends la fin de l’envoi des fichiers.'); return;}
+    if (images.some(item => item.status === 'reading')) {notify('Attends la fin de la lecture des documents.'); return;}
+    if (images.some(item => item.status === 'error')) {notify('Retire les fichiers refusés avant d’envoyer.'); return;}
     if (chat.messages.length >= 9998) {notify('Cette conversation est longue. Ouvre un nouveau chat pour continuer.'); return;}
     const attachments = images.map(item => item.ref!);
     setPrompt(''); setPending(() => []);
@@ -357,7 +386,7 @@ export function useObservatoire() {
   }
 
   async function deleteImage(id: string) {
-    if (!authRef.current || !confirm('Supprimer cette image de ta bibliothèque ? Elle sera remplacée par « Image supprimée » dans les conversations.')) return;
+    if (!authRef.current || !confirm('Supprimer ce fichier de ta bibliothèque ? Il sera remplacé par une mention « supprimé » dans les conversations.')) return;
     const account = epoch.current;
     try {
       await client.json(`/api/attachments/${id}`, {method:'DELETE'});
@@ -369,6 +398,7 @@ export function useObservatoire() {
   }
 
   const imageConversations = (id: string) => client.json<{id: string; title: string}[]>(`/api/attachments/${id}/conversations`);
+  const documentText = (id: string) => client.json<{content: string}>(`/api/attachments/${id}/text`).then(value => value.content);
 
   async function continueAnswer() {
     const chat = chatsRef.current.find(value => value.id === currentRef.current);
@@ -402,7 +432,7 @@ export function useObservatoire() {
   return {auth, initializing, loginError, signingIn, login, logout, changePassword,
     chats, current:activeChat, activity, busy:currentActivity === 'generating', navigating,
     notice:(currentId && notices[currentId]) || notices[''] || null, notify,
-    prompt, setPrompt, pending, addImages, addFromLibrary, removePending, library, loadLibrary, deleteImage, imageConversations, removedImages,
+    prompt, setPrompt, pending, addImages, addFromLibrary, removePending, library, loadLibrary, deleteImage, imageConversations, documentText, removedImages,
     settings, setSettings, newChat, openChat, deleteChat, renameChat, send, regenerate, continueAnswer,
     contextUsage:contextUsage && contextUsage.conversation_id === currentId && contextUsage.version === activeChat?.version ? contextUsage : null,
     compacting:currentActivity === 'compacting', compactContext, summaryFocus,

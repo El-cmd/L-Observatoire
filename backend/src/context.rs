@@ -1,5 +1,5 @@
 //! Context memory is separate from the immutable original message archive.
-use crate::{App, Error, attachments, chat::{Conversation, Message}, session};
+use crate::{App, Error, attachments::{self, Kind}, chat::{Conversation, Message}, session};
 use axum::{Json, extract::{Path, State}, http::{HeaderMap, StatusCode}};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -42,16 +42,17 @@ pub fn prompt(row:&Conversation)->Vec<Value>{
 
 const IMAGE_REF:&str="observatoire-image:";
 
-/// Images stay references here (counting, fingerprint of the prompt); `resolve` loads them.
-/// An image already shown earlier in the context is not sent twice: a mention points to it.
+/// Images and documents stay references here (counting, fingerprint of the prompt); `resolve`
+/// loads them. A file already shown earlier in the context is not sent twice: a mention points to it.
 fn message(m:&Message,shown:&mut std::collections::HashSet<Uuid>)->Value{
     if m.attachments.is_empty(){return json!({"role":m.role,"content":m.content});}
     let mut parts=Vec::new();
     if !m.content.trim().is_empty(){parts.push(json!({"type":"text","text":m.content}));}
-    parts.extend(m.attachments.iter().map(|a|if shown.insert(a.id){
-        json!({"type":"image_url","image_url":{"url":format!("{IMAGE_REF}{}",a.id)},"width":a.width,"height":a.height,"name":a.name})
-    }else{
-        json!({"type":"text","text":format!("[Question sur l’image « {} », montrée plus haut dans la conversation]",a.name)})
+    parts.extend(m.attachments.iter().map(|a|match (a.kind,shown.insert(a.id)){
+        (Kind::Image,true)=>json!({"type":"image_url","image_url":{"url":format!("{IMAGE_REF}{}",a.id)},"width":a.width,"height":a.height,"name":a.name}),
+        (Kind::Image,false)=>json!({"type":"text","text":format!("[Question sur l’image « {} », montrée plus haut dans la conversation]",a.name)}),
+        (Kind::Document,true)=>json!({"type":"document","id":a.id,"name":a.name,"pages":a.pages,"tokens":a.tokens}),
+        (Kind::Document,false)=>json!({"type":"text","text":format!("[Question sur le document « {} », joint plus haut dans la conversation]",a.name)}),
     }));
     json!({"role":m.role,"content":parts})
 }
@@ -61,13 +62,26 @@ fn message(m:&Message,shown:&mut std::collections::HashSet<Uuid>)->Value{
 const MAX_IMAGE_BYTES:usize=40*1024*1024;
 
 fn reference(part:&Value)->Option<Uuid>{part.pointer("/image_url/url")?.as_str()?.strip_prefix(IMAGE_REF)?.parse().ok()}
+fn document(part:&Value)->Option<Uuid>{
+    if part.get("type").and_then(Value::as_str)!=Some("document"){return None;}
+    part.get("id")?.as_str()?.parse().ok()
+}
 
-/// Replaces image references with the images just before calling Qwen; a deleted image
-/// becomes a mention.
+/// Replaces image references with the images and document references with their Markdown just
+/// before calling Qwen; a deleted file becomes a mention.
 pub async fn resolve(app:&App,user:Uuid,mut messages:Vec<Value>)->Result<Vec<Value>,Error>{
-    let ids:Vec<Uuid>=messages.iter().filter_map(|m|m.get("content").and_then(Value::as_array)).flatten().filter_map(reference).collect();
+    let ids:Vec<Uuid>=messages.iter().filter_map(|m|m.get("content").and_then(Value::as_array)).flatten().filter_map(|part|reference(part).or_else(||document(part))).collect();
     if ids.is_empty(){return Ok(messages);}
     let stored=attachments::load(app,user,&ids).await?;
+    for part in messages.iter_mut().filter_map(|m|m.get_mut("content").and_then(Value::as_array_mut)).flatten(){
+        let Some(id)=document(part) else{continue};
+        let name=part.get("name").and_then(Value::as_str).unwrap_or("document").to_string();
+        let pages=match part.get("pages").and_then(Value::as_u64){Some(1)=>", 1 page".to_string(),Some(n) if n>1=>format!(", {n} pages"),_=>String::new()};
+        *part=json!({"type":"text","text":match stored.get(&id).and_then(|d|d.content.as_deref()){
+            Some(content)=>format!("[Document « {name} »{pages}]\n\n{content}\n\n[Fin du document « {name} »]"),
+            None=>format!("[document supprimé : {name}]"),
+        }});
+    }
     let mut budget=MAX_IMAGE_BYTES;
     for part in messages.iter_mut().rev().filter_map(|m|m.get_mut("content").and_then(Value::as_array_mut)).flat_map(|parts|parts.iter_mut().rev()){
         let Some(id)=reference(part) else{continue};
@@ -84,9 +98,10 @@ pub async fn resolve(app:&App,user:Uuid,mut messages:Vec<Value>)->Result<Vec<Val
     Ok(messages)
 }
 
-/// Text sent to the token counter, and the cost of the images measured on Qwen.
-fn split_images(messages:&[Value])->(Vec<Value>,u64){
-    let mut images=0;
+/// Text sent to the token counter, the cost of the images measured on Qwen, and the size of the
+/// documents counted when they were read.
+fn split_images(messages:&[Value])->(Vec<Value>,u64,u64){
+    let (mut images,mut documents)=(0,0);
     let text=messages.iter().map(|m|match m.get("content").and_then(Value::as_array){
         Some(parts)=>{
             let mut texts=Vec::new();
@@ -94,13 +109,15 @@ fn split_images(messages:&[Value])->(Vec<Value>,u64){
                 if reference(part).is_some(){
                     let side=|key:&str|part.get(key).and_then(Value::as_u64).unwrap_or(1024) as u32;
                     images+=attachments::image_tokens(side("width"),side("height"));
+                }else if document(part).is_some(){
+                    documents+=part.get("tokens").and_then(Value::as_u64).unwrap_or(0);
                 }else if let Some(text)=part.get("text").and_then(Value::as_str){texts.push(text);}
             }
             json!({"role":m.get("role"),"content":texts.join("\n")})
         }
         None=>m.clone(),
     }).collect();
-    (text,images)
+    (text,images,documents)
 }
 
 pub fn fallback_count(messages:&[Value])->u64{
@@ -133,9 +150,10 @@ pub async fn count(app:&App,messages:&[Value])->TokenCount{
     if messages.is_empty(){return TokenCount{tokens:0,estimated:false,estimated_part:0,measured:0,source:"estimation".into()};}
     let key=crate::auth::digest(&json!({"model":app.config.model,"messages":messages}).to_string());
     if let Some(cached)=app.token_counts.lock().await.get(&key).cloned(){return cached;}
-    let (text,images)=split_images(messages);
+    let (text,images,documents)=split_images(messages);
     let mut result=count_text(app,&text).await;
     if images>0{result=TokenCount{tokens:result.tokens+images,estimated:true,estimated_part:result.estimated_part+images,..result};}
+    result.tokens+=documents;
     let mut cache=app.token_counts.lock().await;
     if cache.len()>=256{cache.clear();}
     // Failed counters are not cached, so a recovered tokenizer is used immediately.
@@ -219,9 +237,17 @@ async fn summarize(app:&App,user:Uuid,row:&Conversation,end:usize)->Result<Strin
         if message.interrupted||(message.content.trim().is_empty()&&message.attachments.is_empty()){continue;}
         // Images leave the context only now: Qwen transcribes them once for the summary.
         let mut text=message.content.clone();
-        for image in &message.attachments{
-            let seen=attachments::transcript(app,user,image).await.unwrap_or_else(||"contenu indisponible (image supprimée ou illisible)".into());
-            text.push_str(&format!("\n\n[Image « {} » : {}]",image.name,seen));
+        for file in &message.attachments{
+            match file.kind{
+                Kind::Image=>{
+                    let seen=attachments::transcript(app,user,file).await.unwrap_or_else(||"contenu indisponible (image supprimée ou illisible)".into());
+                    text.push_str(&format!("\n\n[Image « {} » : {}]",file.name,seen));
+                }
+                Kind::Document=>{
+                    let content=attachments::document_text(app,user,file.id).await.unwrap_or_else(||"contenu indisponible (document supprimé)".into());
+                    text.push_str(&format!("\n\n[Document « {} » : {}]",file.name,content));
+                }
+            }
         }
         for (index,part) in split_text(&text).iter().enumerate(){segments.push(json!({"role":message.role,"partie":index+1,"content":part}));}
     }

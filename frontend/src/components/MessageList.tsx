@@ -1,12 +1,23 @@
 import {lazy, memo, Suspense, useLayoutEffect, useRef, useState} from 'react';
 import type {AttachmentRef, Conversation, Message} from '../types';
-import {thumbnailURL} from '../lib/images';
+import {documentSize, isDocument, thumbnailURL} from '../lib/images';
 import {CopyButton} from './CopyButton';
 const Markdown = lazy(() => import('./Markdown').then(module => ({default:module.Markdown})));
 import {Icon} from './Icon';
 
+function MessageDocument({file, removed, onOpen, onAsk}: {file: AttachmentRef; removed: boolean; onOpen: (file: AttachmentRef) => void; onAsk: (file: AttachmentRef) => void}) {
+  if (removed) return <span className="message-image is-missing" title={file.name}>Document supprimé</span>;
+  return <div className="message-document">
+    <button type="button" className="message-document-open" aria-label={`Voir le texte lu dans ${file.name}`} title="Voir le texte lu" onClick={() => onOpen(file)}>
+      <Icon name="document"/><span className="message-document-name">{file.name}</span><span className="message-document-size">{documentSize(file)}</span>
+    </button>
+    <button type="button" className="message-image-ask" aria-label={`Poser une question sur ${file.name}`} title="Poser une question sur ce document" onClick={() => onAsk(file)}><Icon name="ask"/></button>
+  </div>;
+}
+
 function MessageImage({image, removed, onOpen, onAsk}: {image: AttachmentRef; removed: boolean; onOpen: (image: AttachmentRef) => void; onAsk: (image: AttachmentRef) => void}) {
   const [missing, setMissing] = useState(false);
+  if (isDocument(image)) return <MessageDocument file={image} removed={removed} onOpen={onOpen} onAsk={onAsk}/>;
   if (missing || removed) return <span className="message-image is-missing" title={image.name}>Image supprimée</span>;
   // At most 360 px wide and 240 px high, in the image's own proportions.
   const width = Math.max(48, Math.round(Math.min(360, 240 * image.width / image.height)));

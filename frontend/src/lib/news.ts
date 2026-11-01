@@ -10,6 +10,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-01-documents', date: '2026-11-01', level: 'major', title: 'Envoyez des documents',
+    text: 'Le bouton + accepte maintenant les PDF, les documents Word (.docx) et les fichiers texte (notes, CSV, code…), en plus des images. L’Observatoire lit chaque document une fois, page par page, y compris les pages scannées et l’écriture à la main ; la lecture d’un long PDF peut prendre une minute. Le texte lu est visible en cliquant sur le document : « [?] » signale un passage incertain, à vérifier sur l’original. Excel et PowerPoint arriveront plus tard : enregistrez-les en PDF en attendant.'},
   {id: '2026-11-01-nouveautes', date: '2026-11-01', level: 'improvement', title: 'Cette page Nouveautés',
     text: 'Retrouvez ici tout ce qui change sur L’Observatoire. Un point apparaît à côté de « Nouveautés » quand il y a du nouveau.'},
   {id: '2026-10-31-logo-accueil', date: '2026-10-31', level: 'fix', title: 'Le logo ramène à l’accueil',

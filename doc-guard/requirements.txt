@@ -1,0 +1,10 @@
+# Lecteur PDF de Docling sans ses modèles (pas de PyTorch), pdfium pour les pages en image,
+# MarkItDown pour Word, charset-normalizer pour les fichiers texte.
+docling-slim[convert-core,format-pdf]==2.138.0
+docling-core==2.105.0
+docling-parse==7.24.2
+pypdfium2==5.14.0
+pillow==12.3.0
+markitdown[docx]==0.1.9
+mammoth==1.13.0
+charset-normalizer==3.5.2

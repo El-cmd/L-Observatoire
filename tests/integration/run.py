@@ -16,6 +16,8 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
+import io
 import zlib
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -91,6 +93,39 @@ def png(width=40, height=30, extra=b''):
     chunk = lambda kind, data: struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
     return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
             + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b'') + extra)
+
+
+def pdf(pages):
+    """A minimal PDF: one page per list of text lines; an empty list makes a page without text."""
+    objects = ['<< /Type /Catalog /Pages 2 0 R >>', '', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>']
+    kids = []
+    for lines in pages:
+        stream = 'BT /F1 12 Tf 72 740 Td 18 TL ' + ' '.join(f'({line}) Tj T*' for line in lines) + ' ET'
+        objects.append(f'<< /Length {len(stream)} >>\nstream\n{stream}\nendstream')
+        objects.append(f'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents {len(objects)} 0 R >>')
+        kids.append(len(objects))
+    objects[1] = f'<< /Type /Pages /Kids [{" ".join(f"{kid} 0 R" for kid in kids)}] /Count {len(kids)} >>'
+    out, offsets = b'%PDF-1.4\n', []
+    for number, body in enumerate(objects, 1):
+        offsets.append(len(out)); out += f'{number} 0 obj\n{body}\nendobj\n'.encode('latin-1')
+    table = len(out)
+    out += f'xref\n0 {len(objects) + 1}\n0000000000 65535 f \n'.encode() + b''.join(f'{offset:010d} 00000 n \n'.encode() for offset in offsets)
+    return out + f'trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{table}\n%%EOF\n'.encode()
+
+
+def docx(paragraphs):
+    """A minimal Word document with one paragraph per string."""
+    w = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+    body = ''.join(f'<w:p><w:r><w:t>{text}</w:t></w:r></w:p>' for text in paragraphs)
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, 'w') as archive:
+        archive.writestr('[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')
+        archive.writestr('_rels/.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')
+        archive.writestr('word/document.xml', f'<?xml version="1.0"?><w:document xmlns:w="{w}"><w:body>{body}</w:body></w:document>')
+    return output.getvalue()
 
 
 def upload(client, data, name='capture.png'):
@@ -256,6 +291,58 @@ class Integration(unittest.TestCase):
         self.alice.call('/api/conversations/' + other['id'], 'PUT', {'version': other['version'], 'messages': [{'role': 'user', 'content': '', 'attachments': [{key: kept[key] for key in ('id', 'name', 'width', 'height')}]}]})
         self.assertEqual(self.alice.call('/api/conversations/' + other['id'], 'DELETE')[0], 204)
         self.assertIn(kept['id'], [item['id'] for item in self.alice.call('/api/attachments')[1]['items']])
+
+    def test_05h_documents_are_read_once_and_reach_qwen(self):
+        # Text and Word files are ready at once; other formats are refused with a clear reason.
+        code, notes = upload(self.alice, 'Liste de courses : pain, café, beurre.'.encode(), 'notes.txt')
+        self.assertEqual(code, 201, notes)
+        self.assertEqual((notes['kind'], notes['status'], notes['mime'], notes['pages']), ('document', 'ready', 'text/plain', 0))
+        self.assertIn('café', self.alice.call('/api/attachments/' + notes['id'] + '/text')[1]['content'])
+        code, word = upload(self.alice, docx(['Compte rendu de la réunion', 'Décision : on continue.']), 'cr.docx')
+        self.assertEqual((code, word['status']), (201, 'ready'), word)
+        self.assertIn('Décision : on continue.', self.alice.call('/api/attachments/' + word['id'] + '/text')[1]['content'])
+        code, refused = upload(self.alice, b'PK\x03\x04 classeur', 'budget.xlsx')
+        self.assertEqual(code, 400); self.assertIn('Excel', refused['error'])
+        self.assertEqual(upload(self.alice, b'\x00\x01binaire', 'programme.exe')[0], 400)
+        # A PDF is read page by page: text laid out from its own words, a page without text read on its image.
+        data = pdf([['Rapport annuel', 'Premiere ligne du texte.', 'Seconde ligne du texte.'], []])
+        code, document = upload(self.alice, data, 'rapport.pdf')
+        self.assertEqual(code, 201, document); self.assertEqual((document['pages'], document['mime']), (2, 'application/pdf'))
+        self.assertEqual(upload(self.alice, data, 'copie.pdf')[1]['id'], document['id'])
+        for _ in range(120):
+            document = self.alice.call('/api/attachments/' + document['id'] + '/status')[1]
+            if document['status'] != 'reading': break
+            time.sleep(0.5)
+        self.assertEqual((document['status'], document['progress'], document['scanned'], document['doubts']), ('ready', 2, 1, 1), document)
+        text = self.alice.call('/api/attachments/' + document['id'] + '/text')[1]['content']
+        self.assertIn('--- Page 1 ---\n\n# Rapport annuel\n\nPremiere ligne du texte. Seconde ligne du texte.', text)
+        self.assertIn('--- Page 2 ---\n\nCourrier lu sur l’image : rendez-vous le treize[?] mai.', text)
+        self.assertEqual(self.bob.call('/api/attachments/' + document['id'] + '/text')[0], 404)
+        self.assertEqual(self.bob.call('/api/attachments/' + document['id'] + '/status')[0], 404)
+        download = self.alice.opener.open(ORIGIN + '/api/attachments/' + document['id'], timeout=20)
+        self.assertTrue(download.read().startswith(b'%PDF')); self.assertTrue(download.headers['Content-Disposition'].startswith('attachment'))
+        # Attached to a question: Qwen receives the text read, once per conversation.
+        ref = {'id': document['id'], 'name': 'rapport.pdf', 'width': 0, 'height': 0, 'kind': 'document', 'pages': 2, 'tokens': document['tokens']}
+        chat = self.alice.call('/api/conversations', 'POST')[1]; path = '/api/conversations/' + chat['id']
+        forged = {**ref, 'tokens': 1}
+        self.assertEqual(self.alice.call(path, 'PUT', {'version': chat['version'], 'messages': [{'role': 'user', 'content': 'Résume', 'attachments': [forged]}]})[0], 400)
+        code, chat, _ = self.alice.call(path, 'PUT', {'version': chat['version'], 'messages': [{'role': 'user', 'content': 'Résume', 'attachments': [ref]}]})
+        self.assertEqual(code, 200, chat)
+        self.assertGreaterEqual(self.alice.call(path + '/context')[1]['used_tokens'], document['tokens'])
+        with self.alice.call(path + '/generate', 'POST', {'version': chat['version']}, stream=True) as response: response.read()
+        saved = self.alice.call(path)[1]; reply = json.loads(saved['messages'][-1]['content'])
+        self.assertIn('[Document « rapport.pdf », 2 pages]', reply['question']); self.assertIn('# Rapport annuel', reply['question'])
+        self.assertEqual(saved['messages'][0]['attachments'], [ref])
+        again = self.alice.call(path, 'PUT', {'version': saved['version'], 'messages': saved['messages'] + [{'role': 'user', 'content': 'Et la page 2 ?', 'attachments': [ref]}]})[1]
+        with self.alice.call(path + '/generate', 'POST', {'version': again['version']}, stream=True) as response: response.read()
+        repeated = json.loads(self.alice.call(path)[1]['messages'][-1]['content'])
+        self.assertIn('joint plus haut', repeated['question']); self.assertNotIn('Rapport annuel', repeated['question'])
+        # Deleted, it becomes a mention.
+        self.assertEqual(self.alice.call('/api/attachments/' + document['id'], 'DELETE')[0], 204)
+        saved = self.alice.call(path)[1]
+        chat = self.alice.call(path, 'PUT', {'version': saved['version'], 'messages': saved['messages'][:1]})[1]
+        with self.alice.call(path + '/generate', 'POST', {'version': chat['version']}, stream=True) as response: response.read()
+        self.assertIn('[document supprimé : rapport.pdf]', json.loads(self.alice.call(path)[1]['messages'][-1]['content'])['question'])
 
     def test_05g_images_are_transcribed_only_when_summarized(self):
         _, image = upload(self.alice, png(24, 24), 'tableau.png')

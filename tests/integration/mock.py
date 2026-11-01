@@ -22,6 +22,16 @@ class Mock(BaseHTTPRequestHandler):
             # Non-streaming calls: conversation title (formatted like a model would) or summary.
             system = body['messages'][0]['content'] if body['messages'][0]['role'] == 'system' else ''
             content = f'**Titre : Sujet {last}.**' if 'titre' in system else 'Résumé simulé.'
+            if 'SANS recopier' in last:
+                # Document page laid out: the first segment is a title, the others one paragraph.
+                assert body.get('response_format') == {'type': 'json_object'} and len(images) == 1
+                count = last.count('\n[')
+                content = json.dumps({'blocs': [{'type': 'titre', 'niveau': 1, 'lignes': [1]},
+                                                {'type': 'paragraphe', 'lignes': list(range(2, count + 1))}]})
+            elif 'Transcris fidèlement tout le texte de cette page' in last:
+                # Scanned page read on its image (a JPEG rendered by doc-guard).
+                assert images[0].startswith('data:image/jpeg;base64,/9j/')
+                content = 'Courrier lu sur l’image : rendez-vous le treize[?] mai.'
             payload = json.dumps({'choices': [{'message': {'role': 'assistant', 'content': content}}]}, ensure_ascii=False).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')

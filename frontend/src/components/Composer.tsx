@@ -2,6 +2,7 @@ import {useEffect, useLayoutEffect, useRef, useState} from 'react';
 import type {Effort, Notice, PendingImage, Settings, ContextUsage} from '../types';
 import {Icon} from './Icon';
 import {ContextMeter} from './ContextMeter';
+import {DOCUMENT_TYPES} from '../lib/images';
 
 const effortLabels = {none:'désactivée', low:'légère', medium:'intermédiaire', xhigh:'approfondie'};
 
@@ -17,8 +18,8 @@ export function Composer({prompt, onPrompt, pending, onAddImages, onRemovePendin
   const [dragging, setDragging] = useState(false);
   const files = useRef<HTMLInputElement>(null);
   const addMenu = useRef<HTMLDivElement>(null);
-  const images = (list: FileList | null | undefined) => Array.from(list || []).filter(file => file.type.startsWith('image/'));
-  const uploading = pending.some(item => item.status === 'uploading');
+  const images = (list: FileList | null | undefined) => Array.from(list || []);
+  const uploading = pending.some(item => item.status === 'uploading' || item.status === 'reading');
   const ready = pending.length > 0 && pending.every(item => item.status === 'ready');
   const canSend = !busy && !disabled && !uploading && (Boolean(prompt.trim()) || ready);
   useEffect(() => {
@@ -61,8 +62,14 @@ export function Composer({prompt, onPrompt, pending, onAddImages, onRemovePendin
       <input id="temperature" type="range" min="0" max="2" step="0.1" value={settings.temperature} onChange={event => onSettings({...settings, temperature:Number(event.target.value)})}/>
       <div className="temperature-scale"><span>Précis</span><span>Varié</span></div><p>Appliqué aux prochains messages.</p>
     </section>
-    {pending.length > 0 && <ul className="pending-images" aria-label="Images jointes au message">
-      {pending.map(item => <li key={item.key} className={`pending-image is-${item.status}`} title={item.error || item.name}>
+    {pending.length > 0 && <ul className="pending-images" aria-label="Fichiers joints au message">
+      {pending.map(item => item.document ? <li key={item.key} className={`pending-image pending-document is-${item.status}`} title={item.error || item.name}>
+        <Icon name="document"/>
+        <span className="pending-document-text"><span className="pending-document-name">{item.name}</span>
+          <span className="pending-document-state" role={item.status === 'error' ? 'alert' : 'status'}>{item.status === 'uploading' ? 'Envoi…'
+            : item.status === 'reading' ? `Lecture… ${item.progress}` : item.status === 'error' ? item.error : item.progress || 'Prêt'}</span></span>
+        <button type="button" className="pending-remove" aria-label={`Retirer ${item.name}`} onClick={() => onRemovePending(item.key)}><Icon name="close"/></button>
+      </li> : <li key={item.key} className={`pending-image is-${item.status}`} title={item.error || item.name}>
         <img src={item.preview} alt={item.name}/>
         {item.status === 'uploading' && <span className="pending-state" role="status" aria-label={`Envoi de ${item.name}`}/>}
         {item.status === 'error' && <span className="pending-error" role="alert">{item.error}</span>}
@@ -71,12 +78,12 @@ export function Composer({prompt, onPrompt, pending, onAddImages, onRemovePendin
     </ul>}
     <form id="chat-form" className="composer" onSubmit={event => {event.preventDefault(); if (canSend) onSend(prompt);}}>
       <div className="attach" ref={addMenu}>
-        <button id="attach-toggle" type="button" className="attach-toggle icon-button" aria-label="Ajouter des images" title="Ajouter des images" aria-haspopup="menu" aria-expanded={adding} disabled={disabled} onClick={() => setAdding(value => !value)}><Icon name="plus"/></button>
+        <button id="attach-toggle" type="button" className="attach-toggle icon-button" aria-label="Ajouter des images ou des documents" title="Ajouter des images ou des documents" aria-haspopup="menu" aria-expanded={adding} disabled={disabled} onClick={() => setAdding(value => !value)}><Icon name="plus"/></button>
         {adding && <div className="attach-menu" role="menu">
-          <button type="button" role="menuitem" onClick={() => {setAdding(false); files.current?.click();}}><Icon name="image"/>Images de l’ordinateur</button>
+          <button type="button" role="menuitem" onClick={() => {setAdding(false); files.current?.click();}}><Icon name="image"/>Images et documents de l’ordinateur</button>
           <button type="button" role="menuitem" onClick={() => {setAdding(false); onOpenLibrary();}}><Icon name="link"/>Depuis la bibliothèque</button>
         </div>}
-        <input ref={files} id="attach-files" type="file" accept="image/*" multiple hidden onChange={event => {const list = images(event.target.files); event.target.value = ''; if (list.length) onAddImages(list);}}/>
+        <input ref={files} id="attach-files" type="file" accept={`image/*,${DOCUMENT_TYPES}`} multiple hidden onChange={event => {const list = images(event.target.files); event.target.value = ''; if (list.length) onAddImages(list);}}/>
       </div>
       <label className="sr-only" htmlFor="prompt">Votre message</label>
       <textarea id="prompt" ref={area} rows={1} placeholder="Demander à L’Observatoire" maxLength={100000} value={prompt} onChange={event => onPrompt(event.target.value)}

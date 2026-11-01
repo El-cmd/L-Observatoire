@@ -36,20 +36,24 @@ services:
       BOOTSTRAP_USERNAME: ${BOOTSTRAP_USERNAME:-}
       BOOTSTRAP_PASSWORD: ${BOOTSTRAP_PASSWORD:-}
       IMAGE_GUARD_URL: http://image-guard:8080
+      DOC_GUARD_URL: http://doc-guard:8080
       RUST_LOG: observatoire=info,tower_http=info
     depends_on:
       db:
         condition: service_healthy
       image-guard:
         condition: service_started
-    networks: [web, database, guard]
+      doc-guard:
+        condition: service_started
+    networks: [web, database, guard, docs]
     restart: unless-stopped
     init: true
     read_only: true
     tmpfs: ["/tmp:size=16m,mode=1777"]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    # Holds the images of the requests being generated (40 MB at most each).
+    # Holds the images of the requests being generated (40 MB at most each) and the documents
+    # being read (20 MB at most, two at a time).
     mem_limit: 1g
     stop_grace_period: 25s
     logging: *logs
@@ -66,6 +70,22 @@ services:
     mem_limit: 768m
     cpus: 1.0
     pids_limit: 64
+    logging: *logs
+  # Only service that opens documents sent by users (PDF, Word, text): no outbound network, no
+  # data, no secrets; each document is read by a process of its own, capped in memory and time.
+  doc-guard:
+    build: ./doc-guard
+    image: observatoire-doc-guard:local
+    networks: [docs]
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs: ["/tmp:size=128m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1536m
+    cpus: 1.0
+    pids_limit: 128
     logging: *logs
   db:
     image: postgres:17-alpine
@@ -97,4 +117,6 @@ networks:
   database:
     internal: true
   guard:
+    internal: true
+  docs:
     internal: true

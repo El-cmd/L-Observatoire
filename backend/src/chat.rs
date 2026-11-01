@@ -78,7 +78,7 @@ fn validate_messages(messages: &[Message]) -> Result<(), Error> {
             || (m.content.trim().is_empty() && m.attachments.is_empty() && (m.role == "user" || m.reasoning.is_empty()))
             || (m.role != "user" && !m.attachments.is_empty())
             || m.attachments.len() > attachments::MAX_PER_MESSAGE
-            || m.attachments.iter().any(|a| a.name.chars().count() > 120 || a.width == 0 || a.height == 0 || a.width > 4096 || a.height > 4096)
+            || m.attachments.iter().any(|a| !a.is_valid())
         {
             return Err(Error::bad(
                 "Un message est vide, trop long ou son rôle est invalide.",
@@ -266,10 +266,10 @@ pub async fn update(
     validate_messages(&input.messages)?;
     let previous=sqlx::query_as::<_,Conversation>("SELECT id,title,messages,version,updated_at,context_summary,compacted_through,compaction_count FROM conversations WHERE id=$1 AND user_id=$2")
         .bind(id).bind(user.user_id).fetch_optional(&app.db).await?.ok_or_else(Error::missing)?;
-    // New references must point to the user's own library; kept ones may be deleted images.
+    // New references must point to the user's own library; kept ones may be deleted files.
     let known: std::collections::HashSet<Uuid> = previous.messages.0.iter().flat_map(|m| m.attachments.iter().map(|a| a.id)).collect();
-    let mut added: Vec<Uuid> = input.messages.iter().flat_map(|m| m.attachments.iter().map(|a| a.id)).filter(|id| !known.contains(id)).collect();
-    added.sort(); added.dedup();
+    let mut added: Vec<&AttachmentRef> = input.messages.iter().flat_map(|m| m.attachments.iter()).filter(|a| !known.contains(&a.id)).collect();
+    added.sort_by_key(|a| a.id); added.dedup_by_key(|a| a.id);
     attachments::check_owned(&app, user.user_id, &added).await?;
     let through=previous.compacted_through as usize;
     let keep_memory=input.messages.len()>=through && previous.messages.0.get(..through)==input.messages.get(..through);
@@ -318,7 +318,7 @@ pub async fn import(
     for chat in &input.chats {
         validate_messages(&chat.messages)?;
         if chat.messages.iter().any(|m| !m.attachments.is_empty()) {
-            return Err(Error::bad("L’import ne prend pas les images."));
+            return Err(Error::bad("L’import ne prend pas les images ni les documents."));
         }
     }
     let mut tx = app.db.begin().await?;

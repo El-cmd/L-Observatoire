@@ -10,6 +10,7 @@ flowchart LR
     Front -->|/api — réseau Docker| API[API Rust / Axum]
     API --> DB[(PostgreSQL 17)]
     API -->|réseau interne, sans Internet| Guard[image-guard]
+    API -->|réseau interne, sans Internet| Docs[doc-guard]
     API --> Qwen[Votre API Qwen]
 ```
 
@@ -19,6 +20,7 @@ flowchart LR
 | `backend` | Rust, Axum, SQLx : authentification, conversations, streaming Qwen | Aucun port publié |
 | `db` | PostgreSQL, sur un réseau Docker interne | Aucun port publié |
 | `image-guard` | Seul service qui décode les images envoyées : vérifie et réencode, sans réseau sortant ni données | Aucun port publié |
+| `doc-guard` | Seul service qui ouvre les documents envoyés (PDF, Word, texte) : extrait le texte et rend les pages en image, sans réseau sortant ni données | Aucun port publié |
 
 Les images frontend et backend sont distinctes. Le frontend est compilé dans une étape Node 24 ; le conteneur final contient uniquement Nginx et les fichiers statiques, sans serveur Node. Les polices et bibliothèques du navigateur sont embarquées : aucun CDN n’est requis. Le frontend et l’API utilisent la même origine via Nginx.
 
@@ -99,6 +101,17 @@ Le bouton **+** de la saisie ajoute des images depuis l’ordinateur ou depuis l
 - Côté serveur, l’API ne décode jamais un fichier reçu : elle le transmet à **image-guard**, conteneur sans réseau sortant (réseau Docker `guard` interne), sans base, secrets ni volume, en lecture seule, non root, sans capacités, limité en mémoire, CPU et processus. Il vérifie le format réel (PNG, JPEG, WebP, GIF, décodeurs en Rust pur), refuse les bombes de décompression, réencode depuis les pixels et renvoie l’image propre et sa miniature. Une image qui bloquerait le décodeur fait redémarrer le conteneur.
 - Seule la copie nettoyée est stockée (PostgreSQL), affichée et envoyée à Qwen. Elle appartient à la **bibliothèque** du compte (500 Mo) : la même image n’est stockée qu’une fois, elle survit à la suppression d’une conversation, et sa suppression la remplace par « Image supprimée » dans les messages.
 - Qwen lit les images lui-même (modèle multimodal). Elles restent envoyées telles quelles tant que la conversation tient dans le contexte : une image coûte un token par carré de 32 px (environ 1 900 pour 1 600 × 1 200). Quand le contexte est plein, Qwen transcrit une fois les images des messages résumés ; la transcription sert au résumé.
+
+## Documents
+
+Le même bouton **+** ajoute des documents : PDF (60 pages au plus), Word `.docx` et fichiers texte (texte, Markdown, CSV, JSON, code), 20 Mo au plus. Excel, PowerPoint et les anciens formats sont refusés avec un message (« enregistre-le en PDF »).
+
+- L’API n’ouvre jamais un document : **doc-guard** (Python, réseau Docker `docs` interne, sans base, secrets ni volume, lecture seule, non root, limité en mémoire, CPU et processus) ouvre chaque document dans un processus à part, plafonné en mémoire et en temps. Il utilise le lecteur PDF de Docling **sans ses modèles** (pas de PyTorch), pdfium pour rendre les pages, MarkItDown pour Word.
+- Un PDF est lu **une seule fois**, au dépôt, page par page, 4 pages à la fois, avec Qwen :
+  - une page dont le texte est fiable est **annotée** : Qwen voit son image et ses morceaux de texte numérotés et ne renvoie que la structure (titres, paragraphes, listes, tableaux) ; le Markdown est assemblé avec le texte du PDF, donc aucun mot ni chiffre ne peut être modifié. Si la structure est incohérente, la page garde son texte brut ;
+  - une page **scannée** est lue sur son image à 2 400 px : page sans texte, texte invisible ajouté par un scanner sous une image pleine page, ou texte illisible (police mal encodée). Qwen marque d’un `[?]` les lectures incertaines, notamment l’écriture à la main.
+- Le Markdown est gardé dans la bibliothèque et envoyé à Qwen avec les questions, une fois par conversation. Un document de plus de 39 300 tokens (30 % du contexte) est refusé. Le texte lu est visible en cliquant sur le document ; le fichier d’origine reste téléchargeable.
+- Une lecture interrompue par un redémarrage de l’API est marquée en échec : il suffit de renvoyer le document.
 
 ## Migration de l’ancienne version
 

@@ -7,10 +7,11 @@ import {Composer} from './components/Composer';
 import {PasswordDialog} from './components/PasswordDialog';
 import {Icon} from './components/Icon';
 import {ImageViewer} from './components/ImageViewer';
+import {DocumentViewer} from './components/DocumentViewer';
 import {LibraryView} from './components/LibraryView';
 import {NewsView} from './components/NewsView';
 import {hasUnreadNews, markNewsRead} from './lib/news';
-import {MAX_IMAGES} from './lib/images';
+import {MAX_IMAGES, isDocument} from './lib/images';
 import type {AttachmentRef} from './types';
 
 export default function App() {
@@ -69,6 +70,7 @@ export default function App() {
       </div>
     </div>
     <PasswordDialog open={passwordOpen} onClose={() => setPasswordOpen(false)} onChange={chat.changePassword}/>
-    <ImageViewer image={viewer} onClose={() => setViewer(null)}/>
+    <ImageViewer image={viewer && !isDocument(viewer) ? viewer : null} onClose={() => setViewer(null)}/>
+    <DocumentViewer file={viewer && isDocument(viewer) ? viewer : null} load={chat.documentText} onClose={() => setViewer(null)} onError={chat.notify}/>
   </>;
 }

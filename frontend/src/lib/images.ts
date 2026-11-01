@@ -1,6 +1,8 @@
+import type {AttachmentRef, LibraryItem} from '../types';
 /** Long side sent to the server: enough to read text, about 1 900 Qwen tokens at most. */
 const MAX_SIDE = 1600;
 const MAX_PNG = 2.5 * 1024 * 1024;
+/** Images and documents together. */
 export const MAX_IMAGES = 5;
 
 /**
@@ -36,4 +38,28 @@ export const thumbnailURL = (id: string) => `/api/attachments/${id}/thumbnail`;
 export function formatBytes(value: number): string {
   if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024)).toLocaleString('fr-FR')} Ko`;
   return `${(value / 1024 / 1024).toLocaleString('fr-FR', {maximumFractionDigits: 1})} Mo`;
+}
+
+/** Documents read by the server; images are any image/* file. */
+export const DOCUMENT_TYPES = '.pdf,.docx,.txt,.md,.markdown,.csv,.tsv,.json,.xml,.yaml,.yml,.toml,.ini,.log,.srt,.tex,.html,.py,.js,.ts,.tsx,.jsx,.rs,.go,.java,.c,.h,.cpp,.cs,.php,.rb,.sh,.sql,.css,.scss';
+export const isImage = (file: File) => file.type.startsWith('image/');
+export const isDocument = (ref: AttachmentRef) => ref.kind === 'document';
+
+export function toRef(item: LibraryItem): AttachmentRef {
+  return item.kind === 'document' ? {id:item.id, name:item.name, width:0, height:0, kind:'document', pages:item.pages, tokens:item.tokens}
+    : {id:item.id, name:item.name, width:item.width, height:item.height};
+}
+
+/** « 12 pages », or the kind of file for Word and text files. */
+export function documentSize(ref: AttachmentRef): string {
+  if (ref.pages) return `${ref.pages} page${ref.pages > 1 ? 's' : ''}`;
+  return /\.docx$/i.test(ref.name) ? 'Word' : 'Texte';
+}
+
+/** What the reading of a document found, in plain words. */
+export function readingSummary(item: LibraryItem): string {
+  const parts = [documentSize(toRef(item))];
+  if (item.scanned) parts.push(`${item.scanned} lue${item.scanned > 1 ? 's' : ''} sur l’image`);
+  if (item.doubts) parts.push(`${item.doubts} passage${item.doubts > 1 ? 's' : ''} incertain${item.doubts > 1 ? 's' : ''}`);
+  return parts.join(' · ');
 }

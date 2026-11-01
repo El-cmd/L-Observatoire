@@ -2,6 +2,7 @@ mod attachments;
 mod auth;
 mod chat;
 mod context;
+mod documents;
 
 use anyhow::{Context, Result};
 use axum::{
@@ -24,6 +25,8 @@ pub struct App {
     pub http: reqwest::Client,
     pub config: Arc<Config>,
     pub generations: Arc<Semaphore>,
+    /// Documents whose pages are laid out by Qwen at the same time.
+    pub documents: Arc<Semaphore>,
     pub password_work: Arc<Semaphore>,
     pub dummy_hash: Arc<String>,
     pub shutdown: tokio::sync::watch::Receiver<bool>,
@@ -36,6 +39,8 @@ pub struct Config {
     pub model: String,
     /// Isolated service that re-encodes images sent by users.
     pub image_guard: String,
+    /// Isolated service that opens documents sent by users.
+    pub doc_guard: String,
     pub origin: String,
     pub secure_cookie: bool,
 }
@@ -150,6 +155,8 @@ async fn main() -> Result<()> {
     auth::bootstrap(&db).await?;
     // This deployment runs one API instance. Recover leases left by an API restart.
     sqlx::query("UPDATE conversations SET active_generation=NULL,generation_started_at=NULL WHERE active_generation IS NOT NULL").execute(&db).await?;
+    // Documents being read when the API stopped: the reading is lost, they can be sent again.
+    sqlx::query("UPDATE attachments SET status='failed',error='La lecture a été interrompue par une mise à jour du site. Renvoie le document.' WHERE status='reading'").execute(&db).await?;
     let origin = env::var("PUBLIC_ORIGIN")
         .unwrap_or_else(|_| "http://localhost:8080".into())
         .trim_end_matches('/')
@@ -173,6 +180,10 @@ async fn main() -> Result<()> {
         model: env::var("QWEN_MODEL").unwrap_or_else(|_| "qwen3.8-27b-abliterated".into()),
         image_guard: env::var("IMAGE_GUARD_URL")
             .unwrap_or_else(|_| "http://image-guard:8080".into())
+            .trim_end_matches('/')
+            .to_string(),
+        doc_guard: env::var("DOC_GUARD_URL")
+            .unwrap_or_else(|_| "http://doc-guard:8080".into())
             .trim_end_matches('/')
             .to_string(),
         secure_cookie: parsed.scheme() == "https",
@@ -199,6 +210,7 @@ async fn main() -> Result<()> {
             .build()?,
         config: Arc::new(config),
         generations: Arc::new(Semaphore::new(6)),
+        documents: Arc::new(Semaphore::new(2)),
         password_work: Arc::new(Semaphore::new(4)),
         dummy_hash: Arc::new(auth::hash_password("dummy-not-a-real-user-password".into()).await?),
     };
@@ -234,9 +246,11 @@ async fn main() -> Result<()> {
         )
         .route("/api/conversations/{id}/generate", post(chat::generate))
         .route("/api/conversations/{id}/title", put(chat::rename).layer(DefaultBodyLimit::max(8192)))
-        .route("/api/attachments", get(attachments::list).post(attachments::upload).layer(DefaultBodyLimit::max(attachments::MAX_UPLOAD)))
+        .route("/api/attachments", get(attachments::list).post(attachments::upload).layer(DefaultBodyLimit::max(documents::MAX_UPLOAD)))
         .route("/api/attachments/{id}", get(attachments::file).delete(attachments::delete))
         .route("/api/attachments/{id}/thumbnail", get(attachments::thumbnail))
+        .route("/api/attachments/{id}/status", get(attachments::status))
+        .route("/api/attachments/{id}/text", get(attachments::text))
         .route("/api/attachments/{id}/conversations", get(attachments::conversations))
         .route("/api/conversations/{id}/context", get(context::usage))
         .route("/api/conversations/{id}/compact", post(context::compact))
