@@ -57,10 +57,10 @@ try {
   await page.locator('#library-link').click();await page.locator('#library').waitFor({state:'visible'});
   await page.locator('#brand').click();await page.locator('#welcome').waitFor({state:'visible'});
   assert.equal(await page.locator('#library').count(),0);assert.equal(await page.locator('.message').count(),0);
-  // News: unread dot until opened, legend and entries in plain words, highlighted alone in the sidebar.
+  // News: unread dot until opened, entries in plain words, highlighted alone in the sidebar.
   await page.locator('#news-unread').waitFor({state:'visible'});
   await page.locator('#news-link').click();await page.locator('#news .news-item').first().waitFor({state:'visible'});
-  assert.equal(await page.locator('#news-unread').count(),0);assert.equal(await page.locator('#news .news-legend li').count(),3);
+  assert.equal(await page.locator('#news-unread').count(),0);
   assert.equal(await page.locator('.sidebar .active').count(),1);
   await page.reload();await page.locator('#chat-app').waitFor({state:'visible'});assert.equal(await page.locator('#news-unread').count(),0);
   await page.locator('#news-link').click();await page.locator('#brand').click();await page.locator('#welcome').waitFor({state:'visible'});

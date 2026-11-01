@@ -14,9 +14,6 @@ export function NewsView({onClose}: {onClose: () => void}) {
       <h2>Nouveautés</h2>
       <button type="button" className="icon-button" aria-label="Fermer les nouveautés" title="Fermer" onClick={onClose}><Icon name="close"/></button>
     </header>
-    <ul className="news-legend" aria-label="Signification des étiquettes">
-      {(Object.keys(NEWS_LEVELS) as NewsLevel[]).map(level => <li key={level}><Tag level={level}/>{NEWS_LEVELS[level].hint}</li>)}
-    </ul>
     <ol className="news-list">
       {NEWS.map(item => <li key={item.id} className="news-item">
         <div className="news-meta"><Tag level={item.level}/><time dateTime={item.date}>{day(item.date)}</time></div>
