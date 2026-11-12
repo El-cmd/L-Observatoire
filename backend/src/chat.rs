@@ -38,7 +38,7 @@ pub struct Message {
 /// Tool steps kept with one answer: enough for a very deep search (a few dozen events).
 pub const MAX_TOOL_EVENTS: usize = 300;
 pub const MAX_TOOL_BYTES: usize = 256 * 1024;
-const SEARCH_MODES: [&str; 3] = ["auto", "approfondie", "tres_approfondie"];
+const SEARCH_MODES: [&str; 4] = ["auto", "web", "approfondie", "tres_approfondie"];
 
 #[derive(Serialize, FromRow)]
 pub struct Conversation {
@@ -389,7 +389,7 @@ pub struct Generate {
     #[serde(default, rename = "continue")]
     resume: bool,
     /// Web search for this answer (accounts allowed only): "auto" (Qwen decides whether and how deep),
-    /// "approfondie" or "tres_approfondie" (search imposed at that depth).
+    /// "web", "approfondie" or "tres_approfondie" (search imposed at that depth).
     #[serde(default)]
     recherche: Option<String>,
 }
@@ -683,6 +683,10 @@ pub async fn generate(
                         } else if let Some(event) = event.as_object() {
                             let mut event = event.clone();
                             event.insert("outil".into(), json!(tool));
+                            // A report part is shown while the others are written; the final text holds it.
+                            if event.get("type").and_then(Value::as_str) == Some("section") {
+                                event.remove("texte");
+                            }
                             let event = Value::Object(event);
                             let size = event.to_string().len();
                             if output.outils.len() < MAX_TOOL_EVENTS && tool_size + size <= MAX_TOOL_BYTES {
@@ -837,7 +841,7 @@ mod tests {
             assert!(generate(Some(mode), false).validate().is_ok());
         }
         assert!(generate(None, false).validate().is_ok());
-        assert!(generate(Some("web"), false).validate().is_err());
+        assert!(generate(Some("extreme"), false).validate().is_err());
         assert!(generate(Some("auto"), true).validate().is_err(), "a resumed answer never searches");
     }
     #[test]

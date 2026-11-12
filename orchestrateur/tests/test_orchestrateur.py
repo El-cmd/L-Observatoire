@@ -61,8 +61,9 @@ class FauxRegistre(Registre):
     async def disponibles(self):
         return {'recherche_web': DEFINITION} if self.ok else {}
 
-    async def appeler(self, nom, arguments, progression):
+    async def appeler(self, nom, arguments, progression, meta=None):
         self.appels.append((nom, arguments))
+        self.meta = meta
         for message in self.progression:
             await progression(message)
         if self.erreur:
@@ -70,12 +71,12 @@ class FauxRegistre(Registre):
         return self.sortie
 
 
-def lancer(reponses, registre, demandes=None, messages=None):
+def lancer(reponses, registre, demandes=None, messages=None, effort='none'):
     async def tout():
         recus = []
         async with httpx.AsyncClient(transport=faux_qwen(reponses, recus)) as http:
             corps = {'model': 'qwen', 'messages': messages or [{'role': 'user', 'content': 'Dernière version de Rust ?'}],
-                     'stream': True, 'max_tokens': 4000, 'reasoning_effort': 'none', 'temperature': 0.7}
+                     'stream': True, 'max_tokens': 4000, 'reasoning_effort': effort, 'temperature': 0.7}
             octets = b''.join([b async for b in boucle.flux(corps, demandes or {'recherche_web': 'auto'}, http, 'http://qwen/v1', 'cle', registre)])
         lignes = [l[6:] for l in octets.decode().split('\n\n') if l.startswith('data: ')]
         return [json.loads(l) for l in lignes if l != '[DONE]'], lignes[-1], recus
@@ -125,6 +126,12 @@ class Boucle(unittest.TestCase):
         self.assertEqual(contenus, ['La 1.99 [1].\n\n**Sources**'], 'texte vérifié à la fin')
         self.assertEqual(evenements[-1]['usage'], {'prompt_tokens': 640, 'completion_tokens': 5})
         self.assertFalse(any('tool_calls' in json.dumps(e) for e in evenements), 'appels d’outils jamais transmis')
+
+    def test_reglage_de_reflexion_transmis_a_l_outil(self):
+        for effort, attendu in (('none', False), ('medium', True)):
+            registre = FauxRegistre(sortie={'reponse': 'Rapport.'})
+            lancer([appel_qwen(('recherche_web', {'question': 'q', 'profondeur': 'web'}))], registre, effort=effort)
+            self.assertEqual(registre.meta, {'observatoire': {'reflexion': attendu}})
 
     def test_texte_ecrit_avant_l_appel_garde(self):
         registre = FauxRegistre(sortie={'reponse': 'Rapport.'})

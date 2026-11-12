@@ -7,6 +7,7 @@ import {DOCUMENT_TYPES} from '../lib/images';
 const effortLabels = {none:'désactivée', low:'légère', medium:'intermédiaire', xhigh:'approfondie'};
 const WEB_MODES: {mode: WebMode; label: string; hint: string}[] = [
   {mode:'auto', label:'Automatique', hint:'L’Observatoire décide s’il faut chercher, et jusqu’où'},
+  {mode:'web', label:'Rapide', hint:'Une recherche, quelques pages, environ 30 secondes'},
   {mode:'approfondie', label:'Approfondie', hint:'Plusieurs sources croisées, environ une minute'},
   {mode:'tres_approfondie', label:'Très approfondie', hint:'Un dossier complet, quelques minutes'},
 ];

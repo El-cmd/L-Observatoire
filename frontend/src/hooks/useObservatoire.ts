@@ -12,7 +12,7 @@ function readSettings(userId: string, legacy: Legacy | null): Settings {
   let saved: Partial<Settings> | null = null;
   try { saved = JSON.parse(localStorage.getItem(`observatoire-settings:${userId}`) || 'null') as Partial<Settings> | null; } catch {}
   saved ||= legacy?.settings || {};
-  const modes: WebMode[] = ['auto', 'approfondie', 'tres_approfondie'];
+  const modes: WebMode[] = ['auto', 'web', 'approfondie', 'tres_approfondie'];
   return {
     effort: ['none', 'low', 'medium', 'xhigh'].includes(saved.effort || '') ? saved.effort! : 'none',
     temperature: typeof saved.temperature === 'number' && Number.isFinite(saved.temperature) && saved.temperature >= 0 && saved.temperature <= 2 ? saved.temperature : 0.7,

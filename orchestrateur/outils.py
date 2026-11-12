@@ -99,8 +99,9 @@ class Registre:
     def serveur_de(self, nom: str) -> Serveur | None:
         return next((s for s in self.serveurs if nom in s.outils), None)
 
-    async def appeler(self, nom: str, arguments: dict, progression: Callable[[str], Awaitable[None]]) -> dict:
-        """Appelle l'outil ; rend son résultat JSON (objet). Chaque message de progression est passé à `progression`."""
+    async def appeler(self, nom: str, arguments: dict, progression: Callable[[str], Awaitable[None]], meta: dict | None = None) -> dict:
+        """Appelle l'outil ; rend son résultat JSON (objet). Chaque message de progression est passé à `progression`.
+        `meta` : réglages de l'utilisateur pour l'outil (métadonnées MCP de l'appel, hors des arguments écrits par Qwen)."""
         serveur = self.serveur_de(nom)
         if serveur is None:
             raise OutilErreur(f'outil inconnu : {nom}')
@@ -113,7 +114,7 @@ class Registre:
                                       sse_read_timeout=DELAI_APPEL) as (lire, ecrire, _):
                 async with ClientSession(lire, ecrire) as session:
                     await session.initialize()
-                    r = await session.call_tool(nom, arguments, progress_callback=recue)
+                    r = await session.call_tool(nom, arguments, progress_callback=recue, meta=meta)
         except asyncio.CancelledError:
             # Réponse abandonnée (l'utilisateur a arrêté) : le serveur est prévenu, en arrière-plan.
             if serveur.annuler:

@@ -75,6 +75,7 @@ class Contexte:
     base: dict                        # paramètres de la requête du backend, sans « messages »
     outils: list[dict]                # définitions proposées à Qwen
     choix: Any                        # tool_choice du premier tour (« auto » ou un outil imposé)
+    reflexion: bool = False           # réglage de réflexion de l'utilisateur, transmis aux outils
     exclus: set = field(default_factory=set)
     usage: dict = field(default_factory=dict)   # prompt_tokens du premier appel, completion_tokens cumulés
 
@@ -177,7 +178,8 @@ async def outils(etat: Etat, runtime: Runtime[Contexte]) -> dict:
             if not isinstance(arguments, dict):
                 raise OutilErreur('arguments illisibles')
             ecrire({'observatoire': {nom: {'type': 'appel', 'arguments': arguments}}})
-            tache = asyncio.ensure_future(ctx.registre.appeler(nom, arguments, progression))
+            tache = asyncio.ensure_future(ctx.registre.appeler(nom, arguments, progression,
+                                                               meta={'observatoire': {'reflexion': ctx.reflexion}}))
             try:
                 while True:
                     attente = asyncio.ensure_future(file.get())
@@ -283,7 +285,7 @@ async def flux(corps: dict, demandes: dict, http: httpx.AsyncClient, qwen_url: s
         messages = avec_consigne(messages, consigne_outils(forcer))
     ctx = Contexte(http=http, qwen_url=qwen_url, qwen_cle=qwen_cle, registre=registre,
                    base={k: v for k, v in corps.items() if k not in ('messages', 'stream', 'stream_options', 'tools', 'tool_choice')},
-                   outils=outils_, choix=choix)
+                   outils=outils_, choix=choix, reflexion=corps.get('reasoning_effort') not in (None, 'none'))
     fin = 'stop'
     try:
         async for genre, valeur in GRAPHE.astream({'messages': messages}, context=ctx, stream_mode=['custom', 'values'],

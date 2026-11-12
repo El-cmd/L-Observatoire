@@ -1,7 +1,7 @@
 export type Effort = 'none' | 'low' | 'medium' | 'xhigh';
 export type Activity = 'generating' | 'compacting';
 /** Web search depth chosen in the menu of the Web button: auto lets L'Observatoire decide whether and how deep. */
-export type WebMode = 'auto' | 'approfondie' | 'tres_approfondie';
+export type WebMode = 'auto' | 'web' | 'approfondie' | 'tres_approfondie';
 export interface Settings { effort: Effort; temperature: number; web: boolean; webMode: WebMode }
 /** recherche_web: the account may use the web search (Web button). */
 export interface User { id: string; username: string; is_admin: boolean; recherche_web?: boolean }

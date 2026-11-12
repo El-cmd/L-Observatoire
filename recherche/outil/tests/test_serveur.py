@@ -26,6 +26,8 @@ class Compacter(unittest.TestCase):
                                  'relances': [{'id': 'Q1', 'requetes': ['x'], 'question': 'Q'}]})
         self.assertEqual((sup['couverture'], sup['relances']), ([{'id': 'Q1', 'statut': 'partielle'}], ['Q1']))
         self.assertEqual(serveur.compacter({'type': 'compression', 'id': 'Q2', 'notes': [1, 2]}), {'type': 'compression', 'id': 'Q2', 'notes': 2})
+        self.assertEqual(serveur.compacter({'type': 'section', 'id': 'Q1', 'texte': '### Partie', 'jetons': {}}),
+                         {'type': 'section', 'id': 'Q1', 'texte': '### Partie'})
 
     def test_resultat(self):
         res = {'reponse': 'R [1].', 'limites': ['l'], 'sources': [{'numero': 1, 'url': 'u', 'titre': 't', 'favorisee': True}],
@@ -38,7 +40,7 @@ class Compacter(unittest.TestCase):
 
 
 class AppelMcp(unittest.TestCase):
-    def appeler(self, executer, arguments=None):
+    def appeler(self, executer, arguments=None, meta=None):
         async def tout():
             recus = []
 
@@ -51,7 +53,7 @@ class AppelMcp(unittest.TestCase):
                     outils = await client.list_tools()
                     r = await client.call_tool('recherche_web', arguments or {'question': ' Dernière  version de Rust ? ',
                                                                               'profondeur': 'web'},
-                                               progress_callback=progression)
+                                               progress_callback=progression, meta=meta)
             return outils, r, recus
         return asyncio.run(tout())
 
@@ -59,7 +61,7 @@ class AppelMcp(unittest.TestCase):
         vu = {}
 
         async def executer(mode, ctx, question, emettre):
-            vu.update(mode=mode, question=question, clarifier=ctx.clarifier, filtre=ctx.filtre)
+            vu.update(mode=mode, question=question, clarifier=ctx.clarifier, filtre=ctx.filtre, reflexion=ctx.reflexion)
             await emettre({'type': 'planification', 'requetes': ['rust latest version'], 'raison': 'x', 'jetons': {}})
             await emettre({'type': 'reflexion'})
             await emettre({'type': 'texte', 'delta': 'La 1.99 [1].'})
@@ -70,11 +72,20 @@ class AppelMcp(unittest.TestCase):
         self.assertEqual(outil.name, 'recherche_web')
         self.assertEqual(outil.inputSchema['properties']['profondeur']['enum'], ['web', 'approfondie', 'tres_approfondie'])
         self.assertIn('question complète et autonome', outil.inputSchema['properties']['question']['description'])
-        self.assertEqual(vu, {'mode': 'web', 'question': 'Dernière version de Rust ?', 'clarifier': False, 'filtre': True})
+        self.assertEqual(vu, {'mode': 'web', 'question': 'Dernière version de Rust ?', 'clarifier': False, 'filtre': True, 'reflexion': False})
         self.assertEqual(recus, [{'type': 'planification', 'requetes': ['rust latest version']}, {'type': 'texte', 'delta': 'La 1.99 [1].'}])
         self.assertFalse(r.isError)
         sortie = json.loads(r.content[0].text)
         self.assertEqual((sortie['mode'], sortie['sources'][0]['url'], sortie['appels']), ('web', 'https://r.org', 2))
+
+    def test_reflexion_transmise_par_l_orchestrateur(self):
+        vu = {}
+
+        async def executer(mode, ctx, question, emettre):
+            vu['reflexion'] = ctx.reflexion
+            return {'reponse': 'R.', 'statistiques': {}}
+        self.appeler(executer, meta={'observatoire': {'reflexion': True}})
+        self.assertTrue(vu['reflexion'])
 
     def test_profondeur_inconnue_refusee(self):
         async def executer(*_):

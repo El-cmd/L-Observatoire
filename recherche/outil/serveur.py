@@ -79,7 +79,7 @@ _GARDER = {
     'chercheur': ('id', 'question', 'tour', 'requetes', 'passages'),
     'supervision': ('tour', 'decision', 'raison'),
     'compression': ('id',),
-    'section': ('id',),
+    'section': ('id', 'texte'),   # texte : affiché dans la réponse pendant que les autres parties s'écrivent
     'redaction_debut': (),
     'redaction': (),
     'erreur': ('message',),
@@ -120,6 +120,17 @@ def resultat_outil(res: dict, profondeur: str) -> dict:
     return sortie
 
 
+def reflexion_demandee(ctx: Context) -> bool:
+    """Réflexion de Qwen pendant la recherche : réglage de l'utilisateur, transmis par l'orchestrateur dans les
+    métadonnées de l'appel (_meta.observatoire.reflexion), jamais par Qwen."""
+    try:
+        meta = ctx.request_context.meta
+    except (AttributeError, LookupError, ValueError):
+        return False
+    extra = getattr(meta, 'model_extra', None) or {}
+    return (extra.get('observatoire') or {}).get('reflexion') is True
+
+
 @serveur.tool(name='recherche_web', description=DESCRIPTION)
 async def recherche_web(question: Annotated[str, Field(description=QUESTION)],
                         profondeur: Annotated[Literal['web', 'approfondie', 'tres_approfondie'], Field(description=PROFONDEUR)],
@@ -134,7 +145,7 @@ async def recherche_web(question: Annotated[str, Field(description=QUESTION)],
     async with place:
         qwen, web = clients()
         rctx = graphe.RechercheContext(qwen_url=QWEN_URL, qwen_cle=QWEN_CLE, modele=QWEN_MODELE, http=qwen, web=web,
-                                       reflexion=False, filtre=True, clarifier=False,
+                                       reflexion=reflexion_demandee(ctx), filtre=True, clarifier=False,
                                        compteurs=graphe.Compteurs(debut=asyncio.get_running_loop().time()))
         numero = 0
 

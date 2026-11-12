@@ -78,6 +78,21 @@ export function ToolTrace({events, streaming}: {events: ToolEvent[]; streaming: 
   </details>;
 }
 
+/** Text shown while a very deep search writes its report: the parts already written, in the order of the plan,
+ *  under the summary being written (the content streamed so far). Once the search is over, the content itself. */
+export function provisionalReport(content: string, events: ToolEvent[] | undefined, streaming: boolean): string {
+  const web = (events || []).filter(event => event.outil === 'recherche_web');
+  if (!streaming || web.some(event => event.type === 'fin' || event.type === 'echec')) return content;
+  const parts = web.filter(event => event.type === 'section' && typeof event.texte === 'string');
+  if (!parts.length) return content;
+  const plan = web.find(event => event.type === 'cahier');
+  const order = Array.isArray(plan?.sous_questions) ? (plan.sous_questions as {id: string}[]).map(q => q.id) : [];
+  const rank = (id: unknown) => {const index = order.indexOf(String(id)); return index < 0 ? order.length : index;};
+  const sorted = [...parts].sort((a, b) => rank(a.id) - rank(b.id));
+  return `## Synthèse\n\n${content.trim() || '*La synthèse sera écrite quand toutes les parties seront prêtes…*'}\n\n`
+    + sorted.map(part => String(part.texte)).join('\n\n');
+}
+
 /** Sources of the search (number -> page), for the clickable citations [n] of the answer. */
 export function citationSources(events?: ToolEvent[]): Map<number, {url: string; titre: string}> {
   const sources = new Map<number, {url: string; titre: string}>();

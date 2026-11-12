@@ -20,6 +20,7 @@ async def recherche_web(question: str, profondeur: str, ctx: Context) -> dict:
     await ctx.report_progress(1, None, json.dumps({'type': 'planification', 'requetes': [question]}))
     await ctx.report_progress(2, None, json.dumps({'type': 'recherche', 'iteration': 1, 'requetes': [question], 'passages': 3,
                                                    'pages': [{'url': 'https://exemple.fr', 'titre': 'Exemple', 'etat': 'lue', 'source': 1}]}))
+    await ctx.report_progress(3, None, json.dumps({'type': 'section', 'id': 'Q1', 'texte': '### Partie écrite\n\nTexte [1].'}))
     for morceau in ('Rapport ', 'en cours [1][7].'):
         await ctx.report_progress(3, None, json.dumps({'type': 'texte', 'delta': morceau}))
     return {'mode': profondeur, 'reponse': f'Rapport vérifié sur « {question} » ({profondeur}) [1].\n\n**Sources**\n\n- [1] [Exemple](<https://exemple.fr>)',

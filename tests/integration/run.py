@@ -447,13 +447,18 @@ class Integration(unittest.TestCase):
             saved = self.alice.call(path)[1]; last = saved['messages'][-1]
             self.assertEqual(last['content'], 'Rapport vérifié sur « cherche la dernière version de Rust » (web) [1].\n\n**Sources**\n\n- [1] [Exemple](<https://exemple.fr>)')
             self.assertFalse(last.get('interrupted'))
-            self.assertEqual([e['type'] for e in last['outils']], ['appel', 'planification', 'recherche', 'sources', 'fin'])
+            self.assertEqual([e['type'] for e in last['outils']], ['appel', 'planification', 'recherche', 'section', 'sources', 'fin'])
+            self.assertIn('Partie écrite', raw, 'report part streamed while the others are written')
+            self.assertNotIn('texte', last['outils'][3], 'not kept twice: the final text holds it')
             self.assertTrue(all(e['outil'] == 'recherche_web' for e in last['outils']))
             self.assertEqual(last['outils'][2]['pages'][0]['url'], 'https://exemple.fr')
             # Depth chosen in the menu: the tool is imposed at that depth.
             chat = self.alice.create('Rust ou Go ?'); path = '/api/conversations/'+chat['id']
             with self.alice.call(path+'/generate', 'POST', {'version': chat['version'], 'recherche': 'tres_approfondie'}, stream=True) as response: response.read()
             self.assertIn('(tres_approfondie)', self.alice.call(path)[1]['messages'][-1]['content'])
+            chat = self.alice.create('Rust ou Go ?'); path = '/api/conversations/'+chat['id']
+            with self.alice.call(path+'/generate', 'POST', {'version': chat['version'], 'recherche': 'web'}, stream=True) as response: response.read()
+            self.assertIn('(web)', self.alice.call(path)[1]['messages'][-1]['content'])
             # Without the button: an ordinary answer, no tool offered to Qwen.
             chat = self.alice.create('bonjour'); path = '/api/conversations/'+chat['id']
             with self.alice.call(path+'/generate', 'POST', {'version': chat['version']}, stream=True) as response: response.read()

@@ -4,7 +4,7 @@ import {documentSize, isDocument, thumbnailURL} from '../lib/images';
 import {CopyButton} from './CopyButton';
 const Markdown = lazy(() => import('./Markdown').then(module => ({default:module.Markdown})));
 import {Icon} from './Icon';
-import {ToolTrace, citationSources} from './ToolTrace';
+import {ToolTrace, citationSources, provisionalReport} from './ToolTrace';
 
 function MessageDocument({file, removed, onOpen, onAsk}: {file: AttachmentRef; removed: boolean; onOpen: (file: AttachmentRef) => void; onAsk: (file: AttachmentRef) => void}) {
   if (removed) return <span className="message-image is-missing" title={file.name}>Document supprimé</span>;
@@ -36,11 +36,13 @@ const MessageItem = memo(function MessageItem({message, streaming, last, removed
 }) {
   const user = message.role === 'user';
   const sources = useMemo(() => citationSources(message.outils), [message.outils]);
+  // Very deep search: its parts appear as soon as they are written, under the summary being written.
+  const shown = useMemo(() => provisionalReport(message.content, message.outils, streaming), [message.content, message.outils, streaming]);
   return <article className={`message ${message.role}${streaming ? ' streaming' : ''}`}>
     {!user && <div className="assistant-heading">L’Observatoire</div>}
     {!user && message.outils?.length ? <ToolTrace events={message.outils} streaming={streaming}/> : null}
     {user && message.attachments?.length ? <div className="message-images">{message.attachments.map(image => <MessageImage key={image.id} image={image} removed={removedImages.has(image.id)} onOpen={onOpenImage} onAsk={onAskImage}/>)}</div> : null}
-    {(!user || message.content) && <div className="message-content">{user ? message.content : message.content ? <Suspense fallback={<span className="typing">Affichage de la réponse…</span>}><Markdown content={message.content} onError={onError} sources={sources}/></Suspense> : <span className="typing">{streaming ? message.outils?.length ? 'Recherche sur Internet…' : 'L’Observatoire prépare sa réponse…' : 'Aucune réponse finale reçue.'}</span>}</div>}
+    {(!user || message.content) && <div className="message-content">{user ? message.content : shown ? <Suspense fallback={<span className="typing">Affichage de la réponse…</span>}><Markdown content={shown} onError={onError} sources={sources}/></Suspense> : <span className="typing">{streaming ? message.outils?.length ? 'Recherche sur Internet…' : 'L’Observatoire prépare sa réponse…' : 'Aucune réponse finale reçue.'}</span>}</div>}
     {!streaming && <div className="message-footer">
       <CopyButton text={message.content} label={user ? 'Copier la question' : 'Copier la réponse'} onError={onError}/>
       {!user && last && message.truncated && <button className="message-action continue-response" type="button" title="La réponse a atteint la longueur maximale" onClick={onContinue}>Continuer la réponse</button>}
