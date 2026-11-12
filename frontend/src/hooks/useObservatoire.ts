@@ -2,7 +2,7 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import {APIClient, APIError, errorMessage} from '../lib/api';
 import {consumeCompletion} from '../lib/stream';
 import {MAX_IMAGES, documentSize, isDocument, isImage, prepareImage, thumbnailURL, toRef} from '../lib/images';
-import type {Activity, AttachmentRef, Auth, Conversation, ConversationSummary, Legacy, Library, LibraryItem, Message, Notice, PendingImage, Settings, ContextUsage} from '../types';
+import type {Activity, AttachmentRef, Auth, Conversation, ConversationSummary, Legacy, Library, LibraryItem, Message, Notice, PendingImage, Settings, ContextUsage, WebMode} from '../types';
 
 function readLegacy(): Legacy | null {
   try { return JSON.parse(localStorage.getItem('observatoir-chat-v1') || localStorage.getItem('qwen-chat-v1') || 'null') as Legacy | null; }
@@ -12,9 +12,12 @@ function readSettings(userId: string, legacy: Legacy | null): Settings {
   let saved: Partial<Settings> | null = null;
   try { saved = JSON.parse(localStorage.getItem(`observatoire-settings:${userId}`) || 'null') as Partial<Settings> | null; } catch {}
   saved ||= legacy?.settings || {};
+  const modes: WebMode[] = ['auto', 'approfondie', 'tres_approfondie'];
   return {
     effort: ['none', 'low', 'medium', 'xhigh'].includes(saved.effort || '') ? saved.effort! : 'none',
     temperature: typeof saved.temperature === 'number' && Number.isFinite(saved.temperature) && saved.temperature >= 0 && saved.temperature <= 2 ? saved.temperature : 0.7,
+    web: saved.web === true,
+    webMode: modes.includes(saved.webMode as WebMode) ? saved.webMode! : 'auto',
   };
 }
 const normalize = (chat: Conversation): Conversation => ({...chat, message_count: chat.messages.length});
@@ -51,7 +54,7 @@ export function useObservatoire() {
   const [library, setLibrary] = useState<Library | null>(null);
   // The browser keeps images shown in the page in memory: deleted ones are hidden from here.
   const [removedImages, setRemovedImages] = useState<ReadonlySet<string>>(() => new Set());
-  const [settings, setSettings] = useState<Settings>({effort:'none', temperature:0.7});
+  const [settings, setSettings] = useState<Settings>({effort:'none', temperature:0.7, web:false, webMode:'auto'});
   const [canImport, setCanImport] = useState(false);
   const [importing, setImporting] = useState(false);
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
@@ -249,15 +252,18 @@ export function useObservatoire() {
       const start: Message = resume ? {...savedChat.messages[savedChat.messages.length - 1], truncated:false} : {role:'assistant', content:'', reasoning:''};
       assistant = start;
       replaceChat({...savedChat, messages:[...history, assistant]});
+      // The Web button (accounts allowed only): the search depth chosen in its menu. Never when continuing an answer.
+      const recherche = settings.web && authRef.current?.user.recherche_web && !resume ? {recherche:settings.webMode} : {};
       const response = await client.response(`/api/conversations/${id}/generate`, {method:'POST', signal:controller.signal,
-        body:{version:baseVersion, reasoning_effort:settings.effort, temperature:settings.temperature, ...(resume ? {continue:true} : {})}});
+        body:{version:baseVersion, reasoning_effort:settings.effort, temperature:settings.temperature, ...(resume ? {continue:true} : {}), ...recherche}});
       // The title Qwen chose is applied once; a rename made meanwhile in the sidebar is kept.
       let named: string | undefined;
       const result = await consumeCompletion(response, value => {
         if (epoch.current !== account) return;
         let title = chatsRef.current.find(chat => chat.id === id)?.title ?? savedChat.title;
         if (value.title && value.title !== named) {named = value.title; title = value.title;}
-        assistant = {...start, content:start.content + value.content, reasoning:(start.reasoning || '') + value.reasoning};
+        assistant = {...start, content:start.content + value.content, reasoning:(start.reasoning || '') + value.reasoning,
+          ...(value.outils.length ? {outils:value.outils} : {})};
         replaceChat({...savedChat, title, messages:[...history, assistant]});
       });
       complete = true;

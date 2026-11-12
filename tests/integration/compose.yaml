@@ -7,6 +7,7 @@ services:
       PUBLIC_ORIGIN: http://localhost:${TEST_PORT}
       QWEN_BASE_URL: http://mock:8080/v1
       QWEN_API_KEY: integration-test-key
+      ORCHESTRATEUR_TOKEN: integration-orchestrator-token
       BOOTSTRAP_USERNAME: ""
       BOOTSTRAP_PASSWORD: ""
       RUST_LOG: observatoire=warn,tower_http=warn
@@ -19,6 +20,31 @@ services:
     user: "10001:10001"
     volumes:
       - ./tests/integration/mock.py:/mock.py:ro
-    networks: [web]
+    networks: [web, qwen]
+    read_only: true
+    cap_drop: [ALL]
+  orchestrateur:
+    environment:
+      QWEN_BASE_URL: http://mock:8080/v1
+      QWEN_API_KEY: integration-test-key
+      ORCHESTRATEUR_TOKEN: integration-orchestrator-token
+      RECHERCHE_TOKEN: integration-tool-token
+      OUTILS: /essai/outils.toml
+    volumes:
+      - ./tests/integration/outils.toml:/essai/outils.toml:ro
+    depends_on:
+      mock:
+        condition: service_started
+      outil-factice:
+        condition: service_started
+  # Fake MCP search tool (the orchestrator image already has the MCP library).
+  outil-factice:
+    image: observatoire-orchestrateur:local
+    command: [python, /outil.py]
+    environment:
+      RECHERCHE_TOKEN: integration-tool-token
+    volumes:
+      - ./tests/integration/outil.py:/outil.py:ro
+    networks: [outils]
     read_only: true
     cap_drop: [ALL]

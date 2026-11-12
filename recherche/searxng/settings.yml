@@ -1,0 +1,60 @@
+# SearXNG de la recherche web de L'Observatoire : instance privée (réseau interne, aucun port publié), appelée seulement
+# par le service de recherche (recherche/service). Sortie par le proxy « sortie ». Réglages par défaut, sauf ce qui suit.
+use_default_settings:
+  engines:
+    keep_only:
+      - duckduckgo
+      - brave
+      - mojeek
+      - bing
+      - wikipedia
+
+# Testé le 12/11/2026, chaque moteur seul, depuis l'adresse de sortie du labo :
+# - duckduckgo, mojeek : répondent et sont pertinents (mojeek surtout en anglais) ; brave : pertinent mais limite
+#   souvent le rythme (« too many requests »).
+# - bing : SearXNG le livre désactivé (disabled) ; il répond bien en français sur une requête courte, mais sur une
+#   requête longue ou technique il ne retient souvent que le premier mot : moteur de secours (service/multi.py).
+# - mojeek : SearXNG ne le charge pas par défaut (inactive).
+# - qwant (« access denied ») et startpage (CAPTCHA) refusent cette adresse : retirés.
+# - Moteurs dev (stackoverflow, github, mdn, pypi, crates.io, npm, docker hub, arch linux wiki, mankier, pkg.go.dev) :
+#   ce sont des recherches par mots-clés dans un catalogue ; sur une vraie question (« docker rootless memory limit »,
+#   « fetch abort timeout javascript »), ils rendent des pages hors sujet (MDN sur Docker, dépôts GitHub au hasard) ;
+#   stackoverflow ne cherche que dans les titres, pypi est derrière un défi JavaScript, arch linux wiki ne cherche
+#   que les pages « (Français) » avec la langue fr-FR. Non retenus.
+engines:
+  - name: bing
+    disabled: false
+  - name: mojeek
+    inactive: false
+    disabled: false
+
+general:
+  instance_name: "Recherche de L’Observatoire"
+  debug: false
+  enable_metrics: false
+
+search:
+  safe_search: 1
+  autocomplete: ""
+  default_lang: "fr-FR"
+  formats:
+    - json
+
+server:
+  # secret_key : variable SEARXNG_SECRET (fichier .env)
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  method: "GET"
+
+outgoing:
+  request_timeout: 4.0
+  max_request_timeout: 8.0
+  pool_connections: 20
+  pool_maxsize: 10
+  proxies:
+    all://:
+      - http://10.231.30.3:3128
+
+ui:
+  static_use_hash: true

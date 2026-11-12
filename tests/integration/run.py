@@ -431,6 +431,60 @@ class Integration(unittest.TestCase):
         self.assertTrue(saved['messages'][-1]['interrupted'])
         self.assertEqual(self.alice.call(path,'PUT',{'version':saved['version'],'messages':[{'role':'user','content':'After restart'}]})[0],200)
 
+    def test_13_web_search_is_reserved_and_runs_through_the_orchestrator(self):
+        self.assertFalse(self.alice.call('/api/auth/me')[1]['user']['recherche_web'])
+        chat = self.alice.create('cherche la dernière version de Rust'); path = '/api/conversations/'+chat['id']
+        code, result, _ = self.alice.call(path+'/generate', 'POST', {'version': chat['version'], 'recherche': 'auto'})
+        self.assertEqual(code, 403, result)
+        self.assertEqual(self.alice.call(path+'/generate', 'POST', {'version': chat['version'], 'recherche': 'extreme'})[0], 400)
+        sql("UPDATE users SET recherche_web=true WHERE username='alice'", admin=True)
+        try:
+            self.assertTrue(self.alice.call('/api/auth/me')[1]['user']['recherche_web'])
+            with self.alice.call(path+'/generate', 'POST', {'version': chat['version'], 'recherche': 'auto'}, stream=True) as response:
+                self.assertEqual(response.status, 200); raw = response.read().decode()
+            self.assertIn('"Rapport "', raw); self.assertIn('en cours [1][7].', raw)  # text written by the tool, streamed
+            self.assertIn('"contenu"', raw); self.assertIn('data: [DONE]', raw)
+            saved = self.alice.call(path)[1]; last = saved['messages'][-1]
+            self.assertEqual(last['content'], 'Rapport vérifié sur « cherche la dernière version de Rust » (web) [1].\n\n**Sources**\n\n- [1] [Exemple](<https://exemple.fr>)')
+            self.assertFalse(last.get('interrupted'))
+            self.assertEqual([e['type'] for e in last['outils']], ['appel', 'planification', 'recherche', 'sources', 'fin'])
+            self.assertTrue(all(e['outil'] == 'recherche_web' for e in last['outils']))
+            self.assertEqual(last['outils'][2]['pages'][0]['url'], 'https://exemple.fr')
+            # Depth chosen in the menu: the tool is imposed at that depth.
+            chat = self.alice.create('Rust ou Go ?'); path = '/api/conversations/'+chat['id']
+            with self.alice.call(path+'/generate', 'POST', {'version': chat['version'], 'recherche': 'tres_approfondie'}, stream=True) as response: response.read()
+            self.assertIn('(tres_approfondie)', self.alice.call(path)[1]['messages'][-1]['content'])
+            # Without the button: an ordinary answer, no tool offered to Qwen.
+            chat = self.alice.create('bonjour'); path = '/api/conversations/'+chat['id']
+            with self.alice.call(path+'/generate', 'POST', {'version': chat['version']}, stream=True) as response: response.read()
+            last = self.alice.call(path)[1]['messages'][-1]
+            self.assertEqual(json.loads(last['content'])['outils'], []); self.assertNotIn('outils', last)
+            # The steps belong to the answer: a client cannot put them on a question.
+            code, _, _ = self.alice.call(path, 'PUT', {'version': self.alice.call(path)[1]['version'],
+                                                       'messages': [{'role': 'user', 'content': 'x', 'outils': [{'type': 'fin'}]}]})
+            self.assertEqual(code, 400)
+        finally:
+            sql("UPDATE users SET recherche_web=false WHERE username='alice'", admin=True)
+
+    def test_14_without_orchestrator_qwen_answers_directly(self):
+        compose('stop', 'orchestrateur', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        sql("UPDATE users SET recherche_web=true WHERE username='alice'", admin=True)
+        try:
+            chat = self.alice.create('question directe'); path = '/api/conversations/'+chat['id']
+            with self.alice.call(path+'/generate', 'POST', {'version': chat['version']}, stream=True) as response:
+                self.assertEqual(response.status, 200); response.read()
+            self.assertEqual(json.loads(self.alice.call(path)[1]['messages'][-1]['content'])['question'], 'question directe')
+            chat = self.alice.create('cherche quelque chose'); path = '/api/conversations/'+chat['id']
+            with self.alice.call(path+'/generate', 'POST', {'version': chat['version'], 'recherche': 'auto'}, stream=True) as response:
+                self.assertEqual(response.status, 200); raw = response.read().decode()
+            self.assertIn('indisponible', raw)
+            last = self.alice.call(path)[1]['messages'][-1]
+            self.assertEqual(last['outils'][0]['type'], 'indisponible')
+            self.assertEqual(json.loads(last['content'])['outils'], [], 'answered by Qwen directly, without tools')
+        finally:
+            sql("UPDATE users SET recherche_web=false WHERE username='alice'", admin=True)
+            compose('start', 'orchestrateur', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
 
 if __name__=='__main__':
     success=False

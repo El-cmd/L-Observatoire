@@ -1,7 +1,10 @@
 /** What changed for users, newest first. Each user-visible feature or fix adds an entry here
  * (see CLAUDE.md): plain words, no technical terms. */
+import type {User} from '../types';
+
 export type NewsLevel = 'major' | 'improvement' | 'fix';
-export type NewsItem = {id: string; date: string; level: NewsLevel; title: string; text: string};
+/** reserve: shown only to accounts that have this right (a feature not open to everyone yet). */
+export type NewsItem = {id: string; date: string; level: NewsLevel; title: string; text: string; reserve?: 'recherche_web'};
 
 export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
   major: {label: 'Nouveauté', hint: 'Une nouvelle possibilité'},
@@ -10,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-12-recherche-web', date: '2026-11-12', level: 'major', title: 'Chercher sur Internet', reserve: 'recherche_web',
+    text: 'Le bouton Web, à gauche du champ de saisie, permet à L’Observatoire de chercher sur Internet avant de répondre : il lit les pages, puis répond en citant ses sources, [1], [2]… sur lesquelles vous pouvez cliquer. La petite flèche à côté choisit comment chercher : Automatique (L’Observatoire décide s’il faut chercher, et jusqu’où), Approfondie (plusieurs sources croisées, environ une minute) ou Très approfondie (un dossier complet sur une question large ou une comparaison, quelques minutes). Le déroulé de la recherche se déplie au-dessus de la réponse.'},
   {id: '2026-11-01-documents', date: '2026-11-01', level: 'major', title: 'Envoyez des documents',
     text: 'Le bouton + accepte maintenant les PDF, les documents Word (.docx) et les fichiers texte (notes, CSV, code…), en plus des images. L’Observatoire lit chaque document une fois, page par page, y compris les pages scannées et l’écriture à la main ; la lecture d’un long PDF peut prendre une minute. Le texte lu est visible en cliquant sur le document : « [?] » signale un passage incertain, à vérifier sur l’original. Excel et PowerPoint arriveront plus tard : enregistrez-les en PDF en attendant.'},
   {id: '2026-11-01-nouveautes', date: '2026-11-01', level: 'improvement', title: 'Cette page Nouveautés',
@@ -40,11 +45,18 @@ export const NEWS: NewsItem[] = [
 
 const seenKey = (user: string) => `observatoire:news-seen:${user}`;
 
-/** The newest entry already read on this browser; storage may be unavailable. */
-export function hasUnreadNews(user: string): boolean {
-  try { return !!NEWS.length && localStorage.getItem(seenKey(user)) !== NEWS[0].id; } catch { return false; }
+/** The entries this account sees: reserved ones only with the matching right. */
+export function newsFor(user: User): NewsItem[] {
+  return NEWS.filter(item => !item.reserve || user[item.reserve] === true);
 }
 
-export function markNewsRead(user: string) {
-  try { if (NEWS.length) localStorage.setItem(seenKey(user), NEWS[0].id); } catch { /* not remembered */ }
+/** The newest entry already read on this browser; storage may be unavailable. */
+export function hasUnreadNews(user: User): boolean {
+  const news = newsFor(user);
+  try { return !!news.length && localStorage.getItem(seenKey(user.id)) !== news[0].id; } catch { return false; }
+}
+
+export function markNewsRead(user: User) {
+  const news = newsFor(user);
+  try { if (news.length) localStorage.setItem(seenKey(user.id), news[0].id); } catch { /* not remembered */ }
 }

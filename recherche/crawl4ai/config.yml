@@ -1,0 +1,104 @@
+# Crawl4AI 0.9.5 de la recherche web de L'Observatoire : configuration de l'image, resserrée (différences marquées « labo »,
+# reprises du labo recherche). Appelé seulement par recherche/service (jeton CRAWL4AI_API_TOKEN), réseau interne, sans port.
+# Sortie : proxy de Crawl4AI (résolution et épinglage de l'adresse) puis proxy « sortie » (CRAWL4AI_UPSTREAM_PROXY).
+# Hooks, JavaScript fourni par l'appelant et exploration profonde : désactivés (variables d'environnement du compose).
+app:
+  title: "Crawl4AI API"
+  version: "1.0.0"
+  host: "127.0.0.1"
+  port: 11235
+  reload: False
+  workers: 1
+  timeout_keep_alive: 300
+
+llm:
+  provider: "openai/gpt-4o-mini"   # labo : aucune clé fournie, aucune fonction LLM utilisée
+
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
+  password: ""
+  task_ttl_seconds: 600            # labo : 10 min (1 h dans l'image)
+  ssl: False
+  ssl_cert_reqs: None
+  ssl_ca_certs: None
+  ssl_certfile: None
+  ssl_keyfile: None
+
+limits:
+  max_body_bytes: 8388608          # labo : 8 Mio (10 Mio dans l'image) ; le HTML lu est renvoyé en « raw: » pour le nettoyer
+  max_pages: 1                     # labo : pas d'exploration
+  max_depth: 0
+  wall_clock_s: 90                 # labo : 90 s (300 s dans l'image)
+  queue:
+    maxsize: 20
+    workers: 2
+    per_principal: 0
+
+rate_limiting:
+  enabled: True
+  default_limit: "600/minute"      # labo : 600 (1000 dans l'image) ; seul le service de recherche appelle Crawl4AI, 2 pages
+                                   # à la fois ; une recherche multi-sources fait ~20 appels (lecture + 2 retraitements par page)
+  trusted_proxies: []
+  storage_uri: "memory://"
+
+security:
+  enabled: true
+  jwt_enabled: false
+  api_token: ""
+  https_redirect: false
+  trusted_hosts: ["*"]
+  cors_allow_origins: []
+  headers:
+    x_content_type_options: "nosniff"
+    x_frame_options: "DENY"
+    content_security_policy: "default-src 'self'"
+    strict_transport_security: "max-age=63072000; includeSubDomains"
+
+crawler:
+  base_config:
+    simulate_user: true
+  memory_threshold_percent: 95.0
+  rate_limiter:
+    enabled: true
+    base_delay: [1.0, 2.0]
+  timeouts:
+    stream_init: 30.0
+    batch_process: 90.0            # labo : 90 s (300 s dans l'image)
+  pool:
+    max_pages: 4                   # labo : 4 pages ouvertes au plus (40 dans l'image)
+    idle_ttl_sec: 300
+    max_pages_before_recycle: 50   # labo : 50 (200 dans l'image)
+  browser:
+    kwargs:
+      headless: true
+      text_mode: true
+    extra_args:
+      - "--no-sandbox"
+      - "--disable-dev-shm-usage"
+      - "--disable-gpu"
+      - "--disable-software-rasterizer"
+
+logging:
+  level: "WARNING"                 # labo : WARNING (INFO dans l'image, qui journalise les adresses lues)
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+observability:
+  prometheus:
+    enabled: False                 # labo : pas de métriques
+    endpoint: "/metrics"
+  health_check:
+    endpoint: "/health"
+
+webhooks:
+  enabled: false                   # labo : aucun webhook (sortie vers une adresse fournie par l'appelant)
+  default_url: null
+  data_in_payload: false
+  retry:
+    max_attempts: 1
+    initial_delay_ms: 1000
+    max_delay_ms: 1000
+    timeout_ms: 10000
+  headers:
+    User-Agent: "Crawl4AI-Webhook/1.0"

@@ -1,0 +1,5 @@
+# Serveurs d'outils de l'orchestrateur pendant les tests d'intégration : le faux outil de recherche (outil.py).
+[[serveurs]]
+nom = "recherche"
+url = "http://outil-factice:8080/mcp"
+jeton = "RECHERCHE_TOKEN"

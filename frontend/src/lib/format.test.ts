@@ -1,5 +1,21 @@
 import {describe, expect, it} from 'vitest';
-import {formatProse, highlightCode} from './format';
+import {formatProse, highlightCode, linkCitations} from './format';
+
+describe('citations of a web search answer', () => {
+  const sources = new Map([[1, {url: 'https://doc.rust-lang.org/a?b=1&c=2', titre: 'Rust "doc"'}], [2, {url: 'javascript:alert(1)', titre: 'x'}]]);
+  it('links known sources only, never in code, links or glued to a word', () => {
+    const html = linkCitations(formatProse('Voir [1][3] et [2]. Code `x[1]`, tableau[1], [Lien](https://a.fr) [1]'), sources);
+    expect(html.match(/class="citation"/g)?.length).toBe(2);
+    expect(html).toContain('href="https://doc.rust-lang.org/a?b=1&amp;c=2"');
+    expect(html).toContain('title="Rust &quot;doc&quot;"');
+    expect(html).toContain('[3]'); expect(html).not.toContain('javascript:');
+    expect(html).toContain('<code>x[1]</code>'); expect(html).toContain('tableau[1]');
+  });
+  it('changes nothing without sources', () => {
+    const html = formatProse('Voir [1].');
+    expect(linkCitations(html, new Map())).toBe(html);
+  });
+});
 
 describe('safe message formatting', () => {
   it('renders the four LaTeX delimiters without applying Markdown to the formula', () => {

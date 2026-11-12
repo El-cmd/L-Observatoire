@@ -1,0 +1,10 @@
+# Mêmes versions que le labo recherche (et CeliA) pour LangGraph ; MCP 1.30 (dernière version 1, interface éprouvée).
+mcp==1.30.0
+uvicorn==0.54.0
+httpx==0.28.1
+pydantic==2.14.1
+langgraph==1.2.14
+langchain-core==1.6.7
+langgraph-checkpoint==4.2.0
+langgraph-prebuilt==1.1.0
+langgraph-sdk==0.4.6

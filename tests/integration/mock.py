@@ -15,6 +15,23 @@ class Mock(BaseHTTPRequestHandler):
             # Mixed message: text parts and images (data URLs sent by the API).
             images = [part['image_url']['url'] for part in last if part.get('type') == 'image_url']
             last = '\n'.join(part['text'] for part in last if part.get('type') == 'text')
+        if body.get('tools') and body.get('stream') and not any(m['role'] == 'tool' for m in body['messages']) \
+                and ('cherche' in last or isinstance(body.get('tool_choice'), dict)):
+            # Qwen calls the search tool: the question, and the depth imposed by the menu when there is one.
+            outil = body['tools'][0]['function']
+            profondeur = outil['parameters']['properties']['profondeur'].get('enum', ['web'])
+            arguments = json.dumps({'question': last, 'profondeur': profondeur[0] if len(profondeur) == 1 else 'web'}, ensure_ascii=False)
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            for chunk in ({'choices': [{'index': 0, 'delta': {'tool_calls': [{'index': 0, 'id': 'appel-1', 'type': 'function', 'function': {'name': outil['name'], 'arguments': ''}}]}}]},
+                          {'choices': [{'index': 0, 'delta': {'tool_calls': [{'index': 0, 'function': {'arguments': arguments}}]}}]},
+                          {'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'tool_calls'}]},
+                          {'choices': [], 'usage': {'prompt_tokens': 1234, 'completion_tokens': 9}}):
+                self.wfile.write(('data: ' + json.dumps(chunk, ensure_ascii=False) + '\n\n').encode()); self.wfile.flush()
+            self.wfile.write(b'data: [DONE]\n\n'); self.wfile.flush()
+            return
         if last == 'upstream-error':
             self.send_error(503, 'Private upstream detail: integration-test-key')
             return
@@ -43,7 +60,8 @@ class Mock(BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'text/event-stream')
         self.send_header('Connection', 'close')
         self.end_headers()
-        text = json.dumps({'reply': 'Bonjour, été !', 'temperature': body['temperature'],
+        text = json.dumps({'reply': 'Bonjour, été !', 'outils': [t['function']['name'] for t in body.get('tools') or []],
+                           'temperature': body['temperature'],
                            'effort': body['reasoning_effort'], 'question': last, 'max_tokens': body['max_tokens'],
                            'images': [url[:40] for url in images]}, ensure_ascii=False)
         if body.get('continue_final_message'):

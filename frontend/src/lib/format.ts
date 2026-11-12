@@ -44,3 +44,17 @@ export function formatProse(text: string): string {
   fragments.forEach((fragment, index) => { html = html.split(prefix + index + 'END').join(fragment); });
   return html;
 }
+
+const attribute = (text: string) => text.replace(/[&<>"']/g, char => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[char]!));
+
+/** Citations [n] of a web search answer become links to their source (only http and https pages). Tags, links and
+ *  inline code are left alone, and so is a bracket glued to a word (tableau[0]). */
+export function linkCitations(html: string, sources: ReadonlyMap<number, {url: string; titre: string}>): string {
+  if (!sources.size) return html;
+  return html.split(/(<code[\s\S]*?<\/code>|<a\s[\s\S]*?<\/a>|<[^>]+>)/).map((part, index) => index % 2 ? part
+    : part.replace(/(?<!\w)\[(\d{1,3})\]/g, (match, number: string) => {
+      const source = sources.get(Number(number));
+      if (!source || !/^https?:\/\//i.test(source.url)) return match;
+      return `<a class="citation" href="${attribute(source.url)}" target="_blank" rel="noopener noreferrer nofollow" title="${attribute(source.titre)}">[${number}]</a>`;
+    })).join('');
+}

@@ -29,7 +29,16 @@ pub struct Message {
     /// Images of the user's library shown with a question.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<AttachmentRef>,
+    /// Steps of the tools used for an answer (web search…), as sent by the orchestrator, each with its "outil".
+    /// Shown under the answer; never sent back to Qwen (the answer text carries its sources).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outils: Vec<Value>,
 }
+
+/// Tool steps kept with one answer: enough for a very deep search (a few dozen events).
+pub const MAX_TOOL_EVENTS: usize = 300;
+pub const MAX_TOOL_BYTES: usize = 256 * 1024;
+const SEARCH_MODES: [&str; 3] = ["auto", "approfondie", "tres_approfondie"];
 
 #[derive(Serialize, FromRow)]
 pub struct Conversation {
@@ -79,12 +88,16 @@ fn validate_messages(messages: &[Message]) -> Result<(), Error> {
             || (m.role != "user" && !m.attachments.is_empty())
             || m.attachments.len() > attachments::MAX_PER_MESSAGE
             || m.attachments.iter().any(|a| !a.is_valid())
+            || (m.role != "assistant" && !m.outils.is_empty())
+            || m.outils.len() > MAX_TOOL_EVENTS
+            || m.outils.iter().any(|e| !e.is_object())
+            || tool_bytes(&m.outils) > MAX_TOOL_BYTES
         {
             return Err(Error::bad(
                 "Un message est vide, trop long ou son rôle est invalide.",
             ));
         }
-        size += m.content.len() + m.reasoning.len();
+        size += m.content.len() + m.reasoning.len() + tool_bytes(&m.outils);
     }
     if size > context::MAX_HISTORY_BYTES {
         return Err(Error::bad(
@@ -92,6 +105,10 @@ fn validate_messages(messages: &[Message]) -> Result<(), Error> {
         ));
     }
     Ok(())
+}
+
+fn tool_bytes(events: &[Value]) -> usize {
+    events.iter().map(|e| e.to_string().len()).sum()
 }
 
 fn title(messages: &[Message]) -> String {
@@ -371,6 +388,10 @@ pub struct Generate {
     /// Resume the last assistant message where the length limit cut it.
     #[serde(default, rename = "continue")]
     resume: bool,
+    /// Web search for this answer (accounts allowed only): "auto" (Qwen decides whether and how deep),
+    /// "approfondie" or "tres_approfondie" (search imposed at that depth).
+    #[serde(default)]
+    recherche: Option<String>,
 }
 impl Generate {
     fn validate(&self) -> Result<(), Error> {
@@ -380,6 +401,8 @@ impl Generate {
         ) || !self.temperature.is_finite()
             || !(0.0..=2.0).contains(&self.temperature)
             || !(128..=context::MAX_OUTPUT as u32).contains(&self.max_tokens)
+            || self.recherche.as_deref().is_some_and(|mode| !SEARCH_MODES.contains(&mode))
+            || (self.resume && self.recherche.is_some())
         {
             return Err(Error::bad("Réglages de génération invalides."));
         }
@@ -392,6 +415,17 @@ async fn save_title(app: &App, id: Uuid, name: &str) -> bool {
     let done = sqlx::query("UPDATE conversations SET title=$2,title_source='generated' WHERE id=$1 AND title_source='question'")
         .bind(id).bind(name).execute(&app.db).await;
     matches!(done, Ok(ref result) if result.rows_affected() == 1)
+}
+
+/// Streaming chat completion, from Qwen or from the orchestrator (same API).
+async fn send_completion(app: &App, url: &str, key: &str, payload: &Value) -> Result<reqwest::Response, reqwest::Error> {
+    app.http
+        .post(format!("{url}/chat/completions"))
+        .bearer_auth(key)
+        .timeout(std::time::Duration::from_secs(30 * 60))
+        .json(payload)
+        .send()
+        .await
 }
 
 pub(crate) async fn release(app: &App, id: Uuid, generation: Uuid) {
@@ -411,6 +445,12 @@ pub async fn generate(
             StatusCode::SERVICE_UNAVAILABLE,
             "L’API Qwen n’est pas configurée.".into(),
         ));
+    }
+    if input.recherche.is_some() && !user.recherche_web {
+        return Err(Error(StatusCode::FORBIDDEN, "La recherche web n’est pas ouverte à ce compte.".into()));
+    }
+    if input.recherche.is_some() && app.config.orchestrator_url.is_empty() {
+        return Err(Error(StatusCode::SERVICE_UNAVAILABLE, "La recherche web n’est pas disponible sur ce serveur.".into()));
     }
     let permit = app.generations.clone().try_acquire_owned().map_err(|_| {
         Error(
@@ -475,14 +515,30 @@ pub async fn generate(
         payload["add_generation_prompt"] = json!(false);
         payload["reasoning_effort"] = json!("none");
     }
-    let response = app
-        .http
-        .post(format!("{}/chat/completions", app.config.api_url))
-        .bearer_auth(&app.config.api_key)
-        .timeout(std::time::Duration::from_secs(30 * 60))
-        .json(&payload)
-        .send()
-        .await;
+    if let Some(mode) = &input.recherche {
+        // Extension read by the orchestrator only (removed before Qwen): tools allowed for this answer.
+        payload["observatoire"] = json!({"outils":{"recherche_web":mode}});
+    }
+    // The orchestrator answers like Qwen (same stream); when it cannot be reached, Qwen is asked directly,
+    // without tools, and the user is told that the search was not available.
+    let mut notice: Option<Value> = None;
+    let response = if app.config.orchestrator_url.is_empty() {
+        send_completion(&app, &app.config.api_url, &app.config.api_key, &payload).await
+    } else {
+        match send_completion(&app, &app.config.orchestrator_url, &app.config.orchestrator_key, &payload).await {
+            Err(error) if error.is_connect() || error.is_timeout() => {
+                tracing::warn!("orchestrator unreachable, answering with Qwen directly");
+                if input.recherche.is_some() {
+                    notice = Some(json!({"outil":"recherche_web","type":"indisponible","message":"La recherche web est indisponible pour le moment : réponse sans elle."}));
+                }
+                if let Some(object) = payload.as_object_mut() {
+                    object.remove("observatoire");
+                }
+                send_completion(&app, &app.config.api_url, &app.config.api_key, &payload).await
+            }
+            other => other,
+        }
+    };
     let upstream = match response {
         Ok(response)
             if response.status().is_success()
@@ -531,8 +587,16 @@ pub async fn generate(
             interrupted: false,
             truncated: false,
             attachments: Vec::new(),
+            outils: Vec::new(),
         });
         output.truncated = false;
+        let mut tool_size = tool_bytes(&output.outils);
+        if let Some(notice) = notice {
+            let line = format!("data: {}\n\n", json!({"observatoire":{"recherche_web":notice}}));
+            tool_size += notice.to_string().len();
+            output.outils.push(notice);
+            let _ = sender.send(Ok(Bytes::from(line))).await;
+        }
         let mut prompt_tokens: Option<i32> = None;
         let mut done = false;
         let mut failed = false;
@@ -608,6 +672,26 @@ pub async fn generate(
                     failed = true;
                     break 'read;
                 }
+                // Orchestrator extension: tool steps (kept with the answer) and the checked final text of a tool,
+                // which replaces what was streamed while the tool was writing.
+                if let Some(extension) = value.get("observatoire").and_then(Value::as_object) {
+                    for (tool, event) in extension {
+                        if tool == "contenu" {
+                            if let Some(text) = event.as_str() {
+                                output.content = text.to_string();
+                            }
+                        } else if let Some(event) = event.as_object() {
+                            let mut event = event.clone();
+                            event.insert("outil".into(), json!(tool));
+                            let event = Value::Object(event);
+                            let size = event.to_string().len();
+                            if output.outils.len() < MAX_TOOL_EVENTS && tool_size + size <= MAX_TOOL_BYTES {
+                                tool_size += size;
+                                output.outils.push(event);
+                            }
+                        }
+                    }
+                }
                 // Sent in the last chunk thanks to stream_options.include_usage: Qwen's own count.
                 if let Some(tokens) = value
                     .pointer("/usage/prompt_tokens")
@@ -635,7 +719,7 @@ pub async fn generate(
                 }
                 if output.content.len() > context::MAX_MESSAGE_BYTES
                     || output.reasoning.len() > context::MAX_MESSAGE_BYTES
-                    || existing_bytes + output.content.len() + output.reasoning.len() > context::MAX_HISTORY_BYTES
+                    || existing_bytes + output.content.len() + output.reasoning.len() + tool_size > context::MAX_HISTORY_BYTES
                 {
                     failed = true;
                     break 'read;
@@ -667,6 +751,10 @@ pub async fn generate(
             context::MAX_MESSAGE_BYTES.min(budget.saturating_sub(output.content.len())),
         );
         if !output.content.is_empty() || !output.reasoning.is_empty() {
+            row.messages.0.push(output);
+        } else if !output.outils.is_empty() {
+            // Stopped during a search, before any text: the steps stay visible, marked as interrupted.
+            output.content = "(Recherche interrompue.)".into();
             row.messages.0.push(output);
         }
         // Without a usage chunk (interruption), the previous measurement is kept.
@@ -720,13 +808,37 @@ mod tests {
             interrupted: false,
             truncated: false,
             attachments: Vec::new(),
+            outils: Vec::new(),
         };
         assert!(validate_messages(&[m.clone()]).is_ok());
         m.role = "system".into();
         assert!(validate_messages(&[m.clone()]).is_err());
         m.role = "user".into();
+        m.outils = vec![json!({"outil":"recherche_web","type":"fin"})];
+        assert!(validate_messages(&[m.clone()]).is_err(), "tool steps belong to answers only");
+        m.role = "assistant".into();
+        assert!(validate_messages(&[m.clone()]).is_ok());
+        m.outils = vec![json!("pas un objet")];
+        assert!(validate_messages(&[m.clone()]).is_err());
+        m.outils = vec![json!({"texte":"x".repeat(MAX_TOOL_BYTES)})];
+        assert!(validate_messages(&[m.clone()]).is_err());
+        m.outils.clear();
+        m.role = "user".into();
         m.content.clear();
         assert!(validate_messages(&[m]).is_err());
+    }
+    #[test]
+    fn search_modes_are_checked() {
+        let generate = |recherche: Option<&str>, resume: bool| Generate {
+            version: 0, reasoning_effort: "none".into(), temperature: 0.7, max_tokens: 4096, resume,
+            recherche: recherche.map(str::to_string),
+        };
+        for mode in SEARCH_MODES {
+            assert!(generate(Some(mode), false).validate().is_ok());
+        }
+        assert!(generate(None, false).validate().is_ok());
+        assert!(generate(Some("web"), false).validate().is_err());
+        assert!(generate(Some("auto"), true).validate().is_err(), "a resumed answer never searches");
     }
     #[test]
     fn reasoning_levels_match_live_model() {
@@ -737,7 +849,8 @@ mod tests {
                     reasoning_effort: level.into(),
                     temperature: 0.7,
                     max_tokens: 4096,
-                    resume: false
+                    resume: false,
+                    recherche: None
                 }
                 .validate()
                 .is_ok()
@@ -749,7 +862,8 @@ mod tests {
                 reasoning_effort: "high".into(),
                 temperature: 0.7,
                 max_tokens: 4096,
-                resume: false
+                resume: false,
+                recherche: None
             }
             .validate()
             .is_err()

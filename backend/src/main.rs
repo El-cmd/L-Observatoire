@@ -36,6 +36,9 @@ pub struct App {
 pub struct Config {
     pub api_url: String,
     pub api_key: String,
+    /// Orchestrator in front of Qwen for chat answers (tools such as the web search); empty: Qwen directly.
+    pub orchestrator_url: String,
+    pub orchestrator_key: String,
     pub model: String,
     /// Isolated service that re-encodes images sent by users.
     pub image_guard: String,
@@ -83,7 +86,7 @@ pub async fn session(app: &App, headers: &HeaderMap, write: bool) -> Result<auth
     let token =
         auth::cookie_token(headers, app.config.secure_cookie).ok_or_else(Error::unauthorized)?;
     let found = sqlx::query_as::<_, auth::Session>(
-        "SELECT s.token_hash,s.csrf_token,u.id AS user_id,u.username,u.is_admin FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now()"
+        "SELECT s.token_hash,s.csrf_token,u.id AS user_id,u.username,u.is_admin,u.recherche_web FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now()"
     ).bind(auth::digest(&token)).fetch_optional(&app.db).await?.ok_or_else(Error::unauthorized)?;
     if write {
         auth::verify_origin(app, headers)?;
@@ -177,6 +180,11 @@ async fn main() -> Result<()> {
             .trim_end_matches('/')
             .to_string(),
         api_key: env::var("QWEN_API_KEY").unwrap_or_default(),
+        orchestrator_url: env::var("ORCHESTRATEUR_URL")
+            .unwrap_or_default()
+            .trim_end_matches('/')
+            .to_string(),
+        orchestrator_key: env::var("ORCHESTRATEUR_TOKEN").unwrap_or_default(),
         model: env::var("QWEN_MODEL").unwrap_or_else(|_| "qwen3.8-27b-abliterated".into()),
         image_guard: env::var("IMAGE_GUARD_URL")
             .unwrap_or_else(|_| "http://image-guard:8080".into())
@@ -194,6 +202,13 @@ async fn main() -> Result<()> {
         anyhow::ensure!(
             matches!(url.scheme(), "http" | "https") && url.host_str().is_some(),
             "QWEN_BASE_URL must be HTTP(S)"
+        );
+    }
+    if !config.orchestrator_url.is_empty() {
+        let url = reqwest::Url::parse(&config.orchestrator_url).context("invalid ORCHESTRATEUR_URL")?;
+        anyhow::ensure!(
+            matches!(url.scheme(), "http" | "https") && url.host_str().is_some() && !config.orchestrator_key.is_empty(),
+            "ORCHESTRATEUR_URL must be HTTP(S) and ORCHESTRATEUR_TOKEN set"
         );
     }
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);

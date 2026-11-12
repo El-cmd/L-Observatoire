@@ -1,5 +1,5 @@
 import {memo, useMemo} from 'react';
-import {formatProse, highlightCode} from '../lib/format';
+import {formatProse, highlightCode, linkCitations} from '../lib/format';
 import {CopyButton} from './CopyButton';
 
 const CodeBlock = memo(function CodeBlock({source, language, onError}: {source: string; language: string; onError: (message: string) => void}) {
@@ -11,14 +11,18 @@ const CodeBlock = memo(function CodeBlock({source, language, onError}: {source: 
   </pre>;
 });
 
-const Prose = memo(function Prose({text}: {text: string}) {
-  const html = useMemo(() => formatProse(text), [text]);
+type Sources = ReadonlyMap<number, {url: string; titre: string}>;
+const NONE: Sources = new Map();
+
+const Prose = memo(function Prose({text, sources}: {text: string; sources: Sources}) {
+  const html = useMemo(() => linkCitations(formatProse(text), sources), [text, sources]);
   return <div className="prose" dangerouslySetInnerHTML={{__html: html}}/>;
 });
 
-export const Markdown = memo(function Markdown({content, onError}: {content: string; onError: (message: string) => void}) {
+/** sources: those of a web search, to make its citations [n] clickable. */
+export const Markdown = memo(function Markdown({content, onError, sources = NONE}: {content: string; onError: (message: string) => void; sources?: Sources}) {
   return <>{content.split('```').map((block, index) => {
-    if (!(index % 2)) return <Prose key={index} text={block}/>;
+    if (!(index % 2)) return <Prose key={index} text={block} sources={sources}/>;
     const newline = block.indexOf('\n');
     const language = newline >= 0 ? block.slice(0, newline).trim() : '';
     const code = newline >= 0 ? block.slice(newline + 1).replace(/\n$/, '') : block;

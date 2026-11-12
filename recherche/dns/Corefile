@@ -1,0 +1,11 @@
+# Relais DNS du réseau interne (seul Crawl4AI s'en sert : il résout lui-même chaque adresse avant de la lire).
+# Il ne fait que résoudre ; la sortie réelle est décidée par le proxy « sortie » (Squid), qui refuse le réseau interne.
+# Réponses IPv4 seulement : Docker rootless ne sort pas en IPv6. Aucune requête journalisée.
+. {
+    template IN AAAA . {
+        rcode NOERROR
+    }
+    forward . /etc/resolv.conf
+    cache 60
+    errors
+}

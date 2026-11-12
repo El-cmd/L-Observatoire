@@ -1,0 +1,10 @@
+# Serveurs d'outils (MCP, transport HTTP) proposés à Qwen par l'orchestrateur. Chaque serveur décrit lui-même ses
+# outils ; brancher un nouveau service = l'ajouter ici (et au compose). « jeton » : nom de la variable d'environnement
+# qui contient le jeton d'accès au serveur ; « annuler » (facultatif) : adresse appelée quand l'utilisateur arrête la
+# réponse pendant un appel. Un serveur injoignable rend seulement ses outils indisponibles.
+
+[[serveurs]]
+nom = "recherche"
+url = "http://recherche:8080/mcp"
+jeton = "RECHERCHE_TOKEN"
+annuler = "http://recherche:8080/annuler"

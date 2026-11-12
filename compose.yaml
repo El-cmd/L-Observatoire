@@ -37,6 +37,9 @@ services:
       BOOTSTRAP_PASSWORD: ${BOOTSTRAP_PASSWORD:-}
       IMAGE_GUARD_URL: http://image-guard:8080
       DOC_GUARD_URL: http://doc-guard:8080
+      # Chat answers go through the orchestrator (tools such as the web search); Qwen directly if it is down.
+      ORCHESTRATEUR_URL: http://orchestrateur:8080/v1
+      ORCHESTRATEUR_TOKEN: ${ORCHESTRATEUR_TOKEN:-}
       RUST_LOG: observatoire=info,tower_http=info
     depends_on:
       db:
@@ -45,7 +48,9 @@ services:
         condition: service_started
       doc-guard:
         condition: service_started
-    networks: [web, database, guard, docs]
+      orchestrateur:
+        condition: service_started
+    networks: [web, database, guard, docs, orchestration]
     restart: unless-stopped
     init: true
     read_only: true
@@ -87,6 +92,178 @@ services:
     cpus: 1.0
     pids_limit: 128
     logging: *logs
+  # Between the backend and Qwen for chat answers: relays them unchanged, or runs Qwen with the tools the account may
+  # use (MCP servers of orchestrateur/outils.toml). No data, no port; Qwen through the « qwen » network only.
+  orchestrateur:
+    build: ./orchestrateur
+    image: observatoire-orchestrateur:local
+    environment:
+      QWEN_BASE_URL: ${QWEN_BASE_URL:-}
+      QWEN_API_KEY: ${QWEN_API_KEY:-}
+      ORCHESTRATEUR_TOKEN: ${ORCHESTRATEUR_TOKEN:-}
+      RECHERCHE_TOKEN: ${RECHERCHE_TOKEN:-}
+    networks: [orchestration, outils, qwen]
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    pids_limit: 64
+    stop_grace_period: 10s
+    logging: *logs
+  # --- Web search (profile « recherche », enabled on the server with COMPOSE_PROFILES=recherche) ----------------
+  # recherche: MCP tool « recherche_web » (LangGraph graphs of the search lab), called by the orchestrator only.
+  # recherche-service: SearXNG + Crawl4AI, cleaning, BM25 (no language model). searxng and crawl4ai have no direct
+  # way out: their only door to the Internet is the Squid proxy « recherche-sortie », which refuses private, local
+  # and metadata addresses. recherche-dns: DNS relay of Crawl4AI. Nothing is stored or logged.
+  recherche:
+    profiles: [recherche]
+    build: ./recherche/outil
+    image: observatoire-recherche:local
+    environment:
+      QWEN_BASE_URL: ${QWEN_BASE_URL:-}
+      QWEN_API_KEY: ${QWEN_API_KEY:-}
+      QWEN_MODEL: ${QWEN_MODEL:-qwen3.8-27b-abliterated}
+      RECHERCHE_TOKEN: ${RECHERCHE_TOKEN:-}
+      SERVICE_URL: http://10.231.30.30:8080
+    volumes:
+      # Search prompts, read again for every search (changes apply without rebuilding).
+      - ./recherche/outil/consignes:/app/consignes:ro
+    networks:
+      outils: {}
+      qwen: {}
+      recherche: {ipv4_address: 10.231.30.40}
+    depends_on: [recherche-service]
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    pids_limit: 64
+    logging: *logs
+  recherche-service:
+    profiles: [recherche]
+    build: ./recherche/service
+    image: observatoire-recherche-service:local
+    environment:
+      CRAWL4AI_API_TOKEN: ${CRAWL4AI_API_TOKEN:-}
+      SEARXNG_URL: http://10.231.30.10:8080
+      CRAWL4AI_URL: http://10.231.30.20:11235
+    networks:
+      recherche: {ipv4_address: 10.231.30.30}
+    depends_on: [searxng, crawl4ai]
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # Measured on 11/11/2026 on heavy Wikipedia pages: 674 MB at most.
+    mem_limit: 1536m
+    pids_limit: 64
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/sante', timeout=4)"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 20s
+    logging: *logs
+  searxng:
+    profiles: [recherche]
+    image: searxng/searxng:2026.11.6-ac11e14c5@sha256:c750ee1d859b26d3aeae51c07f6a48c3a0bfbaa9195d71a18b258862d88c4c3c
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-}
+    tmpfs:
+      - /var/cache/searxng:size=64m,uid=977,gid=977
+      - /tmp:size=64m
+    volumes:
+      - ./recherche/searxng:/etc/searxng:ro
+    networks:
+      recherche: {ipv4_address: 10.231.30.10}
+    depends_on: [recherche-sortie]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    pids_limit: 128
+    logging: *logs
+  crawl4ai:
+    profiles: [recherche]
+    image: unclecode/crawl4ai:0.9.5@sha256:0b05666882bfb67f45d559a5b827839c54127b74aedd723f8ab338a3571b5fc9
+    environment:
+      CRAWL4AI_API_TOKEN: ${CRAWL4AI_API_TOKEN:-}
+      CRAWL4AI_UPSTREAM_PROXY: http://10.231.30.3:3128
+      CRAWL4AI_HOOKS_ENABLED: 'false'
+      CRAWL4AI_EXECUTE_JS_ENABLED: 'false'
+      CRAWL4AI_ALLOW_DEEP_CRAWL: 'false'
+      CRAWL4AI_ALLOW_INTERNAL_URLS: 'false'
+      CRAWL4AI_ALLOW_INSECURE_TLS: 'false'
+    dns: [10.231.30.53]
+    shm_size: 1g
+    volumes:
+      - ./recherche/crawl4ai/config.yml:/app/config.yml:ro
+    networks:
+      recherche: {ipv4_address: 10.231.30.20}
+    depends_on: [recherche-sortie, recherche-dns]
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # Measured on the server on 11/11/2026: 327 MB idle, 937 MB at most for 2 pages at a time. One CPU at most,
+    # so that chat answers keep the other one during a search.
+    mem_limit: 2g
+    cpus: 1.0
+    pids_limit: 512
+    logging: *logs
+  recherche-sortie:
+    profiles: [recherche]
+    image: ubuntu/squid:6.6-24.04_edge@sha256:8a3baed477e2c282ab8aa5edad442f69873246964f225c5c2ae8364b6610963c
+    user: proxy
+    entrypoint: [/usr/sbin/squid]
+    command: [-f, /etc/squid/squid.conf, -NYC]
+    tmpfs:
+      - /var/spool/squid:size=16m,uid=13,gid=13
+      - /var/log/squid:size=16m,uid=13,gid=13
+      - /run/squid:size=1m,uid=13,gid=13
+      - /tmp:size=16m
+    volumes:
+      - ./recherche/sortie/squid.conf:/etc/squid/squid.conf:ro
+    networks:
+      recherche: {ipv4_address: 10.231.30.3}
+      recherche-internet: {}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    pids_limit: 64
+    # Squid allocates a table the size of this limit: without it (a billion under Docker Desktop or WSL), it crashes.
+    ulimits:
+      nofile: {soft: 4096, hard: 4096}
+    logging: *logs
+  recherche-dns:
+    profiles: [recherche]
+    image: coredns/coredns:1.15.0@sha256:0a9d8c8ddf34347eb59aad9a8784f0710de88d6d112726d11d271f9bc6daca26
+    command: [-conf, /Corefile]
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: 0
+    volumes:
+      - ./recherche/dns/Corefile:/Corefile:ro
+    networks:
+      recherche: {ipv4_address: 10.231.30.53}
+      recherche-internet: {}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 64m
+    pids_limit: 32
+    logging: *logs
   db:
     image: postgres:17-alpine
     environment:
@@ -120,3 +297,16 @@ networks:
     internal: true
   docs:
     internal: true
+  # Backend <-> orchestrator; orchestrator <-> tool servers; way out to Qwen for the orchestrator and the search tool.
+  orchestration:
+    internal: true
+  outils:
+    internal: true
+  qwen:
+  # Web search: internal network (fixed addresses: Crawl4AI's DNS, Squid's allowed clients); only Squid and the DNS
+  # relay reach the Internet.
+  recherche:
+    internal: true
+    ipam:
+      config: [{subnet: 10.231.30.0/24}]
+  recherche-internet:

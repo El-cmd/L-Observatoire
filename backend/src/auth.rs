@@ -25,6 +25,8 @@ pub struct Session {
     pub user_id: Uuid,
     pub username: String,
     pub is_admin: bool,
+    /// May use the web search (button Web of the composer).
+    pub recherche_web: bool,
 }
 
 #[derive(FromRow)]
@@ -33,6 +35,7 @@ struct User {
     username: String,
     password_hash: String,
     is_admin: bool,
+    recherche_web: bool,
 }
 
 pub fn digest(value: &str) -> String {
@@ -172,7 +175,7 @@ pub async fn login(
         )
     })?;
     let user = sqlx::query_as::<_, User>(
-        "SELECT id,username,password_hash,is_admin FROM users WHERE username=$1",
+        "SELECT id,username,password_hash,is_admin,recherche_web FROM users WHERE username=$1",
     )
     .bind(&username)
     .fetch_optional(&app.db)
@@ -212,7 +215,7 @@ pub async fn login(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
-    let mut response=Json(json!({"user":{"id":user.id,"username":user.username,"is_admin":user.is_admin},"csrf_token":csrf,"configured":!app.config.api_key.is_empty()&&!app.config.api_url.is_empty()})).into_response();
+    let mut response=Json(json!({"user":{"id":user.id,"username":user.username,"is_admin":user.is_admin,"recherche_web":user.recherche_web},"csrf_token":csrf,"configured":!app.config.api_key.is_empty()&&!app.config.api_url.is_empty()})).into_response();
     response
         .headers_mut()
         .insert(header::SET_COOKIE, cookie(&app, &token, false));
@@ -225,7 +228,7 @@ pub async fn me(
 ) -> Result<Json<serde_json::Value>, Error> {
     let user = session(&app, &headers, false).await?;
     Ok(Json(
-        json!({"user":{"id":user.user_id,"username":user.username,"is_admin":user.is_admin},"csrf_token":user.csrf_token,"configured":!app.config.api_key.is_empty()&&!app.config.api_url.is_empty()}),
+        json!({"user":{"id":user.user_id,"username":user.username,"is_admin":user.is_admin,"recherche_web":user.recherche_web},"csrf_token":user.csrf_token,"configured":!app.config.api_key.is_empty()&&!app.config.api_url.is_empty()}),
     ))
 }
 
@@ -325,11 +328,27 @@ pub async fn bootstrap(db: &PgPool) -> Result<()> {
 
 pub async fn admin_command(db: &PgPool, command: &str) -> Result<()> {
     anyhow::ensure!(
-        matches!(command, "create-user" | "reset-password"),
+        matches!(command, "create-user" | "reset-password" | "recherche-web"),
         "Unknown command"
     );
     let mut input = String::new();
     std::io::stdin().take(4096).read_to_string(&mut input)?;
+    if command == "recherche-web" {
+        #[derive(Deserialize)]
+        struct Right {
+            username: String,
+            enabled: bool,
+        }
+        let right: Right = serde_json::from_str(&input).context("Expected JSON {username, enabled} on stdin")?;
+        let done = sqlx::query("UPDATE users SET recherche_web=$1 WHERE username=$2")
+            .bind(right.enabled)
+            .bind(normalize_username(&right.username)?)
+            .execute(db)
+            .await?;
+        anyhow::ensure!(done.rows_affected() == 1, "Account not found");
+        println!("Web search {} for this account.", if right.enabled { "enabled" } else { "disabled" });
+        return Ok(());
+    }
     #[derive(Deserialize)]
     struct Credentials {
         username: String,

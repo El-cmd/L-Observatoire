@@ -1,8 +1,11 @@
-/** title: the conversation name chosen by Qwen, sent by the API during the stream. */
-export interface Completion { content: string; reasoning: string; limited: boolean; title?: string }
+import type {ToolEvent} from '../types';
+
+/** title: the conversation name chosen by Qwen, sent by the API during the stream. outils: steps of the tools used
+ *  (web search); a tool's checked final text replaces the content streamed while it was writing. */
+export interface Completion { content: string; reasoning: string; limited: boolean; title?: string; outils: ToolEvent[] }
 interface Packet {
   error?: {message?: string};
-  observatoire?: {title?: string};
+  observatoire?: Record<string, unknown>;
   choices?: {delta?: {content?: string; reasoning_content?: string; reasoning?: string;
     provider_specific_fields?: {reasoning?: string}}; finish_reason?: string}[];
 }
@@ -13,14 +16,18 @@ export async function consumeCompletion(response: Response, onUpdate: (value: Co
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '', complete = false;
-  const result: Completion = {content: '', reasoning: '', limited: false};
+  const result: Completion = {content: '', reasoning: '', limited: false, outils: []};
   function event(value: string) {
     const raw = value.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n');
     if (!raw) return;
     if (raw.trim() === '[DONE]') { complete = true; return; }
     const packet = JSON.parse(raw) as Packet;
     if (packet.error) throw new Error(packet.error.message || 'Le flux Qwen a rencontré une erreur.');
-    if (typeof packet.observatoire?.title === 'string') result.title = packet.observatoire.title;
+    for (const [key, value] of Object.entries(packet.observatoire ?? {})) {
+      if (key === 'title' && typeof value === 'string') result.title = value;
+      else if (key === 'contenu' && typeof value === 'string') result.content = value;
+      else if (value && typeof value === 'object' && !Array.isArray(value)) result.outils.push({...(value as Record<string, unknown>), outil: key, type: String((value as {type?: unknown}).type ?? '')});
+    }
     const choice = packet.choices?.[0]; const delta = choice?.delta;
     if (typeof delta?.content === 'string') result.content += delta.content;
     const reasoning = delta?.reasoning_content ?? delta?.reasoning ?? delta?.provider_specific_fields?.reasoning;
@@ -33,7 +40,7 @@ export async function consumeCompletion(response: Response, onUpdate: (value: Co
       buffer = (buffer + decoder.decode(value || new Uint8Array(), {stream: !done})).replace(/\r\n/g, '\n');
       let split: number;
       while ((split = buffer.indexOf('\n\n')) >= 0) { event(buffer.slice(0, split)); buffer = buffer.slice(split + 2); }
-      onUpdate({...result});
+      onUpdate({...result, outils: [...result.outils]});
       if (done) { if (buffer.trim()) event(buffer); break; }
     }
     if (!complete) throw new Error('La connexion a été interrompue avant la fin de la réponse.');

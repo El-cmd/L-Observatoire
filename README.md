@@ -11,7 +11,12 @@ flowchart LR
     API --> DB[(PostgreSQL 17)]
     API -->|réseau interne, sans Internet| Guard[image-guard]
     API -->|réseau interne, sans Internet| Docs[doc-guard]
-    API --> Qwen[Votre API Qwen]
+    API -->|réseau interne| Orch[orchestrateur]
+    Orch --> Qwen[Votre API Qwen]
+    API -.->|si l’orchestrateur ne répond pas| Qwen
+    Orch -->|MCP, réseau interne| Outil[recherche]
+    Outil --> Qwen
+    Outil --> Service[recherche-service] --> SearX[SearXNG] & Crawl[Crawl4AI] --> Squid[recherche-sortie] --> Web[Internet]
 ```
 
 | Service | Rôle | Accès depuis l’hôte |
@@ -21,6 +26,8 @@ flowchart LR
 | `db` | PostgreSQL, sur un réseau Docker interne | Aucun port publié |
 | `image-guard` | Seul service qui décode les images envoyées : vérifie et réencode, sans réseau sortant ni données | Aucun port publié |
 | `doc-guard` | Seul service qui ouvre les documents envoyés (PDF, Word, texte) : extrait le texte et rend les pages en image, sans réseau sortant ni données | Aucun port publié |
+| `orchestrateur` | Python, LangGraph : entre l’API et Qwen pour les réponses du chat ; relaie tel quel, ou fait travailler Qwen avec les outils permis (serveurs MCP) | Aucun port publié |
+| `recherche` et sa pile (profil `recherche`) | Outil MCP `recherche_web` : SearXNG, Crawl4AI, proxy Squid de sortie, relais DNS, service de recherche (BM25) | Aucun port publié |
 
 Les images frontend et backend sont distinctes. Le frontend est compilé dans une étape Node 24 ; le conteneur final contient uniquement Nginx et les fichiers statiques, sans serveur Node. Les polices et bibliothèques du navigateur sont embarquées : aucun CDN n’est requis. Le frontend et l’API utilisent la même origine via Nginx.
 
@@ -113,6 +120,25 @@ Le même bouton **+** ajoute des documents : PDF (60 pages au plus), Word `.docx
 - Le Markdown est gardé dans la bibliothèque et envoyé à Qwen avec les questions, une fois par conversation. Un document de plus de 39 300 tokens (30 % du contexte) est refusé. Le texte lu est visible en cliquant sur le document ; le fichier d’origine reste téléchargeable.
 - Une lecture interrompue par un redémarrage de l’API est marquée en échec : il suffit de renvoyer le document.
 
+## Orchestrateur et recherche web
+
+Les réponses du chat passent par l’**orchestrateur** (`orchestrateur/`, Python, LangGraph), qui se présente comme Qwen (API compatible OpenAI, jeton `ORCHESTRATEUR_TOKEN`) :
+
+- **message ordinaire** (le cas général), ou **réponse continuée** : la requête part telle quelle chez Qwen et le flux revient sans transformation. Si l’orchestrateur ne répond pas, l’API demande directement à Qwen ;
+- **message avec le bouton Web**, pour un compte qui en a le droit (`users.recherche_web`, vérifié par l’API) : Qwen reçoit l’outil `recherche_web` et décide de l’appeler (Automatique) ou y est obligé à la profondeur choisie dans le menu (Approfondie, Très approfondie). Une seule recherche à la fois ; au plus 3 appels d’outils par message ;
+- quand l’utilisateur arrête la réponse, l’orchestrateur coupe la requête à Qwen ou prévient l’outil (`/annuler`), qui libère sa place.
+
+Les outils sont des **serveurs MCP** déclarés dans `orchestrateur/outils.toml` : chaque serveur décrit lui-même ses outils, en brancher un nouveau revient à l’ajouter à ce fichier et au compose. La progression d’un outil (étapes, texte en cours d’écriture) arrive par les notifications de progression MCP et part dans le flux sous `{"observatoire": {"recherche_web": …}}` ; le texte final vérifié de l’outil remplace celui affiché pendant l’écriture (`{"observatoire": {"contenu": …}}`). Les étapes sont gardées avec la réponse (`outils` du message) et affichées repliées au-dessus ; elles ne sont jamais renvoyées à Qwen, la réponse portant ses sources.
+
+**La recherche web** (`recherche/`) reprend le labo recherche : modes web, approfondi et très approfondi (cahier de recherche, un chercheur par sous-question, superviseur, notes, rapport par sections), citations vérifiées, consignes dans `recherche/outil/consignes/prompts.toml` (relues à chaque recherche). SearXNG et Crawl4AI n’ont pas d’accès direct à Internet : seule porte, le proxy Squid `recherche-sortie`, qui refuse les adresses privées, locales et de métadonnées (réseau interne `10.231.30.0/24`). Ces services sont dans le profil Compose `recherche` (environ 2,5 Go de mémoire pendant une recherche, Crawl4AI limité à un processeur) :
+
+```sh
+# .env du serveur
+COMPOSE_PROFILES=recherche
+```
+
+Sans ce profil, l’orchestrateur relaie seulement, et le bouton Web annonce la recherche indisponible. Le droit se donne ou se retire avec `make recherche-web` ; la migration l’ouvre au compte `vloth`. Les secrets internes (`ORCHESTRATEUR_TOKEN`, `RECHERCHE_TOKEN`, `SEARXNG_SECRET`, `CRAWL4AI_API_TOKEN`) sont créés par `make init`.
+
 ## Migration de l’ancienne version
 
 `make up` remplace l’ancien service Python `chat` par les trois nouveaux services. Les anciennes conversations restent dans le stockage du navigateur : elles ne sont pas automatiquement affectées à un utilisateur.
@@ -191,9 +217,9 @@ make build
 make test
 ```
 
-La construction du frontend exécute les tests Vitest (stream SSE, UTF-8, LaTeX et échappement du HTML), le contrôle TypeScript et la compilation Vite. Les tests Rust couvrent les identifiants, la politique de mots de passe, Argon2id et les paramètres Qwen. Les tests d’intégration démarrent un projet Docker séparé avec une base jetable et une API Qwen simulée, sans utiliser les secrets de votre `.env` ni consommer de tokens.
+`make test` lance aussi les tests de l’orchestrateur (relais, boucle d’outils, vrai serveur MCP local, annulation, coupure) et de la recherche (service et outil MCP), sans réseau. La construction du frontend exécute les tests Vitest (stream SSE, étapes d’outils, citations, UTF-8, LaTeX et échappement du HTML), le contrôle TypeScript et la compilation Vite. Les tests Rust couvrent les identifiants, la politique de mots de passe, Argon2id et les paramètres Qwen. Les tests d’intégration démarrent un projet Docker séparé avec une base jetable et une API Qwen simulée, sans utiliser les secrets de votre `.env` ni consommer de tokens.
 
-Ils vérifient les accès anonymes, les cookies et jetons hachés, le rôle SQL, les protections Origin/CSRF, l’isolation des comptes, les conflits de version, le streaming et l’annulation, la révocation et l’expiration des sessions, les limites de connexion, la persistance après redémarrage et la restauration d’un dump. Seul le volume du projet de test est supprimé à la fin.
+Ils vérifient les accès anonymes, les cookies et jetons hachés, le rôle SQL, les protections Origin/CSRF, l’isolation des comptes, les conflits de version, le streaming et l’annulation, la révocation et l’expiration des sessions, les limites de connexion, la persistance après redémarrage, la restauration d’un dump, et la recherche web de bout en bout avec un faux outil MCP : droit du compte, étapes gardées, texte vérifié, profondeur imposée, repli direct sur Qwen quand l’orchestrateur est arrêté. Seul le volume du projet de test est supprimé à la fin.
 
 Des parcours navigateur sont disponibles dans `tests/browser.mjs` avec Playwright : `OBSERVATOIRE_BROWSER=1 python3 tests/integration/run.py` après installation locale de Playwright et de son navigateur. Le backend de test utilise une API simulée.
 

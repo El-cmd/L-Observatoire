@@ -10,7 +10,7 @@ import {ImageViewer} from './components/ImageViewer';
 import {DocumentViewer} from './components/DocumentViewer';
 import {LibraryView} from './components/LibraryView';
 import {NewsView} from './components/NewsView';
-import {hasUnreadNews, markNewsRead} from './lib/news';
+import {hasUnreadNews, markNewsRead, newsFor} from './lib/news';
 import {MAX_IMAGES, isDocument} from './lib/images';
 import type {AttachmentRef} from './types';
 
@@ -25,10 +25,11 @@ export default function App() {
   const [news, setNews] = useState(false);
   const [unreadNews, setUnreadNews] = useState(false);
   const userId = chat.auth?.user.id;
+  const searcher = chat.auth?.user.recherche_web === true;
   useEffect(() => {
     setSidebarOpen(false); setPasswordOpen(false); setLibrary('closed'); setViewer(null); setNews(false);
-    setUnreadNews(userId ? hasUnreadNews(userId) : false);
-  }, [userId]);
+    setUnreadNews(chat.auth ? hasUnreadNews(chat.auth.user) : false);
+  }, [userId, searcher]);
   useEffect(() => {
     function key(event: KeyboardEvent) {
       if (event.key === 'Escape') setSidebarOpen(false);
@@ -44,7 +45,7 @@ export default function App() {
     <div className="app" id="chat-app">
       <Sidebar user={chat.auth.user} chats={chat.chats} activity={chat.activity} currentId={chat.current?.id} libraryOpen={library === 'browse'}
         onLibrary={() => {setNews(false); setLibrary('browse'); setSidebarOpen(false);}} newsOpen={news} unreadNews={unreadNews}
-        onNews={() => {setLibrary('closed'); setNews(true); setSidebarOpen(false); markNewsRead(chat.auth!.user.id); setUnreadNews(false);}} open={sidebarOpen} collapsed={sidebarCollapsed}
+        onNews={() => {setLibrary('closed'); setNews(true); setSidebarOpen(false); markNewsRead(chat.auth!.user); setUnreadNews(false);}} open={sidebarOpen} collapsed={sidebarCollapsed}
         navigating={chat.navigating} canImport={chat.canImport} importing={chat.importing} onClose={() => {if (innerWidth <= 760) setSidebarOpen(false); else setSidebarCollapsed(true);}}
         onNew={() => {setLibrary('closed'); setNews(false); void chat.newChat().then(() => setSidebarOpen(false));}}
         onSelect={id => {setLibrary('closed'); setNews(false); void chat.openChat(id).then(() => setSidebarOpen(false));}}
@@ -55,7 +56,7 @@ export default function App() {
         <header className="topbar"><button id="menu" className="icon-button" aria-label="Ouvrir les conversations" title="Conversations" onClick={() => {if (innerWidth <= 760) setSidebarOpen(value => !value); else setSidebarCollapsed(value => !value);}}><Icon name="sidebar"/></button>
           <span className="topbar-title">L’Observatoire</span><span id="connection" className="sr-only" role="status">{chat.navigating ? 'Chargement…' : chat.auth.configured ? 'API configurée' : 'Configuration requise'}</span>
         </header>
-        {news ? <NewsView onClose={() => setNews(false)}/> : library !== 'closed' ? <LibraryView library={chat.library} picking={library === 'pick'} room={MAX_IMAGES - chat.pending.length}
+        {news ? <NewsView items={newsFor(chat.auth.user)} onClose={() => setNews(false)}/> : library !== 'closed' ? <LibraryView library={chat.library} picking={library === 'pick'} room={MAX_IMAGES - chat.pending.length}
           onLoad={() => {void chat.loadLibrary();}} onClose={() => setLibrary('closed')} onOpen={setViewer} onDelete={id => {void chat.deleteImage(id);}}
           onPick={images => {chat.addFromLibrary(images); setLibrary('closed');}}
           onStartChat={image => {setLibrary('closed'); void chat.newChat().then(() => {chat.addFromLibrary([image]); askAbout();});}} onOpenChat={id => {setLibrary('closed'); void chat.openChat(id);}}
@@ -65,7 +66,8 @@ export default function App() {
           onRemovePending={chat.removePending} onOpenLibrary={() => setLibrary('pick')} onSend={value => {void chat.send(value);}} onStop={chat.stop}
           onRegenerate={() => {void chat.regenerate();}} onContinue={() => {void chat.continueAnswer();}} settings={chat.settings} onSettings={chat.setSettings} busy={chat.busy}
           contextUsage={chat.contextUsage} compacting={chat.compacting} onCompact={() => {void chat.compactContext();}}
-          disabled={!chat.auth.configured || chat.navigating || chat.compacting || !chat.current} notice={chat.notice} chatId={chat.current?.id}/>
+          disabled={!chat.auth.configured || chat.navigating || chat.compacting || !chat.current} notice={chat.notice} chatId={chat.current?.id}
+          webAllowed={chat.auth.user.recherche_web === true}/>
         </>}
       </div>
     </div>

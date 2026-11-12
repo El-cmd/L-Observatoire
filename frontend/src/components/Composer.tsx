@@ -1,19 +1,36 @@
 import {useEffect, useLayoutEffect, useRef, useState} from 'react';
-import type {Effort, Notice, PendingImage, Settings, ContextUsage} from '../types';
+import type {Effort, Notice, PendingImage, Settings, ContextUsage, WebMode} from '../types';
 import {Icon} from './Icon';
 import {ContextMeter} from './ContextMeter';
 import {DOCUMENT_TYPES} from '../lib/images';
 
 const effortLabels = {none:'désactivée', low:'légère', medium:'intermédiaire', xhigh:'approfondie'};
+const WEB_MODES: {mode: WebMode; label: string; hint: string}[] = [
+  {mode:'auto', label:'Automatique', hint:'L’Observatoire décide s’il faut chercher, et jusqu’où'},
+  {mode:'approfondie', label:'Approfondie', hint:'Plusieurs sources croisées, environ une minute'},
+  {mode:'tres_approfondie', label:'Très approfondie', hint:'Un dossier complet, quelques minutes'},
+];
 
-export function Composer({prompt, onPrompt, pending, onAddImages, onRemovePending, onOpenLibrary, onSend, onStop, onRegenerate, onContinue, settings, onSettings, busy, disabled, notice, chatId, contextUsage, compacting, onCompact}: {
+export function Composer({prompt, onPrompt, pending, onAddImages, onRemovePending, onOpenLibrary, onSend, onStop, onRegenerate, onContinue, settings, onSettings, busy, disabled, notice, chatId, contextUsage, compacting, onCompact, webAllowed = false}: {
   pending: PendingImage[]; onAddImages: (files: File[]) => void; onRemovePending: (key: string) => void; onOpenLibrary: () => void;
   prompt: string; onPrompt: (value: string) => void; onSend: (value: string) => void; onStop: () => void;
   onRegenerate: () => void; onContinue: () => void; settings: Settings; onSettings: (value: Settings) => void; busy: boolean;
   disabled: boolean; notice: Notice | null; chatId?: string;
   contextUsage: ContextUsage | null; compacting: boolean; onCompact: () => void;
+  /** The account may search the web: shows the Web button. */
+  webAllowed?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [webOpen, setWebOpen] = useState(false);
+  const webMenu = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!webOpen) return;
+    function outside(event: MouseEvent) {if (!webMenu.current?.contains(event.target as Node)) setWebOpen(false);}
+    function escape(event: KeyboardEvent) {if (event.key === 'Escape') setWebOpen(false);}
+    document.addEventListener('click', outside); document.addEventListener('keydown', escape);
+    return () => {document.removeEventListener('click', outside); document.removeEventListener('keydown', escape);};
+  }, [webOpen]);
+  const webMode = WEB_MODES.find(item => item.mode === settings.webMode) ?? WEB_MODES[0];
   const [adding, setAdding] = useState(false);
   const [dragging, setDragging] = useState(false);
   const files = useRef<HTMLInputElement>(null);
@@ -85,6 +102,19 @@ export function Composer({prompt, onPrompt, pending, onAddImages, onRemovePendin
         </div>}
         <input ref={files} id="attach-files" type="file" accept={`image/*,${DOCUMENT_TYPES}`} multiple hidden onChange={event => {const list = images(event.target.files); event.target.value = ''; if (list.length) onAddImages(list);}}/>
       </div>
+      {webAllowed && <div className={`web-search${settings.web ? ' active' : ''}`} ref={webMenu}>
+        <button id="web-toggle" type="button" className="web-toggle" aria-pressed={settings.web} disabled={disabled}
+          title={settings.web ? `Recherche sur Internet activée : ${webMode.label.toLowerCase()}` : 'Chercher sur Internet avant de répondre'}
+          onClick={() => onSettings({...settings, web:!settings.web})}><Icon name="globe"/><span className="web-label">Web</span>
+          {settings.web && settings.webMode !== 'auto' && <span className="web-mode-label">{webMode.label}</span>}</button>
+        <button id="web-mode" type="button" className="web-mode-toggle" aria-label="Choisir comment chercher sur Internet" title="Choisir comment chercher"
+          aria-haspopup="menu" aria-expanded={webOpen} disabled={disabled} onClick={() => setWebOpen(value => !value)}><Icon name="chevron"/></button>
+        {webOpen && <div className="web-menu" role="menu" aria-label="Recherche sur Internet">
+          {WEB_MODES.map(item => <button key={item.mode} type="button" role="menuitemradio" aria-checked={settings.web && settings.webMode === item.mode}
+            onClick={() => {onSettings({...settings, web:true, webMode:item.mode}); setWebOpen(false);}}>
+            <span className="web-menu-title">{item.label}</span><span className="web-menu-hint">{item.hint}</span></button>)}
+        </div>}
+      </div>}
       <label className="sr-only" htmlFor="prompt">Votre message</label>
       <textarea id="prompt" ref={area} rows={1} placeholder="Demander à L’Observatoire" maxLength={100000} value={prompt} onChange={event => onPrompt(event.target.value)}
         onPaste={event => {const list = images(event.clipboardData.files); if (list.length) {event.preventDefault(); onAddImages(list);}}}

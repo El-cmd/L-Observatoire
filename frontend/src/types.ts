@@ -1,7 +1,12 @@
 export type Effort = 'none' | 'low' | 'medium' | 'xhigh';
 export type Activity = 'generating' | 'compacting';
-export interface Settings { effort: Effort; temperature: number }
-export interface User { id: string; username: string; is_admin: boolean }
+/** Web search depth chosen in the menu of the Web button: auto lets L'Observatoire decide whether and how deep. */
+export type WebMode = 'auto' | 'approfondie' | 'tres_approfondie';
+export interface Settings { effort: Effort; temperature: number; web: boolean; webMode: WebMode }
+/** recherche_web: the account may use the web search (Web button). */
+export interface User { id: string; username: string; is_admin: boolean; recherche_web?: boolean }
+/** One step of a tool used for an answer (web search…), as sent by the server; `outil` names the tool. */
+export interface ToolEvent { outil: string; type: string; [key: string]: unknown }
 export interface Auth { user: User; csrf_token: string; configured: boolean }
 export interface Message {
   role: 'user' | 'assistant'; content: string; reasoning?: string; interrupted?: boolean;
@@ -9,6 +14,8 @@ export interface Message {
   truncated?: boolean;
   /** Images and documents of the user's library shown with a question. */
   attachments?: AttachmentRef[];
+  /** Steps of the tools used for this answer (web search), shown above it. */
+  outils?: ToolEvent[];
 }
 /** Width and height are 0 for documents; pages is 0 for Word and text files. */
 export interface AttachmentRef { id: string; name: string; width: number; height: number; kind?: 'document'; pages?: number; tokens?: number }

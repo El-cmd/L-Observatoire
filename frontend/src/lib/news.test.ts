@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {NEWS, NEWS_LEVELS} from './news';
+import {NEWS, NEWS_LEVELS, newsFor} from './news';
 
 describe('news', () => {
   it('lists valid, unique entries from newest to oldest', () => {
@@ -11,5 +11,12 @@ describe('news', () => {
       expect(item.title.trim()).not.toBe(''); expect(item.text.trim()).not.toBe('');
       if (index) expect(item.date <= NEWS[index - 1].date).toBe(true);
     }
+  });
+  it('shows reserved entries only to accounts with the right', () => {
+    const user = {id: 'u', username: 'u', is_admin: false};
+    const reserved = NEWS.filter(item => item.reserve === 'recherche_web');
+    expect(reserved.length).toBeGreaterThan(0);
+    expect(newsFor(user).some(item => item.reserve)).toBe(false);
+    expect(newsFor({...user, recherche_web: true}).length).toBe(NEWS.length);
   });
 });

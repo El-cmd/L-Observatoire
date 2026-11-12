@@ -15,7 +15,8 @@ for line in text.splitlines():
         key, value = line.split('=', 1)
         values[key] = value.strip().strip('"\'')
 additions = []
-for key in ('POSTGRES_ADMIN_PASSWORD', 'POSTGRES_PASSWORD'):
+# Shared secrets of the internal services (orchestrator, web search tool, SearXNG, Crawl4AI).
+for key in ('POSTGRES_ADMIN_PASSWORD', 'POSTGRES_PASSWORD', 'ORCHESTRATEUR_TOKEN', 'RECHERCHE_TOKEN', 'SEARXNG_SECRET', 'CRAWL4AI_API_TOKEN'):
     if not values.get(key):
         # URL-safe alphabet; valid both in Compose env files and in DATABASE_URL.
         value = secrets.token_hex(32)
@@ -27,4 +28,4 @@ if not values.get('PUBLIC_ORIGIN'):
 if additions:
     target.write_text(text.rstrip() + '\n' + '\n'.join(additions) + '\n')
 os.chmod(target, 0o600)
-print('Configuration locale prête. Secrets PostgreSQL générés si nécessaire.')
+print('Configuration locale prête. Secrets PostgreSQL et des services internes générés si nécessaire.')
