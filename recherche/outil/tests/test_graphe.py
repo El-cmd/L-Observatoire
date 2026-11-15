@@ -222,7 +222,7 @@ class Flux(unittest.TestCase):
     def test_reponse_coupee_gardee(self):
         texte, jetons, _ = self.appel_flux(flux_sse('Début de réponse', fin='length'))
         self.assertEqual(texte, 'Début de réponse')
-        self.assertEqual(jetons['coupee'], 4100)
+        self.assertEqual(jetons['coupee'], 100 + graphe.REFLEXION_SUPPLEMENT)
 
     def test_flux_vide(self):
         with self.assertRaisesRegex(graphe.AgentErreur, 'vide'):
@@ -481,6 +481,35 @@ class TresApprofondie(unittest.TestCase):
         self.assertEqual(graphe.limites_publiques('tres_approfondie')['duree_s'], 600)
         self.assertTrue(graphe.limites_publiques('auto')['auto'])
         self.assertEqual(graphe.finale(3), 7)
+
+
+class Robustesse(unittest.TestCase):
+    def test_lecteur_illisible_la_recherche_continue(self):
+        resultat, evenements, appels, _ = lancer('approfondie', {
+            'planification': PLAN, 'lecture': lambda _: 'pas un objet',
+            'verification': {'decision': 'repondre', 'raison': '', 'sources_coherentes': True, 'informations_manquantes': [],
+                             'nouvelles_requetes': []}, 'redaction': 'R.'})
+        self.assertNotIn('erreur', [e['type'] for e in evenements])
+        self.assertEqual(resultat['reponse'], 'Aucune information fiable n’a été trouvée pour répondre à cette question dans les pages consultées.')
+
+    def test_reflexion_reservee_aux_etapes_qui_decident(self):
+        async def tout():
+            corps = []
+
+            def repondre(request):
+                c = json.loads(request.content); corps.append(c)
+                return httpx.Response(200, json={'choices': [{'message': {'content': '{"faits": [], "contradictions": [], "sans_reponse": []}'},
+                                                              'finish_reason': 'stop'}], 'usage': {}})
+            async with httpx.AsyncClient(transport=httpx.MockTransport(repondre)) as qwen:
+                ctx = graphe.RechercheContext(qwen_url='http://q/v1', qwen_cle='c', modele='q', http=qwen, web=qwen, reflexion=True, filtre=True,
+                                              compteurs=graphe.Compteurs(debut=asyncio.get_running_loop().time()))
+                ctx.consignes = graphe.charger_consignes()
+                await graphe.appel(ctx, 'lecture', [{'role': 'user', 'content': 'q'}], graphe.SCHEMA_LECTURE, 1500)
+                await graphe.appel(ctx, 'verification', [{'role': 'user', 'content': 'q'}], graphe.SCHEMA_LECTURE, 800)
+            return corps
+        lecture, verification = asyncio.run(tout())
+        self.assertEqual((lecture['chat_template_kwargs']['enable_thinking'], lecture['max_tokens']), (False, 1500))
+        self.assertEqual((verification['chat_template_kwargs']['enable_thinking'], verification['max_tokens']), (True, 800 + graphe.REFLEXION_SUPPLEMENT))
 
 
 class Automatique(unittest.TestCase):

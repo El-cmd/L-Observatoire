@@ -75,7 +75,9 @@ FAITS_MAX = 40
 REQUETE_MAX = 150
 QUESTION_MAX = 1000
 BUDGET_WEB = 8000                     # mode web : jetons de passages envoyés à Qwen pour la réponse
-REFLEXION_SUPPLEMENT = 4000           # jetons de sortie en plus quand la réflexion est activée
+REFLEXION_SUPPLEMENT = 8000           # jetons de sortie en plus quand la réflexion est activée
+# Étapes nombreuses et parallèles : jamais de réflexion (lente, et elle épuisait la limite de jetons, 15/11/2026).
+SANS_REFLEXION = frozenset({'lecture', 'compression', 'section'})
 PARALLELE = 3                         # appels à Qwen en même temps pour une recherche
 # Mode très approfondi
 SOUS_QUESTIONS_MAX = 4
@@ -103,6 +105,11 @@ MOIS = ('janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août
 
 class AgentErreur(Exception):
     """Arrêt de la recherche, message montré tel quel."""
+
+
+class ReponseInvalide(AgentErreur):
+    """Réponse de Qwen coupée, vide ou illisible : pour un lecteur, une compression ou une section, l'étape est
+    sautée ou remplacée et la recherche continue ; ailleurs, elle s'arrête."""
 
 
 # --- Contexte et état --------------------------------------------------------------------------------------------
@@ -305,9 +312,10 @@ async def appel(ctx: RechercheContext, etape: str, messages: list[dict], schema:
         raise AgentErreur(f'Limite atteinte : {limite}.')
     loop = asyncio.get_running_loop()
     ctx.compteurs.appels += 1
+    reflechir = ctx.reflexion and etape not in SANS_REFLEXION
     body = {'model': ctx.modele, 'messages': messages, 'temperature': temperature, 'stream': False,
-            'max_tokens': max_tokens + (REFLEXION_SUPPLEMENT if ctx.reflexion else 0),
-            'chat_template_kwargs': {'enable_thinking': ctx.reflexion}}
+            'max_tokens': max_tokens + (REFLEXION_SUPPLEMENT if reflechir else 0),
+            'chat_template_kwargs': {'enable_thinking': reflechir}}
     if schema is not None:
         body['response_format'] = {'type': 'json_schema', 'json_schema': {'name': etape, 'schema': schema, 'strict': True}}
     en_flux = schema is None and ecrire is not None
@@ -336,18 +344,18 @@ async def appel(ctx: RechercheContext, etape: str, messages: list[dict], schema:
     duree = round((loop.time() - debut) * 1000)
     coupee = choix.get('finish_reason') == 'length'
     if coupee and not en_flux:
-        raise AgentErreur(f'Réponse de Qwen coupée (limite de {body["max_tokens"]} jetons).')
+        raise ReponseInvalide(f'Réponse de Qwen coupée (limite de {body["max_tokens"]} jetons).')
     if schema is None:
         contenu = (message.get('content') or '').strip()
         if not contenu:
-            raise AgentErreur('Qwen a rendu une réponse vide.')
+            raise ReponseInvalide('Qwen a rendu une réponse vide.')
     else:
         try:
             contenu = json.loads(message.get('content') or '')
         except ValueError:
             contenu = None
         if not isinstance(contenu, dict):
-            raise AgentErreur('Réponse de Qwen illisible (JSON attendu).')
+            raise ReponseInvalide('Réponse de Qwen illisible (JSON attendu).')
     reflexion = len(message.get('reasoning_content') or message.get('reasoning') or '') // 4   # estimation, ~4 caractères par jeton
     dernier = {'entree': usage.get('prompt_tokens', 0), 'sortie': usage.get('completion_tokens', 0), 'reflexion': reflexion, 'duree_ms': duree}
     if coupee:
@@ -449,10 +457,14 @@ async def lire_lot(ctx: 'RechercheContext', question: str, lot: list[dict], prec
     ids = [p['id'] for p in lot]
     texte = '\n\n'.join(f'<<<PASSAGE {p["id"]}' + (f' — section : {sur(p["section"])}' if p['section'] else '')
                          + f'>>>\n{sur(p["texte"])}\nFIN>>>' for p in lot)
-    reponse, jetons = await appel(ctx, 'lecture', [
-        {'role': 'system', 'content': ctx.consignes['lecture']},
-        {'role': 'user', 'content': f'Question : {question}{precision}\n\nIdentifiants permis : {", ".join(ids)}\n\n{texte}'},
-    ], SCHEMA_LECTURE, 1500)
+    try:
+        reponse, jetons = await appel(ctx, 'lecture', [
+            {'role': 'system', 'content': ctx.consignes['lecture']},
+            {'role': 'user', 'content': f'Question : {question}{precision}\n\nIdentifiants permis : {", ".join(ids)}\n\n{texte}'},
+        ], SCHEMA_LECTURE, 1500)
+    except ReponseInvalide:
+        # Un lot illisible ne fait pas échouer la recherche : il ne donne simplement aucun fait.
+        return {'faits': [], 'contradictions': [], 'sans_reponse': []}, {'entree': 0, 'sortie': 0, 'reflexion': 0, 'duree_ms': 0}, ids
     return reponse, jetons, ids
 
 
@@ -1015,8 +1027,11 @@ async def compresseur(entree: dict, runtime: Runtime[RechercheContext]) -> dict:
         contenu += '\n\nContradictions relevées par les lecteurs :\n' + '\n'.join(f'- {c["texte"]}' for c in entree['contradictions'][:5])
     if entree['manques']:
         contenu += '\n\nSans réponse dans les pages lues :\n' + '\n'.join(f'- {m}' for m in entree['manques'][:5])
-    r, jetons = await appel(ctx, 'compression', [{'role': 'system', 'content': ctx.consignes['compression']},
-                                                 {'role': 'user', 'content': contenu}], SCHEMA_COMPRESSION, 2500)
+    try:
+        r, jetons = await appel(ctx, 'compression', [{'role': 'system', 'content': ctx.consignes['compression']},
+                                                     {'role': 'user', 'content': contenu}], SCHEMA_COMPRESSION, 2500)
+    except ReponseInvalide:
+        r, jetons = {}, {'entree': 0, 'sortie': 0, 'reflexion': 0, 'duree_ms': 0}   # repli : les faits bruts
     notes, rejetees = _notes_valides(r.get('notes'), permises)
     contradictions, _ = _notes_valides(r.get('contradictions'), permises)
     repli = not notes   # aucune note valide : les faits eux-mêmes servent de notes
@@ -1056,8 +1071,13 @@ async def redacteur_section(entree: dict, runtime: Runtime[RechercheContext]) ->
     if entree['sans_reponse']:
         contenu += '\n\nSans réponse dans les pages lues :\n' + '\n'.join(f'- {m}' for m in entree['sans_reponse'])
     # En flux vers nulle part : une section coupée par la limite de jetons est gardée (et signalée).
-    texte, jetons = await appel(ctx, 'section', [{'role': 'system', 'content': ctx.consignes['section']},
-                                                 {'role': 'user', 'content': contenu}], None, SECTION_JETONS, lambda _: None)
+    try:
+        texte, jetons = await appel(ctx, 'section', [{'role': 'system', 'content': ctx.consignes['section']},
+                                                     {'role': 'user', 'content': contenu}], None, SECTION_JETONS, lambda _: None)
+    except ReponseInvalide:
+        # Section non écrite : ses notes, telles quelles, avec leurs citations.
+        texte = '\n'.join(f'- {n["texte"]} ' + ''.join(f'[{x}]' for x in n['sources']) for n in entree['notes'])
+        jetons = {'entree': 0, 'sortie': 0, 'reflexion': 0, 'duree_ms': 0}
     texte, invalides = verifier_citations(texte.strip(), permises)
     lignes = texte.split('\n', 1)
     if lignes[0].startswith('#'):

@@ -150,6 +150,20 @@ def groupe(url: str) -> str:
     return "autre"
 
 
+def pertinents(resultats: list[dict], textes: list[str]) -> tuple[list[dict], list[dict]]:
+    """Résultats dont le titre ou l'extrait partage assez de mots utiles (racinisés, mots vides exclus) avec la question
+    ou les requêtes : au moins 2, ou tous s'il y en a moins. Un moteur qui ne retient qu'un mot d'une longue requête
+    (Bing sur « qui a gagné… » : dictionnaires à l'article « qui », résultats de foot ou de Loto) est ainsi écarté
+    avant toute lecture. Rend (gardés, écartés)."""
+    cibles = set().union(*(set(termes(t)) for t in textes)) if textes else set()
+    seuil = min(2, len(cibles))
+    gardes, ecartes = [], []
+    for r in resultats:
+        communs = cibles & set(termes(f"{r.get('titre') or ''} {r.get('extrait') or ''}"))
+        (gardes if len(communs) >= seuil else ecartes).append(r)
+    return gardes, ecartes
+
+
 def site(url: str) -> str:
     return (urlsplit(url).hostname or "").lower().removeprefix("www.")
 

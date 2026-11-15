@@ -238,7 +238,8 @@ async def recherche_multi(request: Request):
                     fusion.append({**res, "position": len(fusion) + 1})
     recherche = {"resultats": fusion, "moteurs_muets": sorted({m for r in recherches for m in r["moteurs_muets"]})}
     candidats = []
-    for r in multi.ordonner(recherche["resultats"]):
+    pertinents, hors_sujet = multi.pertinents(recherche["resultats"], [requete, *requetes])
+    for r in multi.ordonner(pertinents):
         if r["url"] in exclure:
             continue
         try:
@@ -326,6 +327,9 @@ async def recherche_multi(request: Request):
         page["lignes_parasites"] = selection["lignes_parasites"].get(page.get("numero"), 0)
     if len(pages_lues) < nombre:
         selection["avertissements"].insert(0, f"{len(pages_lues)} page(s) lue(s) sur {nombre} demandée(s).")
+    if hors_sujet:
+        selection["avertissements"].append(f"{len(hors_sujet)} résultat(s) hors sujet écarté(s) sans être lus "
+                                           "(titre et extrait sans les mots de la question).")
     if avec_passages:
         selection["passages"] = [{"id": f"S{m['numero']}.{m['position']}", "numero": m["numero"], "url": m["url"], "titre": m["titre"],
                                   "section": m["section"], "position": m["position"], "jetons": m["jetons"], "texte": m["texte_complet"]}

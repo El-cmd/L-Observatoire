@@ -104,6 +104,27 @@ class Sources(unittest.TestCase):
                           "https://blog.exemple.fr/taskgroup", "https://sans-moteur.fr/", "https://www.allocine.fr/x"])
 
 
+class Pertinence(unittest.TestCase):
+    def test_resultats_hors_sujet_ecartes(self):
+        """Production, 15/11/2026 : seul Bing répondait, en ne retenant que « qui » de la requête."""
+        resultats = [
+            {'url': 'https://fr.wiktionary.org/wiki/qui', 'titre': 'qui — Wiktionnaire, le dictionnaire libre', 'extrait': 'Pronom relatif.'},
+            {'url': 'https://www.flashscore.fr/', 'titre': 'Foot en direct, Résultats Foot, Match en Direct Live', 'extrait': 'Résultats en direct.'},
+            {'url': 'https://www.fdj.fr/', 'titre': 'Derniers tirages Loto, EuroMillions', 'extrait': 'Résultats des tirages.'},
+            {'url': 'https://fr.wikipedia.org/wiki/x', 'titre': 'Élections américaines de mi-mandat de 2026',
+             'extrait': 'Les élections de mi-mandat ont renouvelé la Chambre des représentants.'},
+            {'url': 'https://apnews.com/x', 'titre': 'Midterm elections 2026 results', 'extrait': 'House and Senate control.'},
+        ]
+        gardes, ecartes = multi.pertinents(resultats, ['qui a gagné les élections de mi-mandat de 2026 ?',
+                                                       'résultats élections mi-mandat 2026 Chambre Sénat', 'midterm elections 2026 results'])
+        self.assertEqual([r['url'] for r in gardes], ['https://fr.wikipedia.org/wiki/x', 'https://apnews.com/x'])
+        self.assertEqual(len(ecartes), 3)
+
+    def test_requete_d_un_seul_mot(self):
+        gardes, _ = multi.pertinents([{'url': 'u', 'titre': 'Tarantino', 'extrait': ''}], ['Tarantino'])
+        self.assertEqual(len(gardes), 1)
+
+
 class Parallele(unittest.TestCase):
     def test_racinisation_dans_plusieurs_fils(self):
         """Deux recherches triées en même temps (mode très approfondi) : le raciniseur partagé plantait (IndexError)."""
@@ -221,9 +242,12 @@ class Selection(unittest.TestCase):
 
 
 def faux(appels, bloque=(), coupe=()):
-    resultats = [{"title": f"Page {i}", "url": u, "content": "c", "engine": "bing"} for i, u in enumerate([
-        "https://forum.exemple.fr/questions/1", "https://www.mutuelle.fr/lunettes", "https://www.python.org/lunettes",
-        "https://fr.wikipedia.org/lunettes", "https://www.bloque.fr/", "https://www.autre.fr/x", "https://www.python.org/doublon"])]
+    resultats = [{"title": f"Page {i}", "url": u, "content": "Remboursement des lunettes et prise en charge", "engine": "bing"}
+                 for i, u in enumerate(["https://forum.exemple.fr/questions/1", "https://www.mutuelle.fr/lunettes", "https://www.python.org/lunettes",
+                                        "https://fr.wikipedia.org/lunettes", "https://www.bloque.fr/", "https://www.autre.fr/x",
+                                        "https://www.python.org/doublon"])]
+    # Hors sujet (un moteur qui n'a retenu qu'un mot) : écarté sans être lu.
+    resultats.insert(1, {"title": "Derniers tirages du Loto", "url": "https://www.loto.fr/", "content": "Résultats des tirages", "engine": "bing"})
 
     def repondre(r):
         appels.append(r)
@@ -266,6 +290,8 @@ class Route(unittest.TestCase):
         self.assertEqual(etats[:2], [("https://www.python.org/lunettes", "lue"), ("https://fr.wikipedia.org/lunettes", "erreur")])
         self.assertEqual(sum(1 for _, e in etats if e == "lue"), 3)
         self.assertNotIn("https://www.python.org/doublon", [u for u, _ in etats])
+        self.assertNotIn("https://www.loto.fr/", [u for u, _ in etats])
+        self.assertTrue(any("hors sujet" in a for a in corps["avertissements"]))
         self.assertLessEqual(corps["contexte"]["jetons"], 3000)
         self.assertEqual(corps["budget"], 3000)
         crawls = [json.loads(a.content) for a in self.appels if a.url.path == "/crawl"]
@@ -309,7 +335,7 @@ class Route(unittest.TestCase):
     def test_crawl4ai_sature(self):
         def sature(r):
             if r.url.host == "searxng":
-                return httpx.Response(200, json={"results": [{"title": "A", "url": f"https://site{i}.fr/", "content": "", "engine": "x"} for i in range(6)]})
+                return httpx.Response(200, json={"results": [{"title": "Lunettes", "url": f"https://site{i}.fr/", "content": "", "engine": "x"} for i in range(6)]})
             return httpx.Response(429, text="Rate limit exceeded")
         self.brancher(httpx.AsyncClient(transport=httpx.MockTransport(sature)))
         corps = self.tc.post("/recherche-multi", json={"requete": "lunettes"}).json()

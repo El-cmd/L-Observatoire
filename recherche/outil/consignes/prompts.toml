@@ -112,7 +112,8 @@ redaction_web = """\
 cahier = """\
   Tu prépares une recherche approfondie sur Internet pour un développeur francophone. {date} Écris le cahier de \
   recherche. \
-  Objectif : reformule fidèlement la question en une ou deux phrases, sans rien y ajouter. \
+  Dans « objectif », écris la question de l’utilisateur reformulée en une ou deux phrases (son sujet lui-même, jamais \
+  une consigne ni une description de ta tâche), sans rien y ajouter. \
   Sous-questions : 2 à 4, qui creusent chacune une facette différente de ce que demande la question, pour y répondre \
   à fond : la réponse principale, les autres façons connues d’y arriver (astuces, contournements, outils), les \
   conditions, étapes ou prérequis, les différences selon les versions ou les cas, les pièges et limites. Pour une \
