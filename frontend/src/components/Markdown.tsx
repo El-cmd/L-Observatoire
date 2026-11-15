@@ -1,5 +1,6 @@
 import {memo, useMemo} from 'react';
 import {formatProse, highlightCode, linkCitations} from '../lib/format';
+import type {Source} from '../lib/sites';
 import {CopyButton} from './CopyButton';
 
 const CodeBlock = memo(function CodeBlock({source, language, onError}: {source: string; language: string; onError: (message: string) => void}) {
@@ -11,7 +12,7 @@ const CodeBlock = memo(function CodeBlock({source, language, onError}: {source: 
   </pre>;
 });
 
-type Sources = ReadonlyMap<number, {url: string; titre: string}>;
+type Sources = ReadonlyMap<number, Source>;
 const NONE: Sources = new Map();
 
 const Prose = memo(function Prose({text, sources}: {text: string; sources: Sources}) {

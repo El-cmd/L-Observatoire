@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest';
-import {siteName, splitSources} from '../components/Sources';
+import {splitSources} from '../components/Sources';
+import {siteLabel, siteName} from './sites';
 
 describe('sources of a web search answer', () => {
   it('separates the answer from the list written by the server', () => {
@@ -13,5 +14,7 @@ describe('sources of a web search answer', () => {
   it('names the site without www', () => {
     expect(siteName('https://www.france24.com/fr/x')).toBe('france24.com');
     expect(siteName('pas une adresse')).toBe('pas une adresse');
+    expect(siteLabel({url: 'https://docs.github.com/x', titre: 't', site: 'GitHub Docs'})).toBe('GitHub Docs');
+    expect(siteLabel({url: 'https://docs.github.com/x', titre: 't', site: '  '})).toBe('docs.github.com');
   });
 });

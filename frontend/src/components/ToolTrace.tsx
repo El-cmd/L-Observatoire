@@ -1,6 +1,6 @@
 import type {ReactNode} from 'react';
 import type {ToolEvent} from '../types';
-import type {Source} from './Sources';
+import type {Source} from '../lib/sites';
 
 const DEPTHS: Record<string, string> = {web: 'rapide', approfondie: 'approfondie', tres_approfondie: 'très approfondie'};
 const COVERAGE: Record<string, string> = {couverte: 'couverte', partielle: 'partielle', absente: 'absente'};
@@ -99,11 +99,12 @@ export function citationSources(events?: ToolEvent[]): Map<number, Source> {
   const sources = new Map<number, Source>();
   for (const event of events || []) {
     if (event.outil !== 'recherche_web' || event.type !== 'sources' || !Array.isArray(event.sources)) continue;
-    for (const source of event.sources as {numero?: number; url?: string; titre?: string; icone?: string}[]) {
+    for (const source of event.sources as {numero?: number; url?: string; titre?: string; icone?: string; site?: string}[]) {
       const url = safe(source.url);
       // Icon: a small PNG embedded by the server (the page only shows its own images and data: ones).
       const icone = typeof source.icone === 'string' && source.icone.startsWith('data:image/png;base64,') && source.icone.length < 16000 ? source.icone : undefined;
-      if (typeof source.numero === 'number' && url) sources.set(source.numero, {url, titre: source.titre || url, ...(icone ? {icone} : {})});
+      const site = typeof source.site === 'string' ? source.site.trim().slice(0, 60) : '';
+      if (typeof source.numero === 'number' && url) sources.set(source.numero, {url, titre: source.titre || url, ...(icone ? {icone} : {}), ...(site ? {site} : {})});
     }
   }
   return sources;

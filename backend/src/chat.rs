@@ -11,8 +11,8 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{FromRow, types::Json as DbJson};
-use std::convert::Infallible;
-use tokio::sync::mpsc;
+use std::{convert::Infallible, sync::Arc, time::Duration};
+use tokio::sync::{Notify, mpsc};
 use uuid::Uuid;
 
 #[derive(Clone, PartialEq, Deserialize, Serialize)]
@@ -33,6 +33,13 @@ pub struct Message {
     /// Shown under the answer; never sent back to Qwen (the answer text carries its sources).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outils: Vec<Value>,
+}
+
+/// An answer being written: the Stop button reaches it through `stop`, and `done` tells when it is saved.
+pub struct Running {
+    generation: Uuid,
+    stop: Arc<Notify>,
+    done: Arc<Notify>,
 }
 
 /// Tool steps kept with one answer: enough for a very deep search (a few dozen events).
@@ -417,6 +424,26 @@ async fn save_title(app: &App, id: Uuid, name: &str) -> bool {
     matches!(done, Ok(ref result) if result.rows_affected() == 1)
 }
 
+/// Stops the answer being written in this conversation (Stop button), and waits until what was received is saved
+/// and the conversation is free again (15 s at most). Nothing being written: nothing to do.
+pub async fn stop(State(app): State<App>, headers: HeaderMap, Path(id): Path<Uuid>) -> Result<StatusCode, Error> {
+    let user = session(&app, &headers, true).await?;
+    let owned: Option<i32> = sqlx::query_scalar("SELECT 1 FROM conversations WHERE id=$1 AND user_id=$2")
+        .bind(id).bind(user.user_id).fetch_optional(&app.db).await?;
+    if owned.is_none() {
+        return Err(Error::missing());
+    }
+    let running = app.running.lock().expect("running answers").get(&id).map(|r| (r.stop.clone(), r.done.clone()));
+    if let Some((stop, done)) = running {
+        let saved = done.notified();
+        tokio::pin!(saved);
+        saved.as_mut().enable();
+        stop.notify_one();
+        let _ = tokio::time::timeout(Duration::from_secs(15), saved).await;
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Streaming chat completion, from Qwen or from the orchestrator (same API).
 async fn send_completion(app: &App, url: &str, key: &str, payload: &Value) -> Result<reqwest::Response, reqwest::Error> {
     app.http
@@ -575,6 +602,11 @@ pub async fn generate(
         .map(|m| m.content.len() + m.reasoning.len())
         .sum();
     let (sender, receiver) = mpsc::channel::<Result<Bytes, Infallible>>(8);
+    // Stop button: it reaches the answer through the API, even when proxies (Cloudflare, Nginx) keep the browser's
+    // closed connection open for a while.
+    let stop = Arc::new(Notify::new());
+    let saved_signal = Arc::new(Notify::new());
+    app.running.lock().expect("running answers").insert(id, Running { generation, stop: stop.clone(), done: saved_signal.clone() });
     tokio::spawn(async move {
         let _permit = permit;
         let mut source = upstream.bytes_stream();
@@ -605,6 +637,7 @@ pub async fn generate(
             let chunk = tokio::select! {
                 _ = sender.closed()=>{disconnected=true;break;},
                 _ = shutdown.changed()=>{disconnected=true;break;},
+                _ = stop.notified()=>{disconnected=true;break;},
                 named = async { naming.as_mut().expect("guarded by the branch condition").await }, if naming.is_some() => {
                     naming = None;
                     if let Ok(Some(name)) = named {
@@ -779,6 +812,13 @@ pub async fn generate(
             };
             let _ = sender.send(Ok(Bytes::from_static(end.as_bytes()))).await;
         }
+        {
+            let mut running = app.running.lock().expect("running answers");
+            if running.get(&id).is_some_and(|r| r.generation == generation) {
+                running.remove(&id);
+            }
+        }
+        saved_signal.notify_waiters();
     });
     let mut response =
         Body::from_stream(tokio_stream::wrappers::ReceiverStream::new(receiver)).into_response();

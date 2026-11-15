@@ -1,4 +1,7 @@
-export type Source = {url: string; titre: string; icone?: string};
+import {type Source, hue, siteLabel, siteName} from '../lib/sites';
+
+export type {Source};
+export {siteName};
 
 const MARKER = '\n\n**Sources**\n\n';
 
@@ -12,17 +15,6 @@ export function splitSources(content: string): {body: string; cited: number[]} |
   return {body: content.slice(0, at), cited: lines.map(line => Number(line.match(/^- \[(\d+)\]/)![1]))};
 }
 
-export const siteName = (url: string) => {
-  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
-};
-
-/** A steady colour per site, for the initial shown when the site has no icon. */
-function hue(text: string) {
-  let value = 0;
-  for (const char of text) value = (value * 31 + char.charCodeAt(0)) % 360;
-  return value;
-}
-
 /** Cited sources as cards: icon of the site (or its initial), site, page title and citation number. */
 export function SourceList({numbers, sources}: {numbers: number[]; sources: ReadonlyMap<number, Source>}) {
   return <div className="sources-block">
@@ -31,7 +23,7 @@ export function SourceList({numbers, sources}: {numbers: number[]; sources: Read
       {numbers.map(number => {
         const source = sources.get(number);
         if (!source) return null;
-        const site = siteName(source.url);
+        const site = siteLabel(source);
         return <li key={number}><a href={source.url} target="_blank" rel="noopener noreferrer nofollow" title={source.url}>
           {source.icone ? <img className="source-icon" src={source.icone} alt="" width={16} height={16}/>
             : <span className="source-icon source-initial" style={{background: `hsl(${hue(site)} 40% 32%)`}} aria-hidden="true">{site.charAt(0).toUpperCase()}</span>}

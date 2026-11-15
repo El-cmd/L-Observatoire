@@ -1,6 +1,7 @@
 import hljs from 'highlight.js/lib/common';
 import katex from 'katex';
 import MarkdownIt from 'markdown-it';
+import {type Source, hue, siteLabel} from './sites';
 
 const escape = (text: string) => text.replace(/[&<>"']/g, char => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[char]!));
 
@@ -47,14 +48,39 @@ export function formatProse(text: string): string {
 
 const attribute = (text: string) => text.replace(/[&<>"']/g, char => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[char]!));
 
-/** Citations [n] of a web search answer become links to their source (only http and https pages). Tags, links and
- *  inline code are left alone, and so is a bracket glued to a word (tableau[0]). */
-export function linkCitations(html: string, sources: ReadonlyMap<number, {url: string; titre: string}>): string {
+const safeURL = (url: string) => /^https?:\/\//i.test(url);
+
+function siteIcon(source: Source): string {
+  if (source.icone?.startsWith('data:image/png;base64,')) return `<img class="cite-icon" src="${attribute(source.icone)}" alt="" width="14" height="14">`;
+  const label = siteLabel(source);
+  return `<span class="cite-icon cite-initial" style="background:hsl(${hue(label)} 40% 32%)" aria-hidden="true">${escape(label.charAt(0).toUpperCase())}</span>`;
+}
+
+/** One chip for a group of citations: icon and name of the first site, "+n" for the others; on hover or focus, a
+ *  small window lists every source of the group (site, page title, number), each one clickable. */
+function citationChip(list: [number, Source][]): string {
+  const [, first] = list[0];
+  const names = list.map(([, source]) => siteLabel(source));
+  const items = list.map(([number, source]) => `<a href="${attribute(source.url)}" target="_blank" rel="noopener noreferrer nofollow">`
+    + `${siteIcon(source)}<span class="cite-pop-text"><span class="cite-pop-site">${escape(siteLabel(source))}</span>`
+    + `<span class="cite-pop-title">${escape(source.titre)}</span></span><span class="cite-pop-number">${number}</span></a>`).join('');
+  return `<span class="cite"><a class="cite-chip" href="${attribute(first.url)}" target="_blank" rel="noopener noreferrer nofollow" `
+    + `aria-label="${attribute(`Source${list.length > 1 ? 's' : ''} : ${names.join(', ')}`)}">${siteIcon(first)}`
+    + `<span class="cite-name">${escape(names[0])}</span>${list.length > 1 ? `<span class="cite-more">+${list.length - 1}</span>` : ''}</a>`
+    + `<span class="cite-pop"><span class="cite-pop-box">${items}</span></span></span>`;
+}
+
+/** Citations of a web search answer ([1], [1][3]…) become chips with the icon and name of their site, linking to
+ *  the page (only http and https pages). Tags, links and inline code are left alone, and so is a bracket glued to a
+ *  word (tableau[0]). A number without a known source stays as written. */
+export function linkCitations(html: string, sources: ReadonlyMap<number, Source>): string {
   if (!sources.size) return html;
   return html.split(/(<code[\s\S]*?<\/code>|<a\s[\s\S]*?<\/a>|<[^>]+>)/).map((part, index) => index % 2 ? part
-    : part.replace(/(?<!\w)\[(\d{1,3})\]/g, (match, number: string) => {
-      const source = sources.get(Number(number));
-      if (!source || !/^https?:\/\//i.test(source.url)) return match;
-      return `<a class="citation" href="${attribute(source.url)}" target="_blank" rel="noopener noreferrer nofollow" title="${attribute(source.titre)}">[${number}]</a>`;
+    : part.replace(/(?<!\w)((?:\[\d{1,3}\])+)/g, group => {
+      const numbers = [...group.matchAll(/\d+/g)].map(match => Number(match[0]));
+      const known = [...new Set(numbers)].filter(number => {const source = sources.get(number); return source && safeURL(source.url);});
+      if (!known.length) return group;
+      const rest = numbers.filter(number => !known.includes(number)).map(number => `[${number}]`).join('');
+      return citationChip(known.map(number => [number, sources.get(number)!])) + rest;
     })).join('');
 }

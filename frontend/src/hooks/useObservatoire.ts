@@ -42,6 +42,8 @@ export function useObservatoire() {
   const [activity, setActivityState] = useState<Record<string, Activity>>({});
   const activityRef = useRef<Record<string, Activity>>({});
   const controllers = useRef(new Map<string, AbortController>());
+  // Stop requested by the user: the server stops and saves the answer; the conversation is reloaded after it.
+  const stopping = useRef(new Map<string, Promise<unknown>>());
   const [navigating, setNavigating] = useState(false);
   const navigation = useRef<{id: number; controller?: AbortController}>({id: 0});
   const creating = useRef(false);
@@ -280,6 +282,8 @@ export function useObservatoire() {
         if (recoveryImages.length) setPending(() => recoveryImages);
       }
     } finally {
+      const stopped = stopping.current.get(id);
+      if (stopped) {await stopped.catch(() => {}); stopping.current.delete(id);}
       if (epoch.current === account) {
         try {
           for (let attempt = 0; attempt < 8; attempt++) {
@@ -442,5 +446,11 @@ export function useObservatoire() {
     settings, setSettings, newChat, openChat, deleteChat, renameChat, send, regenerate, continueAnswer,
     contextUsage:contextUsage && contextUsage.conversation_id === currentId && contextUsage.version === activeChat?.version ? contextUsage : null,
     compacting:currentActivity === 'compacting', compactContext, summaryFocus,
-    stop:() => {if (currentRef.current) controllers.current.get(currentRef.current)?.abort();}, canImport, importing, importLegacy};
+    stop:() => {
+      const id = currentRef.current; const controller = id ? controllers.current.get(id) : undefined;
+      if (!id || !controller) return;
+      // The server stops the answer at once and saves it, even if proxies keep the closed connection open a while.
+      stopping.current.set(id, client.json(`/api/conversations/${id}/stop`, {method:'POST'}));
+      controller.abort();
+    }, canImport, importing, importLegacy};
 }

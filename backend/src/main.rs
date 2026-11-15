@@ -31,6 +31,8 @@ pub struct App {
     pub dummy_hash: Arc<String>,
     pub shutdown: tokio::sync::watch::Receiver<bool>,
     pub token_counts: Arc<tokio::sync::Mutex<context::TokenCache>>,
+    /// Answers being written, by conversation: the Stop button reaches them here.
+    pub running: Arc<std::sync::Mutex<std::collections::HashMap<uuid::Uuid, chat::Running>>>,
 }
 
 pub struct Config {
@@ -215,6 +217,7 @@ async fn main() -> Result<()> {
     let app = App {
         shutdown: shutdown_rx,
         token_counts: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        running: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         db: db.clone(),
         http: reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
@@ -260,6 +263,7 @@ async fn main() -> Result<()> {
             get(chat::get_one).put(chat::update).delete(chat::delete),
         )
         .route("/api/conversations/{id}/generate", post(chat::generate))
+        .route("/api/conversations/{id}/stop", post(chat::stop))
         .route("/api/conversations/{id}/title", put(chat::rename).layer(DefaultBodyLimit::max(8192)))
         .route("/api/attachments", get(attachments::list).post(attachments::upload).layer(DefaultBodyLimit::max(documents::MAX_UPLOAD)))
         .route("/api/attachments/{id}", get(attachments::file).delete(attachments::delete))

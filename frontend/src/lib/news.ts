@@ -13,8 +13,10 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-15-arret', date: '2026-11-15', level: 'fix', title: 'Arrêter une réponse, tout de suite',
+    text: 'Le bouton d’arrêt coupe maintenant la réponse immédiatement : vous pouvez écrire votre message suivant sans attendre ni recharger la page.'},
   {id: '2026-11-15-sources-icones', date: '2026-11-15', level: 'improvement', title: 'Des sources plus lisibles', reserve: 'recherche_web',
-    text: 'Après une recherche sur Internet, les sources s’affichent sous la réponse comme de petites cartes, avec le logo de chaque site, son nom et le titre de la page. Cliquez sur une carte pour ouvrir la page.'},
+    text: 'Après une recherche sur Internet, chaque citation s’affiche dans le texte avec le logo et le nom du site ; passez dessus pour voir toutes ses sources. Sous la réponse, les sources sont rassemblées en petites cartes. Cliquez pour ouvrir la page.'},
   {id: '2026-11-12-recherche-web', date: '2026-11-12', level: 'major', title: 'Chercher sur Internet', reserve: 'recherche_web',
     text: 'Le bouton Web, à gauche du champ de saisie, permet à L’Observatoire de chercher sur Internet avant de répondre : il lit les pages, puis répond en citant ses sources, [1], [2]… sur lesquelles vous pouvez cliquer. La petite flèche à côté choisit comment chercher : Automatique (L’Observatoire décide s’il faut chercher, et jusqu’où), Rapide (une recherche, environ 30 secondes), Approfondie (plusieurs sources croisées, environ une minute) ou Très approfondie (un dossier complet sur une question large ou une comparaison, quelques minutes). Le déroulé de la recherche se déplie au-dessus de la réponse. Si la réflexion est activée dans les réglages, L’Observatoire réfléchit aussi pendant la recherche : c’est plus long, parfois plus juste.'},
   {id: '2026-11-01-documents', date: '2026-11-01', level: 'major', title: 'Envoyez des documents',

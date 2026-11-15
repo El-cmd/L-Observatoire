@@ -296,7 +296,8 @@ async def recherche_multi(request: Request):
                 if raison:                                   # mur payant, CAPTCHA, page coupée : remplacée par la suivante
                     etat.update(etat="incomplete", erreur=raison, version=version or "brut", caracteres=len(texte))
                     continue
-                etat.update(etat="lue", version=version or "brut", caracteres=len(texte), titre=lue.get("titre") or r["titre"])
+                etat.update(etat="lue", version=version or "brut", caracteres=len(texte), titre=lue.get("titre") or r["titre"],
+                            site=lue.get("site") or "")
                 lues[r["url"]] = {"url": r["url"], "titre": lue.get("titre") or r["titre"], "groupe": r["groupe"], "texte": texte,
                                   "date_consultation": lue.get("date_consultation") or maintenant()}
     for tache, r in en_cours.items():

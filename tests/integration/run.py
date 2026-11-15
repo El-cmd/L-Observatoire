@@ -471,6 +471,23 @@ class Integration(unittest.TestCase):
         finally:
             sql("UPDATE users SET recherche_web=false WHERE username='alice'", admin=True)
 
+    def test_13b_stop_reaches_the_answer_even_if_the_connection_stays_open(self):
+        chat = self.alice.create('slow'); path = '/api/conversations/'+chat['id']
+        # The browser's connection stays open, as when a proxy does not pass on its closing.
+        response = self.alice.call(path+'/generate', 'POST', {'version': chat['version']}, stream=True)
+        self.assertTrue(response.readline())
+        # bob's password was changed by test_09: a new session with the new one.
+        other = Client(); other.login('bob', 'New-integration-password-2026!')
+        self.assertEqual(other.call(path+'/stop', 'POST')[0], 404, 'another account cannot stop it')
+        code, _, _ = self.alice.call(path+'/stop', 'POST')
+        self.assertEqual(code, 204)
+        saved = self.alice.call(path)[1]
+        self.assertGreater(saved['version'], chat['version'], 'saved before /stop answers')
+        self.assertTrue(saved['messages'][-1]['interrupted'])
+        self.assertEqual(self.alice.call(path, 'PUT', {'version': saved['version'], 'messages': [{'role': 'user', 'content': 'Après Stop'}]})[0], 200)
+        self.assertEqual(self.alice.call(path+'/stop', 'POST')[0], 204, 'nothing running: nothing to do')
+        response.close()
+
     def test_14_without_orchestrator_qwen_answers_directly(self):
         compose('stop', 'orchestrateur', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         sql("UPDATE users SET recherche_web=true WHERE username='alice'", admin=True)

@@ -221,3 +221,16 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .source-site{font-size:11px;color:#8f8f8f;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .source-title{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .source-number{font-size:11px;color:#7a7a7a;flex-shrink:0}
+/* Citation chips in the text of a web search answer: icon and name of the site, "+n", sources listed on hover. */
+.cite{position:relative;display:inline-block;vertical-align:1px;margin:0 2px}
+.message-content a.cite-chip{display:inline-flex;align-items:center;gap:5px;max-width:220px;padding:0 8px 0 4px;border-radius:999px;background:#262626;color:#d2d2d2;font-size:12px;line-height:21px;text-decoration:none}
+.message-content a.cite-chip:hover,.cite:focus-within a.cite-chip{background:#333;color:#fff}
+.cite-icon{width:14px;height:14px;flex-shrink:0;border-radius:3px}.cite-initial{display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;color:#eee}
+.cite-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cite-more{color:#9a9a9a}
+.cite-pop{display:none;position:absolute;left:0;bottom:100%;z-index:30;padding-bottom:6px}
+.cite:hover .cite-pop,.cite:focus-within .cite-pop{display:block}
+.cite-pop-box{display:flex;flex-direction:column;gap:2px;width:min(320px,78vw);padding:6px;background:#1e1e1e;border:1px solid #3a3a3a;border-radius:11px;box-shadow:0 12px 30px #000a}
+.message-content .cite-pop-box a{display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:7px;color:#ddd;text-decoration:none;line-height:1.35}
+.message-content .cite-pop-box a:hover{background:#2c2c2c}
+.cite-pop-text{display:flex;flex-direction:column;min-width:0;flex:1}.cite-pop-site{font-size:11px;color:#8f8f8f}
+.cite-pop-title{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cite-pop-number{font-size:11px;color:#777}

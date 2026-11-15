@@ -193,6 +193,8 @@ class Crawl4ai:
             "succes": bool(resultat.get("success")) and bool(markdown.strip()),
             "statut_http": resultat.get("status_code"),
             "titre": _texte(meta.get("title") or meta.get("og:title"), TITRE_MAX),
+            # Nom que le site se donne (« GitHub Docs », « Wikipédia ») : celui des puces de citation.
+            "site": _texte(meta.get("og:site_name") or meta.get("application-name"), 60),
             "description": _texte(meta.get("description") or meta.get("og:description"), EXTRAIT_MAX),
             "langue": _texte(meta.get("language") or meta.get("lang"), 20),
             "markdown": markdown[:CONTENU_MAX],
