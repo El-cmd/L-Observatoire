@@ -1,5 +1,6 @@
 import type {ReactNode} from 'react';
 import type {ToolEvent} from '../types';
+import type {Source} from './Sources';
 
 const DEPTHS: Record<string, string> = {web: 'rapide', approfondie: 'approfondie', tres_approfondie: 'très approfondie'};
 const COVERAGE: Record<string, string> = {couverte: 'couverte', partielle: 'partielle', absente: 'absente'};
@@ -94,13 +95,15 @@ export function provisionalReport(content: string, events: ToolEvent[] | undefin
 }
 
 /** Sources of the search (number -> page), for the clickable citations [n] of the answer. */
-export function citationSources(events?: ToolEvent[]): Map<number, {url: string; titre: string}> {
-  const sources = new Map<number, {url: string; titre: string}>();
+export function citationSources(events?: ToolEvent[]): Map<number, Source> {
+  const sources = new Map<number, Source>();
   for (const event of events || []) {
     if (event.outil !== 'recherche_web' || event.type !== 'sources' || !Array.isArray(event.sources)) continue;
-    for (const source of event.sources as {numero?: number; url?: string; titre?: string}[]) {
+    for (const source of event.sources as {numero?: number; url?: string; titre?: string; icone?: string}[]) {
       const url = safe(source.url);
-      if (typeof source.numero === 'number' && url) sources.set(source.numero, {url, titre: source.titre || url});
+      // Icon: a small PNG embedded by the server (the page only shows its own images and data: ones).
+      const icone = typeof source.icone === 'string' && source.icone.startsWith('data:image/png;base64,') && source.icone.length < 16000 ? source.icone : undefined;
+      if (typeof source.numero === 'number' && url) sources.set(source.numero, {url, titre: source.titre || url, ...(icone ? {icone} : {})});
     }
   }
   return sources;

@@ -406,6 +406,12 @@ def lots_de(liste: list[dict]) -> list[list[dict]]:
     return lots[:LOTS_PAR_ITERATION]
 
 
+def icone(page: dict) -> str | None:
+    """Icône du site rendue par le service (PNG en adresse data:), pour la liste des sources ; None sinon."""
+    valeur = page.get('icone')
+    return valeur if isinstance(valeur, str) and valeur.startswith('data:image/png;base64,') and len(valeur) < 16_000 else None
+
+
 def enregistrer_pages(resultat: dict, sources: dict, urls: list, partielles: list, iteration: int) -> list[dict]:
     """Pages d'une recherche : numéros de source globaux (stables d'une recherche à l'autre), pages essayées et pages
     partielles notées (`sources`, `urls`, `partielles` complétés sur place). Rend les passages, identifiés
@@ -419,7 +425,7 @@ def enregistrer_pages(resultat: dict, sources: dict, urls: list, partielles: lis
             urls.append(url)
         if page.get('etat') == 'lue':
             sources.setdefault(url, {'numero': len(sources) + 1, 'url': url, 'titre': str(page.get('titre') or url),
-                                     'iteration': iteration, 'favorisee': page.get('groupe') == 'favorisee'})
+                                     'iteration': iteration, 'favorisee': page.get('groupe') == 'favorisee', 'icone': icone(page)})
             if page.get('numero') is not None:
                 numeros[int(page['numero'])] = sources[url]['numero']
         elif page.get('etat') in ('incomplete', 'erreur', 'delai'):
@@ -617,7 +623,7 @@ async def recherche_simple(etat: Etat, runtime: Runtime[RechercheContext]) -> di
     for page in resultat.get('pages') or []:
         if page.get('etat') == 'lue' and page.get('numero') is not None:
             sources[page['url']] = {'numero': int(page['numero']), 'url': page['url'], 'titre': str(page.get('titre') or page['url']),
-                                    'iteration': iteration, 'favorisee': page.get('groupe') == 'favorisee'}
+                                    'iteration': iteration, 'favorisee': page.get('groupe') == 'favorisee', 'icone': icone(page)}
     pages = resultat.get('pages') or []
     citables = sorted({int(p['numero']) for p in pages if p.get('numero') is not None and p.get('gardes')})
     contexte = (resultat.get('contexte') or {})

@@ -54,7 +54,8 @@ def faux_service(recherches: list):
         corps = json.loads(request.content)
         recherches.append(corps)
         return httpx.Response(200, json={
-            'pages': [{'url': 'https://docs.docker.com/memoire', 'titre': 'Docker', 'etat': 'lue', 'numero': 1, 'groupe': 'favorisee', 'gardes': 2},
+            'pages': [{'url': 'https://docs.docker.com/memoire', 'titre': 'Docker', 'etat': 'lue', 'numero': 1, 'groupe': 'favorisee', 'gardes': 2,
+                       'icone': 'data:image/png;base64,iVBORw0KGgo='},
                       {'url': 'https://blog.exemple.fr/x', 'titre': 'Blog', 'etat': 'lue', 'numero': 2, 'groupe': 'autre', 'gardes': 0},
                       {'url': 'https://lent.exemple.fr/', 'titre': 'Lent', 'etat': 'delai', 'erreur': 'trop long', 'groupe': 'autre'}],
             'contexte': {'texte': 'Sources :\n[1] Docker — https://docs.docker.com/memoire\n<<<PASSAGE [1]>>>\nUtilisez --memory.\n<<<FIN DU PASSAGE>>>',
@@ -124,6 +125,8 @@ class Web(unittest.TestCase):
         self.assertEqual(resultat['citations_invalides'], 2)
         self.assertEqual([s['numero'] for s in resultat['sources']], [1, 2])
         self.assertTrue(resultat['sources'][0]['favorisee'])
+        self.assertEqual(resultat['sources'][0]['icone'], 'data:image/png;base64,iVBORw0KGgo=', 'icône du site gardée avec la source')
+        self.assertIsNone(resultat['sources'][1]['icone'])
         self.assertIn('Page non lue ou incomplète : https://lent.exemple.fr/ (trop long)', resultat['limites'])
         self.assertEqual(resultat['statistiques']['appels_qwen'], 2)
 

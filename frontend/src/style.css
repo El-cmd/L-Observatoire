@@ -209,3 +209,15 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .tool-page-state:not(.is-lue){color:#d99a9a}.tool-limits li{color:#c9a96a}
 .message-content a.citation{font-size:.8em;vertical-align:super;text-decoration:none;color:#9cc3ff;margin:0 1px}.message-content a.citation:hover{text-decoration:underline}
 @media(max-width:760px){.web-label,.web-mode-label{display:none}.web-toggle{padding:0 3px 0 9px}.web-search{height:36px}.web-menu{width:min(270px,80vw)}}
+/* Sources of a web search answer: cards with the icon of each site. */
+.sources-block{margin-top:22px}.sources-heading{font-size:12px;color:#8a8a8a;margin-bottom:8px}
+.source-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;list-style:none;margin:0;padding:0}
+.message-content .source-list{padding:0;margin:0}.message-content .source-list li{margin:0;min-width:0}
+.source-list a{display:flex;align-items:center;gap:10px;height:100%;padding:8px 11px;border:1px solid #2a2a2a;border-radius:10px;background:#141414;color:#ddd;text-decoration:none;min-width:0}
+.source-list a:hover{background:#1c1c1c;border-color:#3a3a3a}
+.source-icon{width:16px;height:16px;flex-shrink:0;border-radius:4px}
+.source-initial{display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:#eee}
+.source-text{display:flex;flex-direction:column;min-width:0;flex:1;line-height:1.35}
+.source-site{font-size:11px;color:#8f8f8f;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.source-title{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.source-number{font-size:11px;color:#7a7a7a;flex-shrink:0}

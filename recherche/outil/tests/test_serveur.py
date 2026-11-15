@@ -35,6 +35,8 @@ class Compacter(unittest.TestCase):
         self.assertEqual(serveur.resultat_outil(res, 'web'), {
             'mode': 'web', 'reponse': 'R [1].', 'limites': ['l'], 'sources': [{'numero': 1, 'url': 'u', 'titre': 't'}],
             'duree_s': 3.2, 'appels': 2, 'pages_lues': 5, 'arret': 'réponse rédigée'})
+        avec = serveur.resultat_outil({**res, 'sources': [{'numero': 1, 'url': 'u', 'titre': 't', 'icone': 'data:image/png;base64,AA'}]}, 'web')
+        self.assertEqual(avec['sources'][0]['icone'], 'data:image/png;base64,AA')
         vide = serveur.resultat_outil({'reponse': '', 'statistiques': {'raison_arret': 'erreur : Qwen injoignable'}}, 'web')
         self.assertEqual(vide['erreur'], 'erreur : Qwen injoignable')
 

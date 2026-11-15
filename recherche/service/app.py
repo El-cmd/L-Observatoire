@@ -18,6 +18,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 import garde
+from icones import Icones
 import multi
 import nettoyage
 import qualite
@@ -28,6 +29,7 @@ REQUETES_MAX = 3
 EXCLURE_MAX = 50
 SOURCES_COMPLETE = 3
 ESSAIS_COMPLETE = 5
+ICONES_DELAI = 3.0                 # attente au plus, après les lectures, des icônes encore en route
 
 journal = logging.getLogger("web-search")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -41,8 +43,14 @@ async def cycle(app: FastAPI):
     app.state.searxng = Searxng(os.environ.get("SEARXNG_URL", "http://searxng:8080"), client)
     app.state.crawl4ai = Crawl4ai(os.environ.get("CRAWL4AI_URL", "http://crawl4ai:11235"), os.environ.get("CRAWL4AI_API_TOKEN", ""), client)
     app.state.lectures = asyncio.Semaphore(LECTURES_SIMULTANEES)
+    # Icônes des sites : demandées par le proxy de sortie (SORTIE_PROXY), le seul chemin de ce service vers Internet.
+    proxy = os.environ.get("SORTIE_PROXY", "")
+    sortie = httpx.AsyncClient(proxy=proxy, trust_env=False, follow_redirects=False) if proxy else None
+    app.state.icones = Icones(sortie)
     yield
     await client.aclose()
+    if sortie is not None:
+        await sortie.aclose()
 
 
 app = FastAPI(title="web-search-service", docs_url=None, redoc_url=None, openapi_url=None, lifespan=cycle)
@@ -241,6 +249,9 @@ async def recherche_multi(request: Request):
     etats = {r["url"]: {"position": r["position"], "url": r["url"], "titre": r["titre"], "groupe": r["groupe"],
                         "libelle_groupe": multi.LIBELLE_GROUPE[r["groupe"]], "etat": "non_essayee"} for r in candidats}
     lues, en_cours, file, essais, arret = {}, {}, list(candidats), 0, False
+    # Icônes des sites qui seront peut-être lus : demandées pendant les lectures (cache par domaine).
+    icones_en_cours = {r["url"]: asyncio.ensure_future(request.app.state.icones.pour(r["url"]))
+                       for r in candidats[:nombre + multi.ESSAIS_EN_PLUS]}
 
     async def une(r):
         try:
@@ -291,6 +302,14 @@ async def recherche_multi(request: Request):
     for tache, r in en_cours.items():
         tache.cancel()
         etats[r["url"]].update(etat="delai", erreur=f"Lecture abandonnée : délai global de {int(multi.DELAI_GLOBAL)} s dépassé.")
+    attendues = [icones_en_cours[u] for u in lues if u in icones_en_cours]
+    if attendues:
+        await asyncio.wait(attendues, timeout=ICONES_DELAI)
+    for url, tache in icones_en_cours.items():
+        if url in lues and tache.done() and not tache.cancelled() and tache.exception() is None and tache.result():
+            etats[url]["icone"] = tache.result()
+        elif not tache.done():
+            tache.cancel()   # la demande elle-même continue et remplit le cache (asyncio.shield dans icones.py)
     # Numéros de source dans l'ordre des candidats (stable, indépendant de l'ordre de fin des lectures).
     pages_lues = []
     for r in candidats:

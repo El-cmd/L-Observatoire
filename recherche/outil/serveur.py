@@ -112,7 +112,8 @@ def compacter(e: dict) -> dict | None:
 def resultat_outil(res: dict, profondeur: str) -> dict:
     s = res.get('statistiques') or {}
     sortie = {'mode': profondeur, 'reponse': res.get('reponse') or '', 'limites': res.get('limites') or [],
-              'sources': [{'numero': x.get('numero'), 'url': x.get('url'), 'titre': x.get('titre')} for x in res.get('sources') or []],
+              'sources': [{'numero': x.get('numero'), 'url': x.get('url'), 'titre': x.get('titre'),
+                           **({'icone': x['icone']} if x.get('icone') else {})} for x in res.get('sources') or []],
               'duree_s': s.get('duree_s'), 'appels': s.get('appels_qwen'), 'pages_lues': s.get('pages_lues'),
               'arret': s.get('raison_arret')}
     if not sortie['reponse']:

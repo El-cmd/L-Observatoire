@@ -5,3 +5,5 @@ httpx==0.28.1
 # Recherche multi-sources : jetons exacts (tokenizer de Qwen, celui de CeliA) et racinisation du français (BM25).
 tokenizers==0.23.3
 snowballstemmer==3.1.1
+# Icônes des sites (redessinées en PNG 32 × 32) ; même version que doc-guard.
+pillow==12.3.0

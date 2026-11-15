@@ -153,6 +153,8 @@ services:
       CRAWL4AI_API_TOKEN: ${CRAWL4AI_API_TOKEN:-}
       SEARXNG_URL: http://10.231.30.10:8080
       CRAWL4AI_URL: http://10.231.30.20:11235
+      # Icônes des sites lus (liste des sources) : demandées par le proxy de sortie.
+      SORTIE_PROXY: http://10.231.30.3:3128
     networks:
       recherche: {ipv4_address: 10.231.30.30}
     depends_on: [searxng, crawl4ai]
