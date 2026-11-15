@@ -210,7 +210,16 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .message-content a.citation{font-size:.8em;vertical-align:super;text-decoration:none;color:#9cc3ff;margin:0 1px}.message-content a.citation:hover{text-decoration:underline}
 @media(max-width:760px){.web-label,.web-mode-label{display:none}.web-toggle{padding:0 3px 0 9px}.web-search{height:36px}.web-menu{width:min(270px,80vw)}}
 /* Sources of a web search answer: cards with the icon of each site. */
-.sources-block{margin-top:22px}.sources-heading{font-size:12px;color:#8a8a8a;margin-bottom:8px}
+.sources-block{margin-top:20px}
+.sources-block>summary{display:inline-flex;align-items:center;gap:9px;list-style:none;cursor:pointer;padding:5px 11px 5px 7px;border:1px solid #2a2a2a;border-radius:999px;background:#141414;color:#bdbdbd;font-size:12.5px;line-height:20px;user-select:none}
+.sources-block>summary::-webkit-details-marker{display:none}
+.sources-block>summary:hover{background:#1c1c1c;color:#eee}
+.sources-block>summary svg{width:15px;height:15px;transition:transform .15s}
+.sources-block[open]>summary svg{transform:rotate(180deg)}
+.sources-stack{display:inline-flex}
+.sources-stack .source-icon{width:18px;height:18px;border-radius:50%;box-shadow:0 0 0 2px #141414;background:#222;margin-left:-3px}
+.sources-stack .source-icon:first-child{margin-left:0}
+.message-content .sources-block[open]>.source-list{margin-top:10px}
 .source-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;list-style:none;margin:0;padding:0}
 .message-content .source-list{padding:0;margin:0}.message-content .source-list li{margin:0;min-width:0}
 .source-list a{display:flex;align-items:center;gap:10px;height:100%;padding:8px 11px;border:1px solid #2a2a2a;border-radius:10px;background:#141414;color:#ddd;text-decoration:none;min-width:0}
@@ -234,3 +243,14 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .message-content .cite-pop-box a:hover{background:#2c2c2c}
 .cite-pop-text{display:flex;flex-direction:column;min-width:0;flex:1}.cite-pop-site{font-size:11px;color:#8f8f8f}
 .cite-pop-title{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cite-pop-number{font-size:11px;color:#777}
+/* Tables: words are never cut inside a cell (with the message's overflow-wrap:anywhere, a phone screen squeezed a
+   column down to one letter per line); a table too wide scrolls sideways instead. On a phone, its first column stays
+   in view while scrolling. */
+.message-content table{line-height:1.55;-webkit-overflow-scrolling:touch}
+.message-content :is(th,td){overflow-wrap:break-word;word-break:normal;min-width:6.5em}
+@media(max-width:760px){
+.message-content table{font-size:13px}
+.message-content :is(th,td){padding:6px 10px;min-width:8.5em}
+.message-content :is(th,td):first-child{position:sticky;left:0;z-index:1;background:#0b0b0b;box-shadow:inset -1px 0 #333;min-width:7em}
+.message-content th:first-child{background:#1b1b1b}
+}

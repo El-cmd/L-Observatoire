@@ -13,6 +13,10 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-15-tableaux-telephone', date: '2026-11-15', level: 'improvement', title: 'Des tableaux lisibles sur téléphone',
+    text: 'Sur un petit écran, les tableaux ne coupent plus les mots lettre par lettre : faites glisser le tableau sur le côté pour voir toutes ses colonnes, la première reste affichée.'},
+  {id: '2026-11-15-sources-repliees', date: '2026-11-15', level: 'improvement', title: 'Sources repliées', reserve: 'recherche_web',
+    text: 'Sous une réponse trouvée sur Internet, les sources sont rangées derrière un petit bouton avec les logos des sites. Touchez-le pour les afficher.'},
   {id: '2026-11-15-application', date: '2026-11-15', level: 'major', title: 'L’Observatoire comme une application',
     text: 'Vous pouvez installer L’Observatoire sur votre ordinateur ou votre téléphone Android : ouvrez le menu de votre compte, en bas à gauche, et choisissez « Installer l’application ». Il s’ouvre ensuite dans sa propre fenêtre, avec son icône. Sur iPhone, touchez le bouton Partager de Safari, puis « Sur l’écran d’accueil ».'},
   {id: '2026-11-15-arret', date: '2026-11-15', level: 'fix', title: 'Arrêter une réponse, tout de suite',
