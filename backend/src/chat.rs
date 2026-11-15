@@ -633,11 +633,23 @@ pub async fn generate(
         let mut done = false;
         let mut failed = false;
         let mut disconnected = false;
+        // Keep-alive: a comment line every 15 s, ignored by the browser. Cloudflare closes a response that sends
+        // nothing for 100 s, which a very deep search can do while its researchers read (15/11/2026).
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
+        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        heartbeat.tick().await;
         'read: loop {
             let chunk = tokio::select! {
                 _ = sender.closed()=>{disconnected=true;break;},
                 _ = shutdown.changed()=>{disconnected=true;break;},
                 _ = stop.notified()=>{disconnected=true;break;},
+                _ = heartbeat.tick()=>{
+                    if sender.send(Ok(Bytes::from_static(b": keep-alive\n\n"))).await.is_err() {
+                        disconnected = true;
+                        break;
+                    }
+                    continue;
+                },
                 named = async { naming.as_mut().expect("guarded by the branch condition").await }, if naming.is_some() => {
                     naming = None;
                     if let Ok(Some(name)) = named {

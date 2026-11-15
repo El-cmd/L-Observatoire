@@ -40,10 +40,15 @@ app = FastAPI(lifespan=cycle, docs_url=None, redoc_url=None, openapi_url=None)
 _FIN = object()
 
 
-async def jusqu_a_deconnexion(request: Request, source):
+BATTEMENT = 15.0   # s : commentaire SSE envoyé quand rien d'autre n'est parti (longues phases silencieuses des outils)
+
+
+async def jusqu_a_deconnexion(request: Request, source, battement: float = BATTEMENT):
     """Flux de `source`, arrêté dès que le backend coupe la connexion (l'utilisateur a cliqué sur Stop) : la production
     est annulée, ce qui ferme la requête à Qwen ou prévient l'outil en cours. Starlette ne le fait plus de lui-même et
-    uvicorn ignore en silence les écritures vers une connexion fermée : sans cela, Qwen écrirait jusqu'au bout."""
+    uvicorn ignore en silence les écritures vers une connexion fermée : sans cela, Qwen écrirait jusqu'au bout.
+    Sans rien à envoyer pendant `battement` secondes, un commentaire SSE (ignoré par le backend) garde la connexion
+    vivante."""
     file: asyncio.Queue = asyncio.Queue()
 
     async def produire():
@@ -61,7 +66,14 @@ async def jusqu_a_deconnexion(request: Request, source):
     producteur = asyncio.create_task(produire())
     veilleur = asyncio.create_task(surveiller())
     try:
-        while (bloc := await file.get()) is not _FIN:
+        while True:
+            try:
+                bloc = await asyncio.wait_for(file.get(), battement)
+            except TimeoutError:
+                yield b': keep-alive\n\n'
+                continue
+            if bloc is _FIN:
+                break
             yield bloc
         await producteur   # erreur éventuelle de la production
     finally:

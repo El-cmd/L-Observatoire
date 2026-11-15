@@ -244,6 +244,21 @@ class Deconnexion(unittest.TestCase):
         self.assertEqual(premier, b'a')
         self.assertTrue(annulee)
 
+    def test_battement_pendant_un_long_silence(self):
+        async def tout():
+            class Requete:
+                async def receive(self):
+                    await asyncio.sleep(30)
+
+            async def source():
+                yield b'data: 1\n\n'
+                await asyncio.sleep(0.35)
+                yield b'data: 2\n\n'
+            return [b async for b in application.jusqu_a_deconnexion(Requete(), source(), battement=0.1)]
+        blocs = asyncio.run(tout())
+        self.assertEqual((blocs[0], blocs[-1]), (b'data: 1\n\n', b'data: 2\n\n'))
+        self.assertGreaterEqual(blocs.count(b': keep-alive\n\n'), 2)
+
     def test_flux_complet_sans_coupure(self):
         async def tout():
             class Requete:
