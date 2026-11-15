@@ -12,3 +12,10 @@ outils = """\
 # Ajouté quand l'utilisateur a choisi une profondeur précise dans le menu du bouton Web : l'outil est imposé.
 outil_impose = """\
   L’utilisateur a demandé d’utiliser l’outil {outil} pour ce message : appelle-le."""
+
+# Donnée à Qwen quand un outil a échoué (recherche indisponible, erreur) : il répond sans l'outil.
+outil_echec = """\
+  L’outil a échoué : réponds sans lui, avec tes connaissances, en commençant par le signaler en une phrase. Nous \
+  sommes le {jour} : pour tout ce qui est récent, daté ou susceptible d’avoir changé (élections, résultats, versions, \
+  prix, actualité), dis clairement que tu ne peux pas le vérifier et jusqu’à quand tes connaissances vont ; ne devine \
+  jamais une date, un résultat ni un chiffre."""

@@ -104,6 +104,27 @@ class Sources(unittest.TestCase):
                           "https://blog.exemple.fr/taskgroup", "https://sans-moteur.fr/", "https://www.allocine.fr/x"])
 
 
+class Parallele(unittest.TestCase):
+    def test_racinisation_dans_plusieurs_fils(self):
+        """Deux recherches triées en même temps (mode très approfondi) : le raciniseur partagé plantait (IndexError)."""
+        import threading
+        texte = ("Les élections de mi-mandat ont renouvelé la Chambre des représentants et un tiers du Sénat ; "
+                 "les républicains et les démocrates se disputaient les circonscriptions décisives. ") * 40
+        attendu, erreurs = multi.termes(texte), []
+
+        def travail():
+            for _ in range(150):
+                try:
+                    if multi.termes(texte) != attendu:
+                        erreurs.append('résultat différent')
+                except IndexError as e:
+                    erreurs.append(repr(e))
+        fils = [threading.Thread(target=travail) for _ in range(4)]
+        [f.start() for f in fils]
+        [f.join() for f in fils]
+        self.assertEqual(erreurs, [])
+
+
 class Decoupage(unittest.TestCase):
     def test_sections_et_tableau_entier(self):
         morceaux = multi.decouper(LUNETTES, "https://www.python.org/l", "Lunettes")

@@ -158,6 +158,7 @@ class Boucle(unittest.TestCase):
         self.assertNotIn('tools', second, 'outil en échec plus proposé')
         self.assertEqual(second['messages'][-1]['role'], 'tool')
         self.assertIn('injoignable', second['messages'][-1]['content'])
+        self.assertIn('ne devine jamais une date', second['messages'][-1]['content'], 'consigne de repli : pas de faits récents inventés')
         self.assertEqual(second['messages'][-2]['tool_calls'][0]['function']['name'], 'recherche_web')
 
     def test_outil_indisponible(self):

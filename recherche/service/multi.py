@@ -8,6 +8,7 @@ Les jetons sont comptés avec le tokenizer du modèle servi (celui de CeliA) ; �
 import math
 import os
 import re
+import threading
 import unicodedata
 from datetime import datetime
 from urllib.parse import urlsplit
@@ -64,7 +65,16 @@ quelles quels qui quoi s sa sans se selon ses si sien soi soient soit son sont s
 toute toutes tu un une vers vos votre vous y
 """.split())
 
-_racine = snowballstemmer.stemmer("french")
+# Un raciniseur par fil d'exécution : il garde le mot en cours dans son état interne, et deux recherches en parallèle
+# (mode très approfondi, tri dans asyncio.to_thread) s'écrasaient l'une l'autre (IndexError, 15/11/2026).
+_fils = threading.local()
+
+
+def _racine():
+    raciniseur = getattr(_fils, "raciniseur", None)
+    if raciniseur is None:
+        raciniseur = _fils.raciniseur = snowballstemmer.stemmer("french")
+    return raciniseur
 _tokenizer = None
 _tokenizer_essaye = False
 
@@ -103,7 +113,7 @@ def termes(texte: str) -> list[str]:
     """Mots utiles, en minuscules, racinisés (« remboursements » → « rembours ») ; accents et mots vides retirés."""
     mots = re.findall(r"[a-zà-ÿœæ0-9]+", texte.lower())
     utiles = [m for m in mots if m not in MOTS_VIDES and len(m) > 1]
-    return [_sans_accents(r) for r in _racine.stemWords(utiles)]
+    return [_sans_accents(r) for r in _racine().stemWords(utiles)]
 
 
 def bm25(morceaux_termes: list[list[str]], requete: list[str], k1: float = 1.5, b: float = 0.75) -> list[float]:

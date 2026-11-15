@@ -54,6 +54,12 @@ def consigne_outils(forcer: str | None) -> str:
     return texte
 
 
+def consigne_echec() -> str:
+    """Consigne donnée à Qwen quand un outil a échoué (consignes.toml)."""
+    brut = tomllib.loads(CONSIGNES.read_text(encoding='utf-8'))
+    return brut['outil_echec'].strip().replace('{jour}', aujourd_hui())
+
+
 def avec_consigne(messages: list[dict], consigne: str) -> list[dict]:
     """Une seule consigne système, en tête (le gabarit de Qwen n'en accepte pas deux) : fusionnée avec la mémoire de
     la conversation si le backend en envoie une."""
@@ -208,7 +214,7 @@ async def outils(etat: Etat, runtime: Runtime[Contexte]) -> dict:
         ecrire({'observatoire': {nom: {'type': 'echec', 'message': str(sortie.get('erreur') or 'échec')[:300]}}})
         ctx.exclus.add(nom)
         reponses.append({'role': 'tool', 'tool_call_id': appel['id'], 'content': json.dumps(
-            {'erreur': sortie.get('erreur'), 'consigne': 'Réponds sans cet outil, avec tes connaissances, en le signalant.'},
+            {'erreur': sortie.get('erreur'), 'consigne': consigne_echec()},
             ensure_ascii=False)})
     return {'messages': [*etat['messages'], *reponses], 'tours': etat.get('tours', 0) + 1, 'appels': []}
 
