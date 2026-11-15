@@ -16,3 +16,6 @@ backups/
 tests/integration/.env
 
 frontend/dist/
+
+# Worktrees des agents Claude Code
+.claude/worktrees/

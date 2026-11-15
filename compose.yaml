@@ -9,7 +9,7 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
-    image: observatoire-frontend:local
+    image: observatoire-frontend:${TAG:-local}
     ports:
       - "127.0.0.1:${PORT:-8080}:8080"
     depends_on:
@@ -26,7 +26,7 @@ services:
     logging: *logs
   backend:
     build: ./backend
-    image: observatoire-backend:local
+    image: observatoire-backend:${TAG:-local}
     environment:
       DATABASE_URL: postgres://observatoire_app:${POSTGRES_PASSWORD:?Exécuter make init}@db:5432/observatoire
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
@@ -65,7 +65,7 @@ services:
   # Only service that decodes images sent by users: no outbound network, no data, no secrets.
   image-guard:
     build: ./image-guard
-    image: observatoire-image-guard:local
+    image: observatoire-image-guard:${TAG:-local}
     networks: [guard]
     restart: unless-stopped
     init: true
@@ -80,7 +80,7 @@ services:
   # data, no secrets; each document is read by a process of its own, capped in memory and time.
   doc-guard:
     build: ./doc-guard
-    image: observatoire-doc-guard:local
+    image: observatoire-doc-guard:${TAG:-local}
     networks: [docs]
     restart: unless-stopped
     init: true
@@ -96,7 +96,7 @@ services:
   # use (MCP servers of orchestrateur/outils.toml). No data, no port; Qwen through the « qwen » network only.
   orchestrateur:
     build: ./orchestrateur
-    image: observatoire-orchestrateur:local
+    image: observatoire-orchestrateur:${TAG:-local}
     environment:
       QWEN_BASE_URL: ${QWEN_BASE_URL:-}
       QWEN_API_KEY: ${QWEN_API_KEY:-}
@@ -121,7 +121,7 @@ services:
   recherche:
     profiles: [recherche]
     build: ./recherche/outil
-    image: observatoire-recherche:local
+    image: observatoire-recherche:${TAG:-local}
     environment:
       QWEN_BASE_URL: ${QWEN_BASE_URL:-}
       QWEN_API_KEY: ${QWEN_API_KEY:-}
@@ -148,7 +148,7 @@ services:
   recherche-service:
     profiles: [recherche]
     build: ./recherche/service
-    image: observatoire-recherche-service:local
+    image: observatoire-recherche-service:${TAG:-local}
     environment:
       CRAWL4AI_API_TOKEN: ${CRAWL4AI_API_TOKEN:-}
       SEARXNG_URL: http://10.231.30.10:8080

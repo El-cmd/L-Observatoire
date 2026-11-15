@@ -39,7 +39,7 @@ services:
         condition: service_started
   # Fake MCP search tool (the orchestrator image already has the MCP library).
   outil-factice:
-    image: observatoire-orchestrateur:local
+    image: observatoire-orchestrateur:${TAG:-local}
     command: [python, /outil.py]
     environment:
       RECHERCHE_TOKEN: integration-tool-token
