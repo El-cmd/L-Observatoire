@@ -1,7 +1,7 @@
 """web-search-service : seul point d'entrée du Labo recherche web vers SearXNG et Crawl4AI.
 
 Appelé par l'agent du Labo recherche de L'Observatoire, sur le réseau Docker interne. Aucune fonction LLM.
-Routes : GET /sante, POST /rechercher, POST /lire, POST /recherche-complete. Erreurs : {"erreur": {"code", "message"}}.
+Routes : GET /sante, POST /rechercher, POST /lire, POST /lire-page, POST /recherche-complete, POST /recherche-multi. Erreurs : {"erreur": {"code", "message"}}.
 Journal : route, statut, durée et nombres seulement ; jamais la requête, l'adresse lue ni le contenu.
 """
 import asyncio
@@ -41,11 +41,12 @@ async def cycle(app: FastAPI):
     # trust_env=False : le service parle aux moteurs sur le réseau interne, jamais par un proxy de l'environnement.
     client = httpx.AsyncClient(trust_env=False, follow_redirects=False, limits=httpx.Limits(max_connections=10))
     app.state.searxng = Searxng(os.environ.get("SEARXNG_URL", "http://searxng:8080"), client)
-    app.state.crawl4ai = Crawl4ai(os.environ.get("CRAWL4AI_URL", "http://crawl4ai:11235"), os.environ.get("CRAWL4AI_API_TOKEN", ""), client)
-    app.state.lectures = asyncio.Semaphore(LECTURES_SIMULTANEES)
-    # Icônes des sites : demandées par le proxy de sortie (SORTIE_PROXY), le seul chemin de ce service vers Internet.
+    # Icônes des sites et lecture simple des pages (sans navigateur) : par le proxy de sortie (SORTIE_PROXY), le seul
+    # chemin de ce service vers Internet. Redirections suivies une à une, chaque adresse contrôlée (telechargement.py).
     proxy = os.environ.get("SORTIE_PROXY", "")
     sortie = httpx.AsyncClient(proxy=proxy, trust_env=False, follow_redirects=False) if proxy else None
+    app.state.crawl4ai = Crawl4ai(os.environ.get("CRAWL4AI_URL", "http://crawl4ai:11235"), os.environ.get("CRAWL4AI_API_TOKEN", ""), client, sortie)
+    app.state.lectures = asyncio.Semaphore(LECTURES_SIMULTANEES)
     app.state.icones = Icones(sortie)
     yield
     await client.aclose()
@@ -144,6 +145,56 @@ async def lire(request: Request):
     donnees = await corps(request)
     url = garde.url_publique(donnees.get("url"))
     return await lecture(request, url, requete_bm25(donnees.get("requete")))
+
+
+def texte_de(lue: dict) -> tuple[str | None, str]:
+    """(version, texte) d'une page lue pour le modèle : « sans liens » dès qu'elle a un peu de texte (le brut garde menus,
+    logos et liens), sinon la version recommandée, sinon le brut ; appels de note des wikis retirés."""
+    versions = lue.get("versions") or {}
+    if (versions.get("sans_liens") or {}).get("caracteres", 0) >= 200:
+        version = "sans_liens"
+    else:
+        version = lue.get("recommandee") if lue.get("recommandee") in versions else None
+    texte = versions[version]["texte"] if version else str(lue.get("markdown") or "")
+    return version, nettoyage.sans_appels_de_note(texte)
+
+
+@app.post("/lire-page")
+async def lire_page(request: Request):
+    """Une page donnée par l'utilisateur (outil lire_page), prête pour le modèle : texte nettoyé entier s'il tient dans
+    le budget ; sinon, avec une question, les passages les plus proches d'elle (BM25) dans l'ordre de la page ; sans
+    question, le début de la page. Avec l'icône du site, pour la liste des sources."""
+    donnees = await corps(request)
+    url = garde.url_publique(donnees.get("url"))
+    question = requete_bm25(donnees.get("question"))
+    budget = borne(donnees.get("budget"), multi.PAGE_BUDGET_DEFAUT, multi.BUDGET_MIN, multi.PAGE_BUDGET_MAX, "budget_invalide",
+                   f"Budget entre {multi.BUDGET_MIN} et {multi.PAGE_BUDGET_MAX} jetons.")
+    debut = time.monotonic()
+    icone = asyncio.ensure_future(request.app.state.icones.pour(url))
+    try:
+        lue = await lecture(request, url, question)
+    except BaseException:
+        icone.cancel()
+        raise
+    sortie = {"url": url, "url_finale": lue.get("url_finale") or url, "date_consultation": lue.get("date_consultation") or maintenant(),
+              "lecture": lue.get("lecture")}
+    if not lue.get("succes"):
+        icone.cancel()
+        return {**sortie, "succes": False, "erreur": lue.get("erreur") or "La page n'a rien donné de lisible."}
+    _, texte = texte_de(lue)
+    texte, _ = multi.preparer(texte, True)
+    page = await asyncio.to_thread(multi.extrait_page, texte, url, lue.get("titre") or "", question, budget)
+    # Mur payant, CAPTCHA, page coupée : signalé au modèle (une page courte, elle, n'a rien d'anormal ici).
+    raison = qualite.incomplete(str(lue.get("markdown") or "") + "\n" + texte, texte)
+    if raison and raison.startswith("texte trop court"):
+        raison = None
+    try:
+        sortie["icone"] = await asyncio.wait_for(asyncio.shield(icone), ICONES_DELAI)
+    except Exception:   # noqa: BLE001 — délai dépassé ou échec : une icône manquante ne fait pas échouer la lecture
+        sortie["icone"] = None
+    return {**sortie, "succes": True, "titre": lue.get("titre") or "", "site": lue.get("site") or "",
+            "description": lue.get("description") or "", **page,
+            **({"avertissement": raison} if raison else {}), "duree_s": round(time.monotonic() - debut, 1)}
 
 
 @app.post("/recherche-complete")
@@ -285,13 +336,7 @@ async def recherche_multi(request: Request):
             else:
                 # Version « sans liens » dès qu'elle a un peu de texte (BM25 et la pertinence minimale écartent le reste),
                 # même quand la lecture seule recommande le brut : le brut garde menus, logos et liens.
-                versions = lue.get("versions") or {}
-                if (versions.get("sans_liens") or {}).get("caracteres", 0) >= 200:
-                    version = "sans_liens"
-                else:
-                    version = lue.get("recommandee") if lue.get("recommandee") in versions else None
-                texte = lue["versions"][version]["texte"] if version else lue.get("markdown", "")
-                texte = nettoyage.sans_appels_de_note(texte)
+                version, texte = texte_de(lue)
                 # Marques cherchées aussi dans le brut (le nettoyage peut retirer la ligne « il vous reste… »).
                 raison = qualite.incomplete(str(lue.get("markdown") or "") + "\n" + texte, multi.preparer(texte, True)[0]) if optimise else None
                 if raison:                                   # mur payant, CAPTCHA, page coupée : remplacée par la suivante

@@ -21,6 +21,7 @@ import qualite
 # Réglages par défaut (modifiables par l'appelant dans ces bornes).
 BUDGET_DEFAUT, BUDGET_MIN, BUDGET_MAX = 8000, 1000, 20000
 PAGES_DEFAUT, PAGES_MIN, PAGES_MAX = 5, 1, 8
+PAGE_BUDGET_DEFAUT, PAGE_BUDGET_MAX = 6000, 12000   # outil lire_page : une page donnée par l'utilisateur
 ESSAIS_EN_PLUS = 3                 # pages bloquées ou incomplètes : 3 résultats de plus essayés au plus
 DELAI_GLOBAL = 120.0               # au-delà, les pages non lues sont ignorées et signalées
 # Découpage et sélection.
@@ -478,3 +479,50 @@ def selectionner(requete: str, lues: list[dict], budget: int, optimise: bool = T
             "requete_termes": requete_termes, "optimisations": optimise,
             "corrections": [{"de": de, "vers": vers} for de, vers in fautes.items()],
             "lignes_parasites": {p["numero"]: p["lignes_parasites"] for p in lues}}
+
+
+# ── Une page donnée par l'utilisateur (outil lire_page) ─────────────────────
+
+def extrait_page(texte: str, url: str, titre: str, question: str, budget: int) -> dict:
+    """Texte d'une seule page pour le modèle, sous le budget : entier s'il tient ; sinon, avec une question, les morceaux
+    au meilleur score BM25 après le début de la page (pris par score, rendus dans l'ordre de la page, « […] » entre deux
+    morceaux non contigus) ;
+    sans question, ou si aucun morceau ne partage de mot avec elle, le début de la page.
+    Rend {texte, jetons, entier, extrait} ; extrait : comment le texte a été réduit (absent si entier)."""
+    total = jetons(texte)
+    if total <= budget:
+        return {"texte": texte, "jetons": total, "entier": True}
+    morceaux = decouper(texte, url, titre)
+    q = list(dict.fromkeys(termes(question))) if question else []
+    scores = bm25([termes(m["section"] + " " + m["texte"]) for m in morceaux], q) if q and morceaux else []
+    if any(s > 0 for s in scores):
+        # Le début de la page (introduction, résumé) est toujours gardé s'il est raisonnable : il situe le reste.
+        choisis = [morceaux[0]] if morceaux[0]["jetons"] <= budget // 3 else []
+        utilises = sum(m["jetons"] for m in choisis)
+        for m, s in sorted(zip(morceaux, scores), key=lambda c: (-c[1], c[0]["position"])):
+            if s <= 0:
+                break
+            if m in choisis or utilises + m["jetons"] > budget:
+                continue
+            choisis.append(m)
+            utilises += m["jetons"]
+        choisis.sort(key=lambda m: m["position"])
+        parties, precedent = [], None
+        for m in choisis:
+            if precedent is not None and m["position"] != precedent + 1:
+                parties.append("[…]")
+            # Morceau pris au milieu d'une section : son titre devant, pour le situer (déjà là en début de section).
+            entete = m["section"] and m["section"] != titre and not m["texte"].lstrip().startswith("#")
+            parties.append((f"## {m['section']}\n\n" if entete else "") + m["texte"])
+            precedent = m["position"]
+        sortie = "\n\n".join(parties)
+        return {"texte": sortie, "jetons": jetons(sortie), "entier": False,
+                "extrait": f"page longue ({total} jetons) : passages les plus proches de la question, dans l'ordre de la page"}
+    parties, utilises = [], 0
+    for m in morceaux:
+        if utilises + m["jetons"] > budget:
+            break
+        parties.append(m["texte"])
+        utilises += m["jetons"]
+    sortie = "\n\n".join(parties) if parties else texte[: budget * 3]
+    return {"texte": sortie, "jetons": jetons(sortie), "entier": False, "extrait": f"page longue ({total} jetons) : début de la page seulement"}

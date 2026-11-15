@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 import httpx
 
 import nettoyage
+import telechargement
 
 RESULTATS_MAX = 10
 TITRE_MAX = 300
@@ -134,10 +135,11 @@ class Searxng:
 
 
 class Crawl4ai:
-    def __init__(self, url: str, jeton: str, client: httpx.AsyncClient):
+    def __init__(self, url: str, jeton: str, client: httpx.AsyncClient, sortie: httpx.AsyncClient | None = None):
         self.url = url.rstrip("/")
         self.jeton = jeton
         self.client = client
+        self.sortie = sortie          # client du proxy de sortie : lecture simple d'abord ; None : navigateur toujours
         self.etat = Etat()
 
     async def sante(self) -> dict:
@@ -194,23 +196,56 @@ class Crawl4ai:
             return str(markdown.get(champ) or "")
         return str(markdown or "") if champ == "raw_markdown" else ""
 
+    async def _lecture_simple(self, url: str) -> tuple[tuple[dict, str, str] | None, str | None]:
+        """((résultat Crawl4AI, adresse finale, HTML aux liens absolus), None) si le HTML téléchargé sans navigateur
+        suffit ; sinon (None, raison du passage au navigateur). Voir telechargement.py."""
+        try:
+            html, url_finale = await telechargement.telecharger(self.sortie, url)
+        except telechargement.Echec as e:
+            return None, e.raison
+        html = nettoyage.liens_absolus(html, url_finale)
+        if len(html.encode()) > nettoyage.HTML_MAX:
+            return None, "page trop lourde"
+        try:
+            resultat = await self._crawl("raw:" + html, nettoyage.configuration_lecture(), DELAI_RETRAITEMENT)
+        except Indisponible as e:
+            if e.code in ("crawl4ai_injoignable", "jeton_refuse", "crawl4ai_sature"):
+                raise
+            return None, "nettoyage impossible"
+        if not resultat.get("success"):
+            return None, "nettoyage impossible"
+        raison = telechargement.besoin_navigateur(self._markdown(resultat))
+        return (None, raison) if raison else ((resultat, url_finale, html), None)
+
     async def lire(self, url: str, requete: str = "") -> dict:
         """Texte de la page en plusieurs versions (voir nettoyage.py), métadonnées et date de consultation.
 
-        Une seule lecture réseau ; les versions nettoyées viennent du HTML reçu, retraité par Crawl4AI (« raw: »).
+        Une seule lecture réseau : téléchargement simple d'abord (voir telechargement.py), navigateur de Crawl4AI si la page
+        en a besoin ; les versions nettoyées viennent du HTML reçu, retraité par Crawl4AI (« raw: »).
         Configuration fixée ici : rien ne vient de l'appelant, sauf la recherche pour BM25 (texte, jamais envoyé dehors).
         """
-        # Pas de remove_overlay_elements : il vide certaines pages (ameli.fr lue « script_heavy_shell », 0 caractère).
         date = maintenant()
-        resultat = await self._crawl(url, {"page_timeout": 30000, "wait_until": "domcontentloaded", **nettoyage.configuration_lecture()}, DELAI_LECTURE)
+        simple, raison = await self._lecture_simple(url) if self.sortie is not None else (None, None)
+        if simple is not None:
+            resultat, url_finale, html = simple
+            statut = 200
+        else:
+            # Pas de remove_overlay_elements : il vide certaines pages (ameli.fr lue « script_heavy_shell », 0 caractère).
+            resultat = await self._crawl(url, {"page_timeout": 30000, "wait_until": "domcontentloaded", **nettoyage.configuration_lecture()}, DELAI_LECTURE)
+            url_finale = str(resultat.get("redirected_url") or resultat.get("url") or url)
+            html = nettoyage.liens_absolus(str(resultat.get("html") or ""), url_finale or url)
+            statut = resultat.get("status_code")
         self.etat.noter_succes()
         markdown = self._markdown(resultat)
         meta = resultat.get("metadata") if isinstance(resultat.get("metadata"), dict) else {}
         lue = {
             "url": url,
-            "url_finale": str(resultat.get("redirected_url") or resultat.get("url") or url),
+            "url_finale": url_finale,
             "succes": bool(resultat.get("success")) and bool(markdown.strip()),
-            "statut_http": resultat.get("status_code"),
+            "statut_http": statut,
+            # « simple » : HTML téléchargé sans navigateur ; « navigateur » : page ouverte par Crawl4AI (raison du repli).
+            "lecture": "simple" if simple is not None else "navigateur",
+            **({"repli_navigateur": raison} if raison else {}),
             "titre": _texte(meta.get("title") or meta.get("og:title"), TITRE_MAX),
             # Nom que le site se donne (« GitHub Docs », « Wikipédia ») : celui des puces de citation.
             "site": _texte(meta.get("og:site_name") or meta.get("application-name"), 60),
@@ -232,7 +267,6 @@ class Crawl4ai:
         # Versions nettoyées : HTML déjà reçu, retraité sans nouvelle connexion au site.
         structure = sans_liens = bm25 = None
         lue["liens"] = []
-        html = nettoyage.liens_absolus(str(resultat.get("html") or ""), lue["url_finale"] or url)
         if html and len(html.encode()) <= nettoyage.HTML_MAX:
             try:
                 r1 = await self._crawl("raw:" + html, nettoyage.configuration_structure(), DELAI_RETRAITEMENT)

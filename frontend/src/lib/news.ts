@@ -13,6 +13,10 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-15-lire-une-page', date: '2026-11-15', level: 'major', title: 'Lire une page dont vous donnez le lien',
+    text: 'Activez le bouton Web, collez l’adresse d’une page dans votre message et demandez, par exemple, « résume cette page » ou « que dit cet article sur les délais ? ». L’Observatoire lit la page puis vous répond en la citant ; elle apparaît dans les sources sous la réponse.'},
+  {id: '2026-11-15-recherche-plus-rapide', date: '2026-11-15', level: 'improvement', title: 'Une recherche sur Internet plus rapide',
+    text: 'L’Observatoire lit maintenant la plupart des pages bien plus vite : une recherche avec le bouton Web prend moins de temps, surtout en mode Approfondie ou Très approfondie.'},
   {id: '2026-11-15-recherche-web-pour-tous', date: '2026-11-15', level: 'major', title: 'Chercher sur Internet',
     text: 'L’Observatoire peut maintenant chercher sur Internet pour vous répondre. Touchez le bouton Web, à côté de la zone de message, puis choisissez : Automatique (il décide seul), Rapide, Approfondie ou Très approfondie. La réponse cite ses sources : touchez une citation pour ouvrir la page. Si quelqu’un d’autre cherche au même moment, votre recherche attend son tour quelques instants.'},
   {id: '2026-11-15-tableaux-telephone', date: '2026-11-15', level: 'improvement', title: 'Des tableaux lisibles sur téléphone',

@@ -4,6 +4,8 @@ import json
 import unittest
 from unittest import mock
 
+import httpx
+
 from mcp.shared.memory import create_connected_server_and_client_session
 
 import serveur
@@ -77,7 +79,7 @@ class AppelMcp(unittest.TestCase):
             return {'reponse': 'La 1.99 [1].\n\n**Sources**', 'limites': [], 'sources': [{'numero': 1, 'url': 'https://r.org', 'titre': 'Rust'}],
                     'statistiques': {'duree_s': 1.0, 'appels_qwen': 2, 'pages_lues': 5, 'raison_arret': 'réponse rédigée'}}
         outils, r, recus = self.appeler(executer)
-        outil = outils.tools[0]
+        outil = next(o for o in outils.tools if o.name == 'recherche_web')
         self.assertEqual(outil.name, 'recherche_web')
         self.assertEqual(outil.inputSchema['properties']['profondeur']['enum'], ['web', 'approfondie', 'tres_approfondie'])
         self.assertIn('question complète et autonome', outil.inputSchema['properties']['question']['description'])
@@ -147,6 +149,62 @@ class AppelMcp(unittest.TestCase):
         r = asyncio.run(tout())
         self.assertEqual(json.loads(r.content[0].text)['erreur'], serveur.OCCUPE)
         self.assertEqual(serveur.en_cours, {})
+
+
+class LirePage(unittest.TestCase):
+    def appeler(self, service, arguments, meta=None):
+        demandes = []
+
+        def repondre(r: httpx.Request) -> httpx.Response:
+            demandes.append((r.url.path, json.loads(r.content)))
+            return service(r)
+
+        async def tout():
+            web = httpx.AsyncClient(base_url='http://recherche-service:8080', transport=httpx.MockTransport(repondre))
+            with mock.patch.dict(serveur._clients, {'qwen': httpx.AsyncClient(), 'web': web}):
+                async with create_connected_server_and_client_session(serveur.serveur._mcp_server) as client:
+                    outils = await client.list_tools()
+                    r = await client.call_tool('lire_page', arguments, meta=meta)
+            return outils, json.loads(r.content[0].text)
+        outils, sortie = asyncio.run(tout())
+        return outils, sortie, demandes
+
+    def test_page_lue(self):
+        page = {'succes': True, 'url': 'https://exemple.fr/a', 'url_finale': 'https://exemple.fr/b', 'titre': 'Garantie',
+                'site': 'Exemple', 'icone': 'data:image/png;base64,AA', 'texte': 'La garantie dure deux ans.', 'jetons': 8,
+                'entier': True, 'date_consultation': '2026-11-15T20:00:00+00:00', 'lecture': 'simple', 'duree_s': 1.2}
+        outils, sortie, demandes = self.appeler(lambda r: httpx.Response(200, json=page),
+                                                {'url': ' https://exemple.fr/a ', 'question': ' durée  garantie '},
+                                                meta={'observatoire': {'premier_numero': 2}})
+        outil = next(o for o in outils.tools if o.name == 'lire_page')
+        self.assertEqual(outil.inputSchema['required'], ['url'])
+        self.assertEqual(demandes, [('/lire-page', {'url': 'https://exemple.fr/a', 'question': 'durée garantie'})])
+        self.assertEqual(sortie['page'], {'numero': 2, 'url': 'https://exemple.fr/b', 'titre': 'Garantie',
+                                          'date_consultation': '2026-11-15T20:00:00+00:00', 'texte': 'La garantie dure deux ans.'})
+        self.assertEqual(sortie['sources'], [{'numero': 2, 'url': 'https://exemple.fr/b', 'titre': 'Garantie',
+                                              'icone': 'data:image/png;base64,AA', 'site': 'Exemple'}])
+        self.assertNotIn('reponse', sortie, 'pas une réponse finale : Qwen rédige ensuite')
+        self.assertEqual((sortie['pages_lues'], sortie['lecture']), (1, 'simple'))
+
+    def test_page_longue_ou_illisible(self):
+        long = {'succes': True, 'url': 'https://exemple.fr/', 'titre': '', 'texte': 'x', 'entier': False,
+                'extrait': 'page longue : début de la page seulement', 'avertissement': 'mur payant'}
+        _, sortie, demandes = self.appeler(lambda r: httpx.Response(200, json=long), {'url': 'https://exemple.fr/'})
+        self.assertEqual(demandes[0][1], {'url': 'https://exemple.fr/'})
+        self.assertEqual(sortie['page']['numero'], 1)
+        self.assertEqual(sortie['page']['titre'], 'https://exemple.fr/', 'sans titre : l’adresse')
+        self.assertIn('début de la page', sortie['page']['extrait'])
+        self.assertIn('mur payant', sortie['page']['avertissement'])
+        _, sortie, _ = self.appeler(lambda r: httpx.Response(200, json={'succes': False, 'erreur': 'statut HTTP 404'}), {'url': 'https://exemple.fr/'})
+        self.assertEqual(sortie, {'erreur': 'La page n’a pas pu être lue : statut HTTP 404'})
+        refus = {'erreur': {'code': 'url_refusee', 'message': 'Adresse refusée : site interne ou adresse locale.'}}
+        _, sortie, _ = self.appeler(lambda r: httpx.Response(422, json=refus), {'url': 'http://localhost/'})
+        self.assertIn('site interne', sortie['erreur'])
+
+        def panne(_):
+            raise httpx.ConnectError('arrêté')
+        _, sortie, _ = self.appeler(panne, {'url': 'https://exemple.fr/'})
+        self.assertIn('injoignable', sortie['erreur'])
 
 
 class Annulation(unittest.TestCase):

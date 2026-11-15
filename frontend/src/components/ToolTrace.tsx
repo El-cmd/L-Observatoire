@@ -68,16 +68,52 @@ function summary(events: ToolEvent[], streaming: boolean): string {
   return `Recherche web en cours${shown ? ` · ${shown.label}` : '…'}`;
 }
 
-/** Steps of the web search behind an answer, folded above it. */
+/** Pages given by the user and read for the answer (tool lire_page): one line per page, folded above the answer. */
+function PageTrace({events, streaming}: {events: ToolEvent[]; streaming: boolean}) {
+  // Each call: its "appel", then "sources" and "fin" when read, or "echec".
+  const calls: {url?: string; titre?: string; etat: 'en_cours' | 'lue' | 'echec'; message?: string; duree?: number; extrait?: boolean}[] = [];
+  for (const event of events) {
+    const e = event as Record<string, unknown>;
+    const current = calls[calls.length - 1];
+    if (event.type === 'appel') calls.push({url: safe(text(((e.arguments || {}) as Record<string, unknown>).url)), etat: 'en_cours'});
+    else if (!current) continue;
+    else if (event.type === 'sources' && Array.isArray(e.sources)) {
+      const source = (e.sources as {url?: string; titre?: string}[])[0];
+      if (source) Object.assign(current, {url: safe(source.url) || current.url, titre: source.titre});
+    } else if (event.type === 'fin') Object.assign(current, {etat: 'lue', duree: typeof e.duree_s === 'number' ? e.duree_s : undefined, extrait: e.entier === false});
+    else if (event.type === 'echec') Object.assign(current, {etat: 'echec', message: text(e.message)});
+  }
+  if (!calls.length) return null;
+  const read = calls.filter(call => call.etat === 'lue');
+  const time = read.reduce((total, call) => total + (call.duree || 0), 0);
+  const running = streaming && calls.some(call => call.etat === 'en_cours');
+  const label = running ? 'Lecture de la page en cours…'
+    : read.length ? `${read.length > 1 ? `${read.length} pages lues` : 'Page lue'}${time ? ` · ${Math.max(1, Math.round(time))} s` : ''}`
+    : calls.some(call => call.etat === 'echec') ? 'Page illisible : réponse sans elle' : 'Lecture de la page interrompue';
+  return <details className={`tool-trace${running ? ' running' : ''}`}>
+    <summary>{label}</summary>
+    <ol className="tool-steps">{calls.map((call, index) => <li key={index}>
+      <span>{call.etat === 'echec' ? call.message || 'La page n’a pas pu être lue.' : call.etat === 'en_cours' ? 'Lecture…'
+        : call.extrait ? 'Page longue : seuls les passages utiles ont été gardés' : 'Page lue en entier'}</span>
+      {call.url ? <ul className="tool-pages"><li><a href={call.url} target="_blank" rel="noopener noreferrer nofollow" title={call.url}>{call.titre || call.url}</a></li></ul> : null}
+    </li>)}</ol>
+  </details>;
+}
+
+/** Steps of the tools behind an answer (web search, pages read), folded above it. */
 export function ToolTrace({events, streaming}: {events: ToolEvent[]; streaming: boolean}) {
   const web = events.filter(event => event.outil === 'recherche_web');
-  if (!web.length) return null;
+  const pages = events.filter(event => event.outil === 'lire_page');
+  if (!web.length && !pages.length) return null;
   const steps = web.map(describe).filter((step): step is NonNullable<ReturnType<typeof describe>> => step !== null);
   const done = !streaming || web.some(e => ['fin', 'echec', 'indisponible'].includes(e.type));
-  return <details className={`tool-trace${done ? '' : ' running'}`}>
-    <summary>{summary(web, streaming)}</summary>
-    <ol className="tool-steps">{steps.map((step, index) => <li key={index}><span>{step.label}</span>{step.detail}</li>)}</ol>
-  </details>;
+  return <>
+    {pages.length ? <PageTrace events={pages} streaming={streaming}/> : null}
+    {web.length ? <details className={`tool-trace${done ? '' : ' running'}`}>
+      <summary>{summary(web, streaming)}</summary>
+      <ol className="tool-steps">{steps.map((step, index) => <li key={index}><span>{step.label}</span>{step.detail}</li>)}</ol>
+    </details> : null}
+  </>;
 }
 
 /** Text shown while a very deep search writes its report: the parts already written, in the order of the plan,
@@ -95,11 +131,14 @@ export function provisionalReport(content: string, events: ToolEvent[] | undefin
     + sorted.map(part => String(part.texte)).join('\n\n');
 }
 
-/** Sources of the search (number -> page), for the clickable citations [n] of the answer. */
+/** Sources of the answer (number -> page), for the clickable citations [n]: those of the web search when it wrote the
+ *  answer, otherwise the pages read for Qwen (numbered for the whole message by the orchestrator). */
 export function citationSources(events?: ToolEvent[]): Map<number, Source> {
   const sources = new Map<number, Source>();
-  for (const event of events || []) {
-    if (event.outil !== 'recherche_web' || event.type !== 'sources' || !Array.isArray(event.sources)) continue;
+  const all = events || [];
+  const tool = all.some(event => event.outil === 'recherche_web' && event.type === 'sources') ? 'recherche_web' : 'lire_page';
+  for (const event of all) {
+    if (event.outil !== tool || event.type !== 'sources' || !Array.isArray(event.sources)) continue;
     for (const source of event.sources as {numero?: number; url?: string; titre?: string; icone?: string; site?: string}[]) {
       const url = safe(source.url);
       // Icon: a small PNG embedded by the server (the page only shows its own images and data: ones).

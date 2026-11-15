@@ -8,8 +8,9 @@
 - outils : exécute l'appel (un seul par outil et par tour). Sa progression part dans le flux sous
   {"observatoire": {"<outil>": évènement}} ; les morceaux « texte » d'une réponse en cours d'écriture partent comme du
   texte normal. Un outil qui rend une réponse finale (« reponse », sans « erreur ») termine le message : son texte
-  vérifié remplace ce qui a été montré ({"observatoire": {"contenu": …}}). En cas d'échec, Qwen reçoit l'erreur et
-  répond sans cet outil.
+  vérifié remplace ce qui a été montré ({"observatoire": {"contenu": …}}). Un outil qui rend des données (lire_page :
+  « page », « sources ») les donne à Qwen, qui reprend la main et rédige ; ses sources (numérotées pour tout le
+  message) sont listées sous la réponse. En cas d'échec, Qwen reçoit l'erreur et répond sans cet outil.
 
 À la fin : un morceau avec la raison de fin, puis l'usage (jetons du premier appel, celui du contexte mesuré par le
 backend), puis [DONE]. Au plus TOURS_MAX appels d'outils par message.
@@ -19,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import json
 from pathlib import Path
+import re
 import tomllib
 from typing import Any, Callable, TypedDict
 from zoneinfo import ZoneInfo
@@ -30,6 +32,9 @@ from langgraph.runtime import Runtime
 from outils import OutilErreur, Registre
 
 TOURS_MAX = 3
+# Outils proposés avec un outil demandé par le backend, sous le même droit : lire une page donnée par l'utilisateur
+# va avec la recherche web (bouton Web).
+COMPAGNONS = {'recherche_web': ('lire_page',)}
 DELAI_QWEN = 30 * 60
 CONSIGNES = Path(__file__).parent / 'consignes.toml'
 JOURS = ('lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche')
@@ -52,6 +57,12 @@ def consigne_outils(forcer: str | None) -> str:
     if forcer:
         texte += ' ' + brut['outil_impose'].strip().replace('{outil}', forcer)
     return texte
+
+
+def consigne_resultat() -> str:
+    """Consigne jointe aux données d'un outil que Qwen reprend (consignes.toml)."""
+    brut = tomllib.loads(CONSIGNES.read_text(encoding='utf-8'))
+    return brut['outil_resultat'].strip().replace('{jour}', aujourd_hui())
 
 
 def consigne_echec() -> str:
@@ -84,6 +95,7 @@ class Contexte:
     reflexion: bool = False           # réglage de réflexion de l'utilisateur, transmis aux outils
     exclus: set = field(default_factory=set)
     usage: dict = field(default_factory=dict)   # prompt_tokens du premier appel, completion_tokens cumulés
+    sources: list = field(default_factory=list)  # pages lues par les outils repris par Qwen, numérotées pour le message
 
 
 class Etat(TypedDict, total=False):
@@ -91,6 +103,7 @@ class Etat(TypedDict, total=False):
     tours: int
     appels: list[dict]                # appels d'outils du dernier tour de Qwen
     avant: str                        # texte écrit par Qwen avant l'outil (gardé devant la réponse de l'outil)
+    texte: str                        # texte de la dernière réponse de Qwen (citations [n] des pages lues)
     fin: str
     fini: bool
 
@@ -149,7 +162,7 @@ async def modele(etat: Etat, runtime: Runtime[Contexte]) -> dict:
     r = await appel_qwen(ctx, etat['messages'], outils, choix, runtime.stream_writer)
     appels = [a for a in r['appels'] if a['nom']]
     if not appels:
-        return {'appels': [], 'fin': r['fin'] or 'stop'}
+        return {'appels': [], 'fin': r['fin'] or 'stop', 'texte': r['texte']}
     message = {'role': 'assistant', 'content': r['texte'] or None,
                'tool_calls': [{'id': a['id'] or f'appel-{tours}-{i}', 'type': 'function',
                                'function': {'name': a['nom'], 'arguments': a['arguments'] or '{}'}} for i, a in enumerate(appels)]}
@@ -184,8 +197,8 @@ async def outils(etat: Etat, runtime: Runtime[Contexte]) -> dict:
             if not isinstance(arguments, dict):
                 raise OutilErreur('arguments illisibles')
             ecrire({'observatoire': {nom: {'type': 'appel', 'arguments': arguments}}})
-            tache = asyncio.ensure_future(ctx.registre.appeler(nom, arguments, progression,
-                                                               meta={'observatoire': {'reflexion': ctx.reflexion}}))
+            meta = {'observatoire': {'reflexion': ctx.reflexion, 'premier_numero': len(ctx.sources) + 1}}
+            tache = asyncio.ensure_future(ctx.registre.appeler(nom, arguments, progression, meta=meta))
             try:
                 while True:
                     attente = asyncio.ensure_future(file.get())
@@ -211,6 +224,18 @@ async def outils(etat: Etat, runtime: Runtime[Contexte]) -> dict:
             avant = etat.get('avant', '')
             ecrire({'observatoire': {'contenu': (avant + '\n\n' if avant else '') + sortie['reponse']}})
             return {'fini': True, 'fin': 'stop', 'appels': []}
+        if 'erreur' not in sortie and not sortie.get('reponse'):
+            # Données à reprendre (une page lue) : données à Qwen, sources gardées pour la liste sous la réponse.
+            sources = [x for x in sortie.get('sources') or [] if isinstance(x, dict)]
+            ctx.sources.extend(sources)
+            if sources:
+                ecrire({'observatoire': {nom: {'type': 'sources', 'sources': sources}}})
+            ecrire({'observatoire': {nom: {'type': 'fin', **{k: sortie.get(k) for k in ('pages_lues', 'duree_s', 'lecture', 'entier')
+                                                               if sortie.get(k) is not None}}}})
+            donnees = {k: v for k, v in sortie.items() if k not in ('sources', 'lecture', 'entier', 'duree_s')}
+            reponses.append({'role': 'tool', 'tool_call_id': appel['id'], 'content': json.dumps(
+                {**donnees, 'consigne': consigne_resultat()}, ensure_ascii=False)})
+            continue
         ecrire({'observatoire': {nom: {'type': 'echec', 'message': str(sortie.get('erreur') or 'échec')[:300]}}})
         ctx.exclus.add(nom)
         reponses.append({'role': 'tool', 'tool_call_id': appel['id'], 'content': json.dumps(
@@ -258,8 +283,12 @@ def ligne(valeur: dict) -> bytes:
 def outils_demandes(demandes: dict, disponibles: dict[str, dict]) -> tuple[list[dict], Any, list[str]]:
     """Demandes du backend ({"recherche_web": "auto" | "approfondie" | "tres_approfondie"}) -> outils proposés à Qwen,
     tool_choice du premier tour, outils demandés mais indisponibles. Un mode autre qu'« auto » impose l'outil et sa
-    profondeur."""
+    profondeur. Les compagnons d'un outil demandé (COMPAGNONS) sont proposés avec lui s'ils sont joignables."""
     outils, choix, absents = [], 'auto', []
+    for nom, mode in list(demandes.items()):
+        for compagnon in COMPAGNONS.get(nom, ()):
+            if compagnon in disponibles and compagnon not in demandes:
+                outils.append(disponibles[compagnon])
     for nom, mode in demandes.items():
         definition = disponibles.get(nom)
         if definition is None:
@@ -275,7 +304,22 @@ def outils_demandes(demandes: dict, disponibles: dict[str, dict]) -> tuple[list[
     return outils, choix, absents
 
 
-NOMS = {'recherche_web': 'La recherche web'}
+NOMS = {'recherche_web': 'La recherche web', 'lire_page': 'La lecture de pages'}
+
+
+def liste_des_sources(texte: str, sources: list[dict]) -> str:
+    """Pages lues par les outils repris par Qwen, sous sa réponse, au format des réponses de la recherche web
+    (« **Sources** » puis « - [n] [Titre](<adresse>) ») : celles qu'il cite, ou toutes s'il n'en cite aucune."""
+    hors_code = re.sub(r'```.*?```|`[^`\n]*`', '', texte, flags=re.DOTALL)
+    citees = {int(n) for n in re.findall(r'(?<!\w)\[(\d+)\]', hors_code)}
+    gardees = [x for x in sources if x.get('numero') in citees] or sources
+    lignes = []
+    for x in gardees:
+        url = re.sub(r'[<>\s]', '', str(x.get('url') or ''))
+        if isinstance(x.get('numero'), int) and url.startswith(('http://', 'https://')):
+            titre = ' '.join(re.sub(r'[\[\]]', '', str(x.get('titre') or '')).split()) or url
+            lignes.append(f'- [{x["numero"]}] [{titre}](<{url}>)')
+    return '\n\n**Sources**\n\n' + '\n'.join(lignes) if lignes else ''
 
 
 async def flux(corps: dict, demandes: dict, http: httpx.AsyncClient, qwen_url: str, qwen_cle: str, registre: Registre):
@@ -292,17 +336,21 @@ async def flux(corps: dict, demandes: dict, http: httpx.AsyncClient, qwen_url: s
     ctx = Contexte(http=http, qwen_url=qwen_url, qwen_cle=qwen_cle, registre=registre,
                    base={k: v for k, v in corps.items() if k not in ('messages', 'stream', 'stream_options', 'tools', 'tool_choice')},
                    outils=outils_, choix=choix, reflexion=corps.get('reasoning_effort') not in (None, 'none'))
-    fin = 'stop'
+    fin, etat = 'stop', {}
     try:
         async for genre, valeur in GRAPHE.astream({'messages': messages}, context=ctx, stream_mode=['custom', 'values'],
                                                  config={'recursion_limit': 4 * TOURS_MAX + 4}):
             if genre == 'custom':
                 yield ligne(valeur)
             else:
+                etat = valeur
                 fin = valeur.get('fin') or fin
     except QwenErreur as erreur:
         yield ligne({'error': {'message': str(erreur)}})
         return
+    if ctx.sources and not etat.get('fini'):
+        if bloc := liste_des_sources(etat.get('texte') or '', ctx.sources):
+            yield ligne(morceau({'content': bloc}))
     yield ligne(morceau(fin=fin))
     yield ligne({'choices': [], 'usage': {'prompt_tokens': ctx.usage.get('prompt_tokens') or 0,
                                           'completion_tokens': ctx.usage.get('completion_tokens') or 0}})

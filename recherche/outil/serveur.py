@@ -1,4 +1,4 @@
-"""Outil MCP « recherche_web » de L'Observatoire (serveur MCP, transport HTTP sans session).
+"""Outils MCP « recherche_web » et « lire_page » de L'Observatoire (serveur MCP, transport HTTP sans session).
 
 L'orchestrateur le découvre et le propose à Qwen ; Qwen l'appelle avec une question autonome et une profondeur. La
 recherche elle-même est celle du labo (graphe.py : modes web, approfondie, tres_approfondie, SearXNG et Crawl4AI par
@@ -6,6 +6,9 @@ le service de recherche, citations vérifiées). Pendant qu'elle avance, chaque 
 progression : son message est un événement JSON réduit à ce qu'affiche le chat (voir compacter) ; les morceaux de la
 réponse en cours d'écriture sont des événements « texte ». Le résultat final est un objet JSON (réponse, sources,
 limites, statistiques, ou erreur).
+
+lire_page lit une seule page donnée par l'utilisateur (service de recherche, /lire-page) et rend son texte nettoyé :
+ce n'est pas une réponse finale, Qwen rédige ensuite à partir de lui, en citant la page [n].
 
 Accès : jeton RECHERCHE_TOKEN (en-tête Authorization), réseau interne seulement. Une recherche à la fois.
 """
@@ -191,6 +194,61 @@ async def recherche_web(question: Annotated[str, Field(description=QUESTION)],
 
 
 en_cours: dict[str, asyncio.Task] = {}   # identifiant de l'appel -> recherche en cours ou en attente
+
+
+DESCRIPTION_PAGE = (
+    'Lit une page web précise dont l’adresse (http ou https) figure dans la conversation, et rend son texte nettoyé '
+    '(menus et publicités retirés). À utiliser quand l’utilisateur donne un lien et demande de le lire, le résumer, '
+    'l’expliquer, le traduire ou d’y trouver quelque chose. Ne sert pas à chercher sur Internet : pour cela, '
+    'recherche_web.')
+URL_PAGE = 'L’adresse complète de la page, telle qu’elle figure dans la conversation (http:// ou https://).'
+QUESTION_PAGE = ('Ce que l’utilisateur veut savoir de cette page, en français (vide pour un résumé) : sur une page longue, '
+                 'les passages les plus proches sont gardés.')
+DELAI_PAGE = 150.0   # le service lit la page (téléchargement simple, ou navigateur jusqu'à 95 s) puis la nettoie
+
+
+def premier_numero(ctx: Context) -> int:
+    """Numéro de citation de la page : l'orchestrateur numérote les pages lues pendant une même réponse."""
+    n = _observatoire(ctx).get('premier_numero')
+    return n if isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= 100 else 1
+
+
+def resultat_page(page: dict, numero: int) -> dict:
+    """Réponse du service (/lire-page) -> résultat de l'outil : le texte pour Qwen, la source pour la liste des sources."""
+    if not page.get('succes'):
+        return {'erreur': 'La page n’a pas pu être lue : ' + str(page.get('erreur') or 'rien de lisible')[:300]}
+    titre = str(page.get('titre') or '')[:300] or str(page.get('url_finale') or page.get('url'))
+    source = {'numero': numero, 'url': page.get('url_finale') or page.get('url'), 'titre': titre,
+              **({'icone': page['icone']} if page.get('icone') else {}), **({'site': page['site']} if page.get('site') else {})}
+    contenu = {'numero': numero, 'url': source['url'], 'titre': titre, 'date_consultation': page.get('date_consultation'),
+               'texte': str(page.get('texte') or '')}
+    if page.get('extrait'):
+        contenu['extrait'] = page['extrait']
+    if page.get('avertissement'):
+        contenu['avertissement'] = 'page peut-être incomplète : ' + str(page['avertissement'])
+    return {'page': contenu, 'sources': [source], 'pages_lues': 1, 'duree_s': page.get('duree_s'),
+            'lecture': page.get('lecture'), 'entier': bool(page.get('entier'))}
+
+
+@serveur.tool(name='lire_page', description=DESCRIPTION_PAGE)
+async def lire_page(url: Annotated[str, Field(description=URL_PAGE)], ctx: Context,
+                    question: Annotated[str, Field(description=QUESTION_PAGE)] = '') -> dict:
+    """Une page, sans Qwen ni file d'attente : quelques secondes, le service borne lui-même ses lectures simultanées."""
+    url = str(url).strip()
+    question = ' '.join(str(question or '').split())[:500]
+    _, web = clients()
+    try:
+        r = await web.post('/lire-page', json={'url': url, **({'question': question} if question else {})}, timeout=DELAI_PAGE)
+    except httpx.HTTPError:
+        return {'erreur': 'La lecture de pages est injoignable pour le moment.'}
+    try:
+        corps = r.json()
+    except ValueError:
+        corps = {}
+    if r.status_code != 200:
+        message = (corps.get('erreur') or {}).get('message') if isinstance(corps, dict) and isinstance(corps.get('erreur'), dict) else None
+        return {'erreur': 'La page n’a pas pu être lue : ' + (message or f'statut {r.status_code}')}
+    return resultat_page(corps if isinstance(corps, dict) else {}, premier_numero(ctx))
 
 
 @serveur.custom_route('/annuler', methods=['POST'])
