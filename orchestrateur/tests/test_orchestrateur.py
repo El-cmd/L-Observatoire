@@ -149,6 +149,16 @@ class Boucle(unittest.TestCase):
         self.assertEqual(DEFINITION['function']['parameters']['properties']['profondeur']['enum'], ['web', 'approfondie', 'tres_approfondie'],
                          'définition d’origine intacte')
 
+    def test_profondeur_imposee_meme_si_qwen_en_choisit_une_autre(self):
+        registre = FauxRegistre(sortie={'reponse': 'Rapport.'})
+        evenements, _, _ = lancer([appel_qwen(('recherche_web', {'question': 'q', 'profondeur': 'web'}))], registre,
+                                  demandes={'recherche_web': 'tres_approfondie'})
+        self.assertEqual(registre.appels, [('recherche_web', {'question': 'q', 'profondeur': 'tres_approfondie'})])
+        self.assertIn({'type': 'appel', 'arguments': {'question': 'q', 'profondeur': 'tres_approfondie'}}, observatoire(evenements))
+        registre = FauxRegistre(sortie={'reponse': 'Rapport.'})
+        lancer([appel_qwen(('recherche_web', {'question': 'q', 'profondeur': 'web'}))], registre, demandes={'recherche_web': 'auto'})
+        self.assertEqual(registre.appels[0][1]['profondeur'], 'web', 'mode automatique : choix de Qwen respecté')
+
     def test_echec_de_l_outil_qwen_repond_sans(self):
         registre = FauxRegistre(erreur='l’outil recherche_web est injoignable')
         evenements, _, recus = lancer([appel_qwen(('recherche_web', {'question': 'q', 'profondeur': 'web'})), texte_qwen('Sans recherche : …')], registre)

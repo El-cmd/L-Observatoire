@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-15-profondeur-respectee', date: '2026-11-15', level: 'fix', title: 'La profondeur de recherche choisie est respectée',
+    text: 'Quand vous choisissez Approfondie ou Très approfondie dans le menu du bouton Web, la recherche se fait toujours à ce niveau. Avant, elle pouvait parfois se faire en mode Rapide.'},
   {id: '2026-11-15-lire-une-page', date: '2026-11-15', level: 'major', title: 'Lire une page dont vous donnez le lien',
     text: 'Activez le bouton Web, collez l’adresse d’une page dans votre message et demandez, par exemple, « résume cette page » ou « que dit cet article sur les délais ? ». L’Observatoire lit la page puis vous répond en la citant ; elle apparaît dans les sources sous la réponse.'},
   {id: '2026-11-15-recherche-plus-rapide', date: '2026-11-15', level: 'improvement', title: 'Une recherche sur Internet plus rapide',

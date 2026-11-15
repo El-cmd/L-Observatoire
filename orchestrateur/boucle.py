@@ -96,6 +96,7 @@ class Contexte:
     exclus: set = field(default_factory=set)
     usage: dict = field(default_factory=dict)   # prompt_tokens du premier appel, completion_tokens cumulés
     sources: list = field(default_factory=list)  # pages lues par les outils repris par Qwen, numérotées pour le message
+    imposes: dict = field(default_factory=dict)  # outil -> profondeur choisie par l'utilisateur (mode autre qu'« auto »)
 
 
 class Etat(TypedDict, total=False):
@@ -189,6 +190,11 @@ async def outils(etat: Etat, runtime: Runtime[Contexte]) -> dict:
             arguments = json.loads(appel['function']['arguments'] or '{}')
         except ValueError:
             arguments = None
+        if isinstance(arguments, dict) and nom in ctx.imposes and arguments.get('profondeur') != ctx.imposes[nom]:
+            # L'enum du schéma ne suffit pas : Qwen choisit parfois « web » quand « tres_approfondie » est imposée
+            # (mesuré le 15/11/2026, 2 fois sur 3) ; la profondeur choisie par l'utilisateur l'emporte toujours.
+            arguments['profondeur'] = ctx.imposes[nom]
+            appel['function']['arguments'] = json.dumps(arguments, ensure_ascii=False)
         file: asyncio.Queue = asyncio.Queue()
 
         async def progression(message: str):
@@ -335,7 +341,9 @@ async def flux(corps: dict, demandes: dict, http: httpx.AsyncClient, qwen_url: s
         messages = avec_consigne(messages, consigne_outils(forcer))
     ctx = Contexte(http=http, qwen_url=qwen_url, qwen_cle=qwen_cle, registre=registre,
                    base={k: v for k, v in corps.items() if k not in ('messages', 'stream', 'stream_options', 'tools', 'tool_choice')},
-                   outils=outils_, choix=choix, reflexion=corps.get('reasoning_effort') not in (None, 'none'))
+                   outils=outils_, choix=choix, reflexion=corps.get('reasoning_effort') not in (None, 'none'),
+                   imposes={nom: mode for nom, mode in demandes.items() if mode != 'auto' and any(
+                       'profondeur' in o['function']['parameters'].get('properties', {}) for o in outils_ if o['function']['name'] == nom)})
     fin, etat = 'stop', {}
     try:
         async for genre, valeur in GRAPHE.astream({'messages': messages}, context=ctx, stream_mode=['custom', 'values'],
