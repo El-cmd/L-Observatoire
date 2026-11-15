@@ -104,6 +104,28 @@ class Sources(unittest.TestCase):
                           "https://blog.exemple.fr/taskgroup", "https://sans-moteur.fr/", "https://www.allocine.fr/x"])
 
 
+class Rythme(unittest.TestCase):
+    def test_requetes_espacees_meme_en_parallele(self):
+        import asyncio
+        import time
+        from moteurs import Searxng
+        departs = []
+
+        def repondre(request):
+            departs.append(time.monotonic())
+            return httpx.Response(200, json={"results": []})
+
+        async def tout():
+            async with httpx.AsyncClient(transport=httpx.MockTransport(repondre)) as client:
+                moteur = Searxng("http://searxng:8080", client)
+                moteur.intervalle = 0.2
+                await asyncio.gather(*(moteur.rechercher(f"q{i}", 5) for i in range(3)))
+        asyncio.run(tout())
+        ecarts = [b - a for a, b in zip(departs, departs[1:])]
+        self.assertEqual(len(departs), 3)
+        self.assertTrue(all(e >= 0.19 for e in ecarts), ecarts)
+
+
 class Pertinence(unittest.TestCase):
     def test_resultats_hors_sujet_ecartes(self):
         """Production, 15/11/2026 : seul Bing répondait, en ne retenant que « qui » de la requête."""
@@ -278,6 +300,7 @@ class Route(unittest.TestCase):
 
     def brancher(self, client):
         app.state.searxng.client = app.state.crawl4ai.client = client
+        app.state.searxng.intervalle = 0   # pas d'écart entre les requêtes dans ces tests
         app.state.searxng.url, app.state.crawl4ai.url, app.state.crawl4ai.jeton = "http://searxng:8080", "http://crawl4ai:11235", "j"
 
     def test_pages_ordre_et_echec(self):

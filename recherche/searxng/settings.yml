@@ -3,30 +3,39 @@
 use_default_settings:
   engines:
     keep_only:
-      - duckduckgo
       - brave
-      - mojeek
+      - startpage
+      - yandex
+      - yahoo
+      - duckduckgo
       - bing
       - wikipedia
 
-# Testé le 12/11/2026, chaque moteur seul, depuis l'adresse de sortie du labo :
-# - duckduckgo, mojeek : répondent et sont pertinents (mojeek surtout en anglais) ; brave : pertinent mais limite
-#   souvent le rythme (« too many requests »).
-# - bing : SearXNG le livre désactivé (disabled) ; il répond bien en français sur une requête courte, mais sur une
-#   requête longue ou technique il ne retient souvent que le premier mot : moteur de secours (service/multi.py).
-# - mojeek : SearXNG ne le charge pas par défaut (inactive).
-# - qwant (« access denied ») et startpage (CAPTCHA) refusent cette adresse : retirés.
-# - Moteurs dev (stackoverflow, github, mdn, pypi, crates.io, npm, docker hub, arch linux wiki, mankier, pkg.go.dev) :
-#   ce sont des recherches par mots-clés dans un catalogue ; sur une vraie question (« docker rootless memory limit »,
-#   « fetch abort timeout javascript »), ils rendent des pages hors sujet (MDN sur Docker, dépôts GitHub au hasard) ;
-#   stackoverflow ne cherche que dans les titres, pypi est derrière un défi JavaScript, arch linux wiki ne cherche
-#   que les pages « (Français) » avec la langue fr-FR. Non retenus.
+# Testé le 15/11/2026 depuis l'adresse du VPS (SearXNG à part, chaque moteur seul, 3 questions espacées de 4 s :
+# actualité en français, question de dev en anglais, recette), pertinents = titre ou extrait reprenant la question :
+# - startpage (résultats de Google) : 10/10 pertinents sur les trois ; brave : 18 à 25, tous pertinents, quand il n'est
+#   pas sollicité en rafale (il refuse les rafales : « too many requests ») ; yandex : 15 sur 15 ; yahoo : 7 sur 7.
+# - duckduckgo : délai dépassé deux fois sur trois depuis cette adresse (gardé, poids normal, quand il répond).
+# - bing : bon en français sur une requête courte, 0 sur 10 sur la question de dev (ne retient que le premier mot) :
+#   moteur de secours (service/multi.py) et poids faible.
+# - Refusent cette adresse : google, qwant, mojeek, dogpile (« access denied »), yep (erreur HTTP).
+# - Non retenus : mwmbl (petit index, 1 résultat sur la question de dev), naver et seznam (coréen et tchèque).
+# - Moteurs dev de SearXNG (stackoverflow, github, mdn, pypi…) : recherches par mots-clés dans un catalogue, hors sujet
+#   sur une vraie question (essai du 12/11/2026). Non retenus.
+# Poids : yandex (index russe) et bing comptent moins dans le classement ; le service espace les requêtes (1,5 s).
 engines:
-  - name: bing
-    disabled: false
-  - name: mojeek
+  - name: startpage
     inactive: false
     disabled: false
+  - name: yandex
+    disabled: false
+    weight: 0.7
+  - name: yahoo
+    disabled: false
+    weight: 0.8
+  - name: bing
+    disabled: false
+    weight: 0.5
 
 general:
   instance_name: "Recherche de L’Observatoire"

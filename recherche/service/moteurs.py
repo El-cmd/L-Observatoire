@@ -1,4 +1,6 @@
 """Clients de SearXNG et de Crawl4AI. Réponses normalisées ; aucun texte de requête ni adresse lue dans les journaux."""
+import asyncio
+import os
 import time
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
@@ -55,11 +57,27 @@ def _texte(valeur, maximum: int) -> str:
     return texte if len(texte) <= maximum else texte[: maximum - 1] + "…"
 
 
+# Écart minimal entre deux requêtes à SearXNG, toutes recherches confondues : chaque requête part vers tous les moteurs,
+# et Brave ou DuckDuckGo refusent les rafales (une recherche très approfondie en envoyait une douzaine d'un coup).
+INTERVALLE = float(os.environ.get("SEARXNG_INTERVALLE", "1.5"))
+
+
 class Searxng:
     def __init__(self, url: str, client: httpx.AsyncClient):
         self.url = url.rstrip("/")
         self.client = client
         self.etat = Etat()
+        self.intervalle = INTERVALLE
+        self._rythme = asyncio.Lock()
+        self._derniere = 0.0
+
+    async def _a_son_tour(self):
+        """Attend que l'écart minimal depuis la requête précédente soit passé (les requêtes partent une à une)."""
+        async with self._rythme:
+            attente = self._derniere + self.intervalle - time.monotonic()
+            if attente > 0:
+                await asyncio.sleep(attente)
+            self._derniere = time.monotonic()
 
     async def sante(self) -> dict:
         try:
@@ -73,6 +91,7 @@ class Searxng:
         return {"etat": "degraded", "detail": raison} if raison else {"etat": "online", "detail": "SearXNG répond."}
 
     async def rechercher(self, requete: str, limite: int) -> dict:
+        await self._a_son_tour()
         try:
             r = await self.client.get(self.url + "/search", timeout=httpx.Timeout(DELAI_RECHERCHE, connect=DELAI_CONNEXION),
                                       params={"q": requete, "format": "json", "language": "fr-FR", "safesearch": 1, "pageno": 1})

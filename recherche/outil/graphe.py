@@ -554,7 +554,9 @@ _REQUETES = {'type': 'array', 'minItems': 1, 'maxItems': 3, 'items': {'type': 's
 SCHEMA_CAHIER = _objet({
     'objectif': {'type': 'string', 'maxLength': 400},
     'sous_questions': {'type': 'array', 'minItems': 1, 'maxItems': SOUS_QUESTIONS_MAX,
-                       'items': _objet({'question': {'type': 'string', 'maxLength': 250}, 'requetes': _REQUETES})},
+                       'items': _objet({'question': {'type': 'string', 'maxLength': 250},
+                                        # 2 au plus : les sous-questions cherchent en même temps (moteurs et rafales)
+                                        'requetes': {**_REQUETES, 'maxItems': 2}})},
     'criteres': {'type': 'array', 'maxItems': 5, 'items': {'type': 'string', 'maxLength': 200}}})
 
 
@@ -849,7 +851,7 @@ async def ecrire_cahier(etat: Etat, runtime: Runtime[RechercheContext]) -> dict:
     sous_questions = []
     for sq in (r.get('sous_questions') or [])[:SOUS_QUESTIONS_MAX]:
         texte = re.sub(r'\s+', ' ', str(sq.get('question') or '')).strip()[:250] if isinstance(sq, dict) else ''
-        requetes = requetes_valides(sq.get('requetes')) if isinstance(sq, dict) else []
+        requetes = requetes_valides(sq.get('requetes'))[:2] if isinstance(sq, dict) else []
         if texte and requetes:
             sous_questions.append({'id': f'Q{len(sous_questions) + 1}', 'question': texte, 'requetes': requetes})
     if not sous_questions:
