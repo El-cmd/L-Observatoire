@@ -30,7 +30,11 @@ QWEN_CLE = os.environ.get('QWEN_API_KEY', '')
 QWEN_MODELE = os.environ.get('QWEN_MODEL', 'qwen3.8-27b-abliterated')
 SERVICE_URL = os.environ.get('SERVICE_URL', 'http://recherche-service:8080')
 JETON = os.environ.get('RECHERCHE_TOKEN', '')
-OCCUPE = 'Une recherche web est déjà en cours : réessaie quand elle sera finie.'
+OCCUPE = 'La recherche web est très demandée en ce moment : réessaie dans quelques minutes.'
+ATTENTE = 'Une autre recherche est en cours : celle-ci attend son tour.'
+# Une recherche à la fois (Qwen, moteurs et Crawl4AI sont partagés) ; les suivantes attendent leur tour, au plus
+# ATTENTE_MAX secondes (l'orchestrateur abandonne un appel au bout de 15 min, une très approfondie en prend ~10).
+ATTENTE_MAX = 240.0
 PAGES_AFFICHEES = 12
 
 DESCRIPTION = (
@@ -83,6 +87,7 @@ _GARDER = {
     'redaction_debut': (),
     'redaction': (),
     'erreur': ('message',),
+    'attente': ('message',),
 }
 
 
@@ -122,15 +127,26 @@ def resultat_outil(res: dict, profondeur: str) -> dict:
     return sortie
 
 
-def reflexion_demandee(ctx: Context) -> bool:
-    """Réflexion de Qwen pendant la recherche : réglage de l'utilisateur, transmis par l'orchestrateur dans les
-    métadonnées de l'appel (_meta.observatoire.reflexion), jamais par Qwen."""
+def _observatoire(ctx: Context) -> dict:
+    """Métadonnées de l'appel posées par l'orchestrateur (_meta.observatoire), jamais écrites par Qwen."""
     try:
         meta = ctx.request_context.meta
     except (AttributeError, LookupError, ValueError):
-        return False
+        return {}
     extra = getattr(meta, 'model_extra', None) or {}
-    return (extra.get('observatoire') or {}).get('reflexion') is True
+    valeur = extra.get('observatoire')
+    return valeur if isinstance(valeur, dict) else {}
+
+
+def reflexion_demandee(ctx: Context) -> bool:
+    """Réflexion de Qwen pendant la recherche : réglage de l'utilisateur, transmis par l'orchestrateur."""
+    return _observatoire(ctx).get('reflexion') is True
+
+
+def identifiant_appel(ctx: Context) -> str:
+    """Identifiant de l'appel donné par l'orchestrateur : /annuler n'arrête que cet appel."""
+    appel = _observatoire(ctx).get('appel')
+    return appel if isinstance(appel, str) and 0 < len(appel) <= 64 else ''
 
 
 @serveur.tool(name='recherche_web', description=DESCRIPTION)
@@ -142,38 +158,51 @@ async def recherche_web(question: Annotated[str, Field(description=QUESTION)],
         return {'mode': profondeur, 'erreur': 'Question vide.'}
     if not (QWEN_URL and QWEN_CLE):
         return {'mode': profondeur, 'erreur': 'Qwen n’est pas configuré pour la recherche.'}
-    if place.locked():
-        return {'mode': profondeur, 'erreur': OCCUPE}
-    async with place:
-        qwen, web = clients()
-        rctx = graphe.RechercheContext(qwen_url=QWEN_URL, qwen_cle=QWEN_CLE, modele=QWEN_MODELE, http=qwen, web=web,
-                                       reflexion=reflexion_demandee(ctx), filtre=True, clarifier=False,
-                                       compteurs=graphe.Compteurs(debut=asyncio.get_running_loop().time()))
-        numero = 0
+    numero = 0
 
-        async def emettre(evenement: dict):
-            nonlocal numero
-            if (c := compacter(evenement)) is not None:
-                numero += 1
-                await ctx.report_progress(numero, None, json.dumps(c, ensure_ascii=False))
+    async def emettre(evenement: dict):
+        nonlocal numero
+        if (c := compacter(evenement)) is not None:
+            numero += 1
+            await ctx.report_progress(numero, None, json.dumps(c, ensure_ascii=False))
 
-        # Retenue pour /annuler : sans session MCP, l'abandon de l'appel par l'orchestrateur n'arrête pas ce travail.
-        en_cours['tache'] = asyncio.current_task()
+    # Retenue pour /annuler dès l'attente : sans session MCP, l'abandon de l'appel par l'orchestrateur n'arrête pas ce
+    # travail. Sans identifiant (appel direct), la recherche ne peut pas être annulée à distance.
+    cle = identifiant_appel(ctx) or f'sans-identifiant-{id(asyncio.current_task())}'
+    en_cours[cle] = asyncio.current_task()
+    try:
+        if place.locked():
+            await emettre({'type': 'attente', 'message': ATTENTE})
         try:
+            await asyncio.wait_for(place.acquire(), ATTENTE_MAX)
+        except TimeoutError:
+            return {'mode': profondeur, 'erreur': OCCUPE}
+        try:
+            qwen, web = clients()
+            rctx = graphe.RechercheContext(qwen_url=QWEN_URL, qwen_cle=QWEN_CLE, modele=QWEN_MODELE, http=qwen, web=web,
+                                           reflexion=reflexion_demandee(ctx), filtre=True, clarifier=False,
+                                           compteurs=graphe.Compteurs(debut=asyncio.get_running_loop().time()))
             res = await graphe.executer(profondeur, rctx, question, emettre)
         finally:
-            en_cours.pop('tache', None)
+            place.release()
+    finally:
+        en_cours.pop(cle, None)
     return resultat_outil(res, profondeur)
 
 
-en_cours: dict[str, asyncio.Task] = {}
+en_cours: dict[str, asyncio.Task] = {}   # identifiant de l'appel -> recherche en cours ou en attente
 
 
 @serveur.custom_route('/annuler', methods=['POST'])
-async def annuler(_: Request) -> JSONResponse:
-    """Appelé par l'orchestrateur quand l'utilisateur arrête la réponse : la recherche en cours s'arrête et libère sa
-    place (une seule recherche à la fois)."""
-    tache = en_cours.get('tache')
+async def annuler(request: Request) -> JSONResponse:
+    """Appelé par l'orchestrateur quand l'utilisateur arrête la réponse, avec l'identifiant de l'appel ({"appel": …}) :
+    cette recherche-là s'arrête (ou quitte la file d'attente) et libère sa place ; celles des autres continuent."""
+    try:
+        corps = await request.json()
+    except ValueError:
+        corps = {}
+    appel = corps.get('appel') if isinstance(corps, dict) else None
+    tache = en_cours.get(appel) if isinstance(appel, str) and appel else None
     if tache is not None and not tache.done():
         tache.cancel()
         return JSONResponse({'annulee': True})

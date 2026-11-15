@@ -125,7 +125,7 @@ Le même bouton **+** ajoute des documents : PDF (60 pages au plus), Word `.docx
 Les réponses du chat passent par l’**orchestrateur** (`orchestrateur/`, Python, LangGraph), qui se présente comme Qwen (API compatible OpenAI, jeton `ORCHESTRATEUR_TOKEN`) :
 
 - **message ordinaire** (le cas général), ou **réponse continuée** : la requête part telle quelle chez Qwen et le flux revient sans transformation. Si l’orchestrateur ne répond pas, l’API demande directement à Qwen ;
-- **message avec le bouton Web**, pour un compte qui en a le droit (`users.recherche_web`, vérifié par l’API) : Qwen reçoit l’outil `recherche_web` et décide de l’appeler (Automatique) ou y est obligé à la profondeur choisie dans le menu (Rapide, Approfondie, Très approfondie). Le réglage de réflexion de l’utilisateur est transmis à l’outil dans les métadonnées de l’appel MCP (`_meta.observatoire.reflexion`), hors des arguments écrits par Qwen ; en très approfondi, chaque partie du rapport s’affiche dès qu’elle est écrite. Une seule recherche à la fois ; au plus 3 appels d’outils par message ;
+- **message avec le bouton Web**, pour un compte qui en a le droit (`users.recherche_web`, ouvert à tous par défaut, vérifié par l’API) : Qwen reçoit l’outil `recherche_web` et décide de l’appeler (Automatique) ou y est obligé à la profondeur choisie dans le menu (Rapide, Approfondie, Très approfondie). Le réglage de réflexion de l’utilisateur est transmis à l’outil dans les métadonnées de l’appel MCP (`_meta.observatoire.reflexion`), hors des arguments écrits par Qwen ; en très approfondi, chaque partie du rapport s’affiche dès qu’elle est écrite. Une seule recherche à la fois : les suivantes attendent leur tour (étape « attente », au plus 4 min), et l’arrêt d’une réponse n’annule que sa propre recherche (identifiant d’appel `_meta.observatoire.appel`) ; au plus 3 appels d’outils par message ;
 - quand l’utilisateur arrête la réponse, l’orchestrateur coupe la requête à Qwen ou prévient l’outil (`/annuler`), qui libère sa place.
 
 Les outils sont des **serveurs MCP** déclarés dans `orchestrateur/outils.toml` : chaque serveur décrit lui-même ses outils, en brancher un nouveau revient à l’ajouter à ce fichier et au compose. La progression d’un outil (étapes, texte en cours d’écriture) arrive par les notifications de progression MCP et part dans le flux sous `{"observatoire": {"recherche_web": …}}` ; le texte final vérifié de l’outil remplace celui affiché pendant l’écriture (`{"observatoire": {"contenu": …}}`). Les étapes sont gardées avec la réponse (`outils` du message) et affichées repliées au-dessus ; elles ne sont jamais renvoyées à Qwen, la réponse portant ses sources.
@@ -137,7 +137,7 @@ Les outils sont des **serveurs MCP** déclarés dans `orchestrateur/outils.toml`
 COMPOSE_PROFILES=recherche
 ```
 
-Sans ce profil, l’orchestrateur relaie seulement, et le bouton Web annonce la recherche indisponible. Le droit se donne ou se retire avec `make recherche-web` ; la migration l’ouvre au compte `vloth`. Les secrets internes (`ORCHESTRATEUR_TOKEN`, `RECHERCHE_TOKEN`, `SEARXNG_SECRET`, `CRAWL4AI_API_TOKEN`) sont créés par `make init`.
+Sans ce profil, l’orchestrateur relaie seulement, et le bouton Web annonce la recherche indisponible. Le droit se donne ou se retire avec `make recherche-web` ; ouvert à tous les comptes depuis le 15/11/2026 (migration `202611150001`). Les secrets internes (`ORCHESTRATEUR_TOKEN`, `RECHERCHE_TOKEN`, `SEARXNG_SECRET`, `CRAWL4AI_API_TOKEN`) sont créés par `make init`.
 
 ## Migration de l’ancienne version
 

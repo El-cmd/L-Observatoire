@@ -46,6 +46,7 @@ function describe(event: ToolEvent): {label: string; detail?: ReactNode} | null 
     case 'section': return {label: `Partie ${text(e.id)} écrite`};
     case 'arret': return {label: `Fin des recherches : ${text(e.raison)}`};
     case 'redaction_debut': return {label: 'Rédaction de la réponse'};
+    case 'attente': return {label: text(e.message) || 'Une autre recherche est en cours : celle-ci attend son tour.'};
     case 'fin': {
       const limits = list(e.limites);
       return limits.length ? {label: 'À savoir', detail: <ul className="tool-limits">{limits.map((limit, index) => <li key={index}>{limit}</li>)}</ul>} : null;

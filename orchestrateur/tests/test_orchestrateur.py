@@ -318,17 +318,18 @@ class McpReel(unittest.TestCase):
         from mcp.server.fastmcp import Context, FastMCP
         from starlette.responses import JSONResponse
 
-        serveur, annulations = FastMCP('essai', stateless_http=True, log_level='WARNING'), []
+        serveur, annulations, vus = FastMCP('essai', stateless_http=True, log_level='WARNING'), [], []
 
         @serveur.tool(name='lent', description='Long.')
         async def lent(ctx: Context) -> dict:
+            vus.append(((ctx.request_context.meta.model_extra or {}).get('observatoire') or {}).get('appel'))
             await ctx.report_progress(1, None, json.dumps({'type': 'debut'}))
             await asyncio.sleep(30)
             return {'reponse': 'trop tard'}
 
         @serveur.custom_route('/annuler', methods=['POST'])
         async def annuler(request):
-            annulations.append(request.headers.get('authorization'))
+            annulations.append((request.headers.get('authorization'), (await request.json()).get('appel')))
             return JSONResponse({'annulee': True})
 
         with socket.socket() as s:
@@ -360,7 +361,9 @@ class McpReel(unittest.TestCase):
                 srv.should_exit = True
                 await tache_serveur
         asyncio.run(tout())
-        self.assertEqual(annulations, ['Bearer j'])
+        self.assertEqual(len(vus), 1)
+        self.assertRegex(vus[0] or '', r'^[0-9a-f]{32}$')
+        self.assertEqual(annulations, [('Bearer j', vus[0])], 'seul cet appel est annulé')
 
 
 if __name__ == '__main__':

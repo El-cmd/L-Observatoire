@@ -42,6 +42,13 @@ class Compacter(unittest.TestCase):
 
 
 class AppelMcp(unittest.TestCase):
+    def setUp(self):
+        # Un verrou neuf par test : un asyncio.Semaphore qui a fait attendre reste lié à la boucle de ce test-là
+        # (chaque test a la sienne, asyncio.run) ; en service, il n'y a qu'une boucle.
+        remplacement = mock.patch.object(serveur, 'place', asyncio.Semaphore(1))
+        remplacement.start()
+        self.addCleanup(remplacement.stop)
+
     def appeler(self, executer, arguments=None, meta=None):
         async def tout():
             recus = []
@@ -95,7 +102,36 @@ class AppelMcp(unittest.TestCase):
         _, r, _ = self.appeler(executer, {'question': 'q', 'profondeur': 'extreme'})
         self.assertTrue(r.isError)
 
-    def test_une_recherche_a_la_fois(self):
+    def test_une_recherche_a_la_fois_les_autres_attendent_leur_tour(self):
+        async def executer(profondeur, rctx, question, emettre):
+            await emettre({'type': 'redaction_debut'})
+            return {'reponse': f'R {question}', 'sources': [], 'limites': [], 'statistiques': {}}
+
+        async def tout():
+            progressions = []
+
+            async def recue(_avance, _total, message):
+                progressions.append(json.loads(message)['type'])
+            await serveur.place.acquire()
+            with mock.patch.object(serveur, 'QWEN_URL', 'u'), mock.patch.object(serveur, 'QWEN_CLE', 'c'), \
+                    mock.patch.object(serveur.graphe, 'executer', executer):
+                async with create_connected_server_and_client_session(serveur.serveur._mcp_server) as client:
+                    appel = asyncio.create_task(client.call_tool('recherche_web', {'question': 'q', 'profondeur': 'web'},
+                                                                 progress_callback=recue))
+                    for _ in range(100):
+                        if progressions:
+                            break
+                        await asyncio.sleep(0.01)
+                    self.assertFalse(appel.done(), 'attend que la place se libère')
+                    serveur.place.release()
+                    r = await asyncio.wait_for(appel, 5)
+            return json.loads(r.content[0].text), progressions
+        resultat, progressions = asyncio.run(tout())
+        self.assertEqual(resultat['reponse'], 'R q')
+        self.assertEqual(progressions, ['attente', 'redaction_debut'])
+        self.assertFalse(serveur.place.locked())
+
+    def test_attente_trop_longue_refusee(self):
         async def executer(*_):
             raise AssertionError('jamais appelé')
 
@@ -103,32 +139,45 @@ class AppelMcp(unittest.TestCase):
             await serveur.place.acquire()
             try:
                 with mock.patch.object(serveur, 'QWEN_URL', 'u'), mock.patch.object(serveur, 'QWEN_CLE', 'c'), \
-                        mock.patch.object(serveur.graphe, 'executer', executer):
+                        mock.patch.object(serveur, 'ATTENTE_MAX', 0.05), mock.patch.object(serveur.graphe, 'executer', executer):
                     async with create_connected_server_and_client_session(serveur.serveur._mcp_server) as client:
                         return await client.call_tool('recherche_web', {'question': 'q', 'profondeur': 'web'})
             finally:
                 serveur.place.release()
         r = asyncio.run(tout())
         self.assertEqual(json.loads(r.content[0].text)['erreur'], serveur.OCCUPE)
+        self.assertEqual(serveur.en_cours, {})
 
 
 class Annulation(unittest.TestCase):
-    def test_annuler_arrete_la_recherche_en_cours(self):
+    def test_annuler_n_arrete_que_l_appel_designe(self):
+        class Requete:
+            def __init__(self, corps):
+                self.corps = corps
+
+            async def json(self):
+                if self.corps is None:
+                    raise ValueError('pas de JSON')
+                return self.corps
+
         async def tout():
             async def longue():
                 await asyncio.sleep(30)
-            tache = asyncio.create_task(longue())
-            serveur.en_cours['tache'] = tache
+            a, b = asyncio.create_task(longue()), asyncio.create_task(longue())
+            serveur.en_cours.update({'a': a, 'b': b})
             try:
-                r1 = await serveur.annuler(None)
+                sans = await serveur.annuler(Requete(None))
+                inconnu = await serveur.annuler(Requete({'appel': 'z'}))
+                r1 = await serveur.annuler(Requete({'appel': 'a'}))
                 await asyncio.sleep(0)
-                vide = await serveur.annuler(None)
+                etats = (a.cancelled(), b.cancelled())
             finally:
-                serveur.en_cours.pop('tache', None)
-            return json.loads(r1.body), tache.cancelled(), json.loads(vide.body)
-        premier, annulee, second = asyncio.run(tout())
-        self.assertEqual((premier, annulee), ({'annulee': True}, True))
-        self.assertEqual(second, {'annulee': False})
+                serveur.en_cours.clear()
+                b.cancel()
+            return [json.loads(x.body) for x in (sans, inconnu, r1)], etats
+        reponses, etats = asyncio.run(tout())
+        self.assertEqual(reponses, [{'annulee': False}, {'annulee': False}, {'annulee': True}])
+        self.assertEqual(etats, (True, False), 'la recherche de l’autre appel continue')
 
 
 class Jeton(unittest.TestCase):

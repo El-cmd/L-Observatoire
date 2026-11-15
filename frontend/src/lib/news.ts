@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-15-recherche-web-pour-tous', date: '2026-11-15', level: 'major', title: 'Chercher sur Internet',
+    text: 'L’Observatoire peut maintenant chercher sur Internet pour vous répondre. Touchez le bouton Web, à côté de la zone de message, puis choisissez : Automatique (il décide seul), Rapide, Approfondie ou Très approfondie. La réponse cite ses sources : touchez une citation pour ouvrir la page. Si quelqu’un d’autre cherche au même moment, votre recherche attend son tour quelques instants.'},
   {id: '2026-11-15-tableaux-telephone', date: '2026-11-15', level: 'improvement', title: 'Des tableaux lisibles sur téléphone',
     text: 'Sur un petit écran, les tableaux ne coupent plus les mots lettre par lettre : faites glisser le tableau sur le côté pour voir toutes ses colonnes, la première reste affichée.'},
   {id: '2026-11-15-sources-repliees', date: '2026-11-15', level: 'improvement', title: 'Sources repliées', reserve: 'recherche_web',

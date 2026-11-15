@@ -431,7 +431,9 @@ class Integration(unittest.TestCase):
         self.assertTrue(saved['messages'][-1]['interrupted'])
         self.assertEqual(self.alice.call(path,'PUT',{'version':saved['version'],'messages':[{'role':'user','content':'After restart'}]})[0],200)
 
-    def test_13_web_search_is_reserved_and_runs_through_the_orchestrator(self):
+    def test_13_web_search_is_open_by_default_can_be_closed_and_runs_through_the_orchestrator(self):
+        self.assertTrue(self.alice.call('/api/auth/me')[1]['user']['recherche_web'], 'open to every account')
+        sql("UPDATE users SET recherche_web=false WHERE username='alice'", admin=True)
         self.assertFalse(self.alice.call('/api/auth/me')[1]['user']['recherche_web'])
         chat = self.alice.create('cherche la dernière version de Rust'); path = '/api/conversations/'+chat['id']
         code, result, _ = self.alice.call(path+'/generate', 'POST', {'version': chat['version'], 'recherche': 'auto'})
@@ -469,7 +471,7 @@ class Integration(unittest.TestCase):
                                                        'messages': [{'role': 'user', 'content': 'x', 'outils': [{'type': 'fin'}]}]})
             self.assertEqual(code, 400)
         finally:
-            sql("UPDATE users SET recherche_web=false WHERE username='alice'", admin=True)
+            sql("UPDATE users SET recherche_web=true WHERE username='alice'", admin=True)
 
     def test_13b_stop_reaches_the_answer_even_if_the_connection_stays_open(self):
         chat = self.alice.create('slow'); path = '/api/conversations/'+chat['id']
@@ -490,7 +492,6 @@ class Integration(unittest.TestCase):
 
     def test_14_without_orchestrator_qwen_answers_directly(self):
         compose('stop', 'orchestrateur', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        sql("UPDATE users SET recherche_web=true WHERE username='alice'", admin=True)
         try:
             chat = self.alice.create('question directe'); path = '/api/conversations/'+chat['id']
             with self.alice.call(path+'/generate', 'POST', {'version': chat['version']}, stream=True) as response:
@@ -504,7 +505,6 @@ class Integration(unittest.TestCase):
             self.assertEqual(last['outils'][0]['type'], 'indisponible')
             self.assertEqual(json.loads(last['content'])['outils'], [], 'answered by Qwen directly, without tools')
         finally:
-            sql("UPDATE users SET recherche_web=false WHERE username='alice'", admin=True)
             compose('start', 'orchestrateur', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 

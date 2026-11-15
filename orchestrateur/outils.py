@@ -7,6 +7,7 @@ Un appel ouvre sa propre connexion MCP (serveurs sans session) ; la progression 
 import asyncio
 from dataclasses import dataclass, field
 import json
+import uuid
 import logging
 import os
 from pathlib import Path
@@ -54,10 +55,10 @@ def charger(chemin: Path = CONFIGURATION) -> list[Serveur]:
 _annulations: set = set()
 
 
-async def _annuler(serveur: Serveur):
+async def _annuler(serveur: Serveur, appel: str):
     try:
         async with httpx.AsyncClient(trust_env=False, timeout=5) as http:
-            await http.post(serveur.annuler, headers=serveur.entetes())
+            await http.post(serveur.annuler, headers=serveur.entetes(), json={'appel': appel})
     except httpx.HTTPError:
         journal.warning('annulation impossible sur le serveur d’outils %s', serveur.nom)
 
@@ -105,6 +106,10 @@ class Registre:
         serveur = self.serveur_de(nom)
         if serveur is None:
             raise OutilErreur(f'outil inconnu : {nom}')
+        # Identifiant de l'appel (métadonnées observatoire.appel) : un arrêt n'annule que cet appel-là, pas la recherche
+        # d'un autre utilisateur sur le même serveur.
+        appel = uuid.uuid4().hex
+        meta = {**(meta or {}), 'observatoire': {**((meta or {}).get('observatoire') or {}), 'appel': appel}}
 
         async def recue(_avance, _total, message):
             if message:
@@ -118,7 +123,7 @@ class Registre:
         except asyncio.CancelledError:
             # Réponse abandonnée (l'utilisateur a arrêté) : le serveur est prévenu, en arrière-plan.
             if serveur.annuler:
-                tache = asyncio.get_running_loop().create_task(_annuler(serveur))
+                tache = asyncio.get_running_loop().create_task(_annuler(serveur, appel))
                 _annulations.add(tache)
                 tache.add_done_callback(_annulations.discard)
             raise
