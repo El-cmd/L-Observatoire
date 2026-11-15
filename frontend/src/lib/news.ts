@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-15-application', date: '2026-11-15', level: 'major', title: 'L’Observatoire comme une application',
+    text: 'Vous pouvez installer L’Observatoire sur votre ordinateur ou votre téléphone Android : ouvrez le menu de votre compte, en bas à gauche, et choisissez « Installer l’application ». Il s’ouvre ensuite dans sa propre fenêtre, avec son icône. Sur iPhone, touchez le bouton Partager de Safari, puis « Sur l’écran d’accueil ».'},
   {id: '2026-11-15-arret', date: '2026-11-15', level: 'fix', title: 'Arrêter une réponse, tout de suite',
     text: 'Le bouton d’arrêt coupe maintenant la réponse immédiatement : vous pouvez écrire votre message suivant sans attendre ni recharger la page.'},
   {id: '2026-11-15-sources-icones', date: '2026-11-15', level: 'improvement', title: 'Des sources plus lisibles', reserve: 'recherche_web',

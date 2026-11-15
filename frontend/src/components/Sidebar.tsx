@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState} from 'react';
 import type {Activity, Conversation, User} from '../types';
 import {Icon} from './Icon';
+import {install, useInstallPrompt} from '../hooks/useInstall';
 
 export function Sidebar({user, chats, activity, currentId, libraryOpen, newsOpen, unreadNews, open, collapsed, navigating, canImport, importing, onClose, onNew, onLibrary, onNews,
   onSelect, onRename, onDelete, onImport, onPassword, onLogout}: {
@@ -10,6 +11,7 @@ export function Sidebar({user, chats, activity, currentId, libraryOpen, newsOpen
   onPassword: () => void; onLogout: () => void;
 }) {
   const [accountOpen, setAccountOpen] = useState(false);
+  const installable = useInstallPrompt();
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const cancelled = useRef(false);
@@ -57,6 +59,7 @@ export function Sidebar({user, chats, activity, currentId, libraryOpen, newsOpen
     <div className="account-area" ref={account}>
       <div id="account-panel" className="account-panel" hidden={!accountOpen}>
         <button id="import-legacy" type="button" hidden={!canImport} disabled={importing} onClick={() => {setAccountOpen(false); onImport();}}>Importer les anciens chats de ce navigateur</button>
+        <button id="install-app" type="button" hidden={!installable} onClick={() => {setAccountOpen(false); void install();}}>Installer l’application</button>
         <button id="change-password" type="button" onClick={() => {setAccountOpen(false); onPassword();}}>Changer mon mot de passe</button>
         <button id="logout" type="button" onClick={() => {setAccountOpen(false); onLogout();}}>Se déconnecter</button>
       </div>
