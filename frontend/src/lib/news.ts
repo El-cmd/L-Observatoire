@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-17-chat-ephemere', date: '2026-11-17', level: 'major', title: 'Le chat éphémère',
+    text: 'Touchez la bulle en pointillés, en haut à droite, pour ouvrir un chat qui n’est enregistré nulle part : il n’apparaît pas dans votre historique et disparaît dès que vous le quittez ou fermez la page. La recherche sur Internet y fonctionne ; les images et documents n’y sont pas acceptés, car ils seraient gardés dans votre bibliothèque. Touchez de nouveau la bulle pour revenir à vos conversations.'},
   {id: '2026-11-15-profondeur-respectee', date: '2026-11-15', level: 'fix', title: 'La profondeur de recherche choisie est respectée',
     text: 'Quand vous choisissez Approfondie ou Très approfondie dans le menu du bouton Web, la recherche se fait toujours à ce niveau. Avant, elle pouvait parfois se faire en mode Rapide.'},
   {id: '2026-11-15-lire-une-page', date: '2026-11-15', level: 'major', title: 'Lire une page dont vous donnez le lien',

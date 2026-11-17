@@ -186,7 +186,7 @@ async fn count_text(app:&App,messages:&[Value])->TokenCount{
 // The proxy's OpenAI tokenizer was off by 8 to 13 % on long texts and up to 28 % on short
 // ones against Qwen's count: a quarter of the estimated part, capped at 12 % of the window.
 fn safety(count:&TokenCount)->u64{512+(count.estimated_part/4).min(15_208)}
-fn fits(count:&TokenCount,reserve:u64)->bool{count.tokens.saturating_add(reserve).saturating_add(safety(count))<=LIMIT}
+pub(crate) fn fits(count:&TokenCount,reserve:u64)->bool{count.tokens.saturating_add(reserve).saturating_add(safety(count))<=LIMIT}
 /// Room left for the answer once the prompt and its safety margin are in the window.
 pub fn output_budget(count:&TokenCount,requested:u64)->u64{
     requested.min(LIMIT.saturating_sub(count.tokens).saturating_sub(safety(count)))

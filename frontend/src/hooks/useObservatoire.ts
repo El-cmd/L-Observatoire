@@ -21,6 +21,13 @@ function readSettings(userId: string, legacy: Legacy | null): Settings {
   };
 }
 const normalize = (chat: Conversation): Conversation => ({...chat, message_count: chat.messages.length});
+/** Ephemeral chat: kept in this page only, never saved (see the ephemere route of the API). */
+const EPHEMERAL = 'ephemere-';
+export const isEphemeral = (chat?: Pick<Conversation, 'id'>) => Boolean(chat?.id.startsWith(EPHEMERAL));
+const emptyEphemeral = (): Conversation => ({id:EPHEMERAL + crypto.randomUUID(), title:'Chat éphémère', version:0, messages:[], message_count:0,
+  updated_at:new Date().toISOString(), context_summary:'', compacted_through:0, compaction_count:0});
+/** Sent back to Qwen: the text only (tool steps and interrupted answers are not part of the prompt). */
+const forPrompt = (messages: Message[]) => messages.map(({role, content, reasoning, interrupted}) => ({role, content, ...(reasoning ? {reasoning} : {}), ...(interrupted ? {interrupted} : {})}));
 const aborted = (error: unknown) => error instanceof Error && error.name === 'AbortError';
 
 export function useObservatoire() {
@@ -61,6 +68,16 @@ export function useObservatoire() {
   const [importing, setImporting] = useState(false);
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
   const [summaryFocus, setSummaryFocus] = useState(0);
+  const [ephemeral, setEphemeralState] = useState<Conversation | null>(null);
+  const ephemeralRef = useRef<Conversation | null>(null);
+  // Identifier of the ephemeral answer being written, for the Stop button.
+  const ephemeralAnswer = useRef<string | undefined>(undefined);
+  const setEphemeral = useCallback((chat: Conversation | null) => {ephemeralRef.current = chat; setEphemeralState(chat);}, []);
+  /** The conversation shown: the ephemeral chat, or a saved one. */
+  const shown = useCallback(() => {
+    const id = currentRef.current;
+    return ephemeralRef.current?.id === id ? ephemeralRef.current ?? undefined : chatsRef.current.find(value => value.id === id);
+  }, []);
 
   const setNotice = useCallback((id: string, value: Notice | null) => setNotices(previous => {
     const next = {...previous}; if (value) next[id] = value; else delete next[id]; return next;
@@ -90,16 +107,44 @@ export function useObservatoire() {
     authRef.current = null; client.setCSRF('');
     setAuth(null); replaceChats([]); selectChat(undefined); setPrompt(''); setPending(() => []); setLibrary(null);
     creating.current = false; loadingList.current = false; setNavigating(false);
-    setNotices({}); setCanImport(false); setContextUsage(null); setLoginError(message); setInitializing(false);
-  }, [client, replaceChats, abortAll, selectChat, setPending]);
+    setNotices({}); setCanImport(false); setContextUsage(null); setLoginError(message); setInitializing(false); setEphemeral(null);
+  }, [client, replaceChats, abortAll, selectChat, setPending, setEphemeral]);
 
   const failure = useCallback((error: unknown, id = currentRef.current ?? '') => {
     if (error instanceof APIError && error.status === 401) clearSession('Ta session a expiré. Reconnecte-toi.');
     else if (!aborted(error)) setNotice(id, {message:errorMessage(error)});
   }, [clearSession, setNotice]);
 
+  /** Leaves the ephemeral chat (it is then gone for good), after confirmation if it holds messages. */
+  function leaveEphemeral(): boolean {
+    const chat = ephemeralRef.current;
+    if (!chat) return true;
+    if (chat.messages.length && !confirm('Quitter le chat éphémère ? Il sera effacé définitivement.')) return false;
+    if (activityRef.current[chat.id]) {
+      if (ephemeralAnswer.current) void client.json(`/api/ephemere/${ephemeralAnswer.current}/stop`, {method:'POST'}).catch(() => {});
+      controllers.current.get(chat.id)?.abort();
+    }
+    setNotice(chat.id, null); setEphemeral(null);
+    return true;
+  }
+
+  function openEphemeral() {
+    if (!authRef.current || isEphemeral(shown())) return;
+    navigation.current.controller?.abort(); navigation.current.id++; setNavigating(false);
+    const chat = emptyEphemeral(); setEphemeral(chat); selectChat(chat.id); setNotice('', null);
+  }
+
+  /** The topbar button: opens an ephemeral chat, or leaves it for the latest conversation. */
+  async function toggleEphemeral() {
+    if (!isEphemeral(shown())) {openEphemeral(); return;}
+    if (!leaveEphemeral()) return;
+    selectChat(undefined);
+    if (chatsRef.current.length) await openChat(chatsRef.current[0].id); else await newChat();
+  }
+
   async function openChat(id: string) {
     if (!authRef.current) return;
+    if (ephemeralRef.current && ephemeralRef.current.id !== id && !leaveEphemeral()) return;
     const account = epoch.current;
     navigation.current.controller?.abort();
     const requestId = ++navigation.current.id;
@@ -119,6 +164,7 @@ export function useObservatoire() {
 
   async function newChat(fromList = false) {
     if (creating.current || loadingList.current && !fromList || !authRef.current) return;
+    if (!leaveEphemeral()) return;
     const empty = chatsRef.current.find(chat => !chat.message_count && !chat.messages.length && !activityRef.current[chat.id]);
     if (empty) { await openChat(empty.id); return; }
     const account = epoch.current; creating.current = true; setNavigating(true);
@@ -174,9 +220,9 @@ export function useObservatoire() {
     catch {notify('Le navigateur ne permet pas de mémoriser les réglages. Les conversations restent sauvegardées sur le serveur.');}
   }, [auth?.user.id, settings, notify]);
 
-  const activeChat = chats.find(chat => chat.id === currentId);
+  const activeChat = ephemeral && ephemeral.id === currentId ? ephemeral : chats.find(chat => chat.id === currentId);
   useEffect(() => {
-    if (!auth || !activeChat) {setContextUsage(null); return;}
+    if (!auth || !activeChat || isEphemeral(activeChat)) {setContextUsage(null); return;}
     const controller = new AbortController(); const account = epoch.current;
     client.json<ContextUsage>(`/api/conversations/${activeChat.id}/context`, {signal:controller.signal}).then(value => {
       if (epoch.current === account && !controller.signal.aborted) setContextUsage(value);
@@ -202,6 +248,14 @@ export function useObservatoire() {
   }
 
   useEffect(() => () => {abortAll(); navigation.current.controller?.abort();}, [abortAll]);
+
+  // An ephemeral chat with messages disappears with the page: the browser asks before closing or reloading it.
+  const ephemeralUsed = Boolean(ephemeral?.messages.length);
+  useEffect(() => {
+    if (!ephemeralUsed) return;
+    const warn = (event: BeforeUnloadEvent) => {event.preventDefault(); event.returnValue = '';};
+    addEventListener('beforeunload', warn); return () => removeEventListener('beforeunload', warn);
+  }, [ephemeralUsed]);
 
   async function login(username: string, password: string) {
     if (signingIn) return;
@@ -299,6 +353,48 @@ export function useObservatoire() {
     }
   }
 
+  /** Ephemeral chat: the whole exchange is sent with each question; nothing is saved, on the server or here. */
+  async function requestEphemeral(draft: Conversation, resume = false) {
+    const id = draft.id;
+    if (activityRef.current[id] || !authRef.current?.configured) return;
+    const account = epoch.current, answer = crypto.randomUUID();
+    const controller = new AbortController(); controllers.current.set(id, controller); ephemeralAnswer.current = answer;
+    setActivity(id, 'generating'); setNotice(id, null);
+    const history = resume ? draft.messages.slice(0, -1) : draft.messages;
+    const start: Message = resume ? {...draft.messages[draft.messages.length - 1], truncated:false} : {role:'assistant', content:'', reasoning:''};
+    let assistant = start;
+    const show = (message: Message) => {
+      if (epoch.current === account && ephemeralRef.current?.id === id) setEphemeral({...draft, messages:[...history, message], message_count:history.length + 1});
+    };
+    show(start);
+    try {
+      const recherche = settings.web && authRef.current?.user.recherche_web && !resume ? {recherche:settings.webMode} : {};
+      const response = await client.response('/api/ephemere', {method:'POST', signal:controller.signal,
+        body:{id:answer, messages:forPrompt(draft.messages), reasoning_effort:settings.effort, temperature:settings.temperature, ...(resume ? {continue:true} : {}), ...recherche}});
+      const result = await consumeCompletion(response, value => {
+        assistant = {...start, content:start.content + value.content, reasoning:(start.reasoning || '') + value.reasoning,
+          ...(value.outils.length ? {outils:value.outils} : {})};
+        show(assistant);
+      });
+      if (epoch.current !== account) return;
+      if (result.limited) {assistant = {...assistant, truncated:true}; show(assistant);}
+      if (!result.content.trim() && !resume) setNotice(id, {message:'Le modèle n’a pas produit de réponse finale. Essaie un niveau de réflexion plus léger.', retry:true});
+      else if (result.limited) setNotice(id, {message:'La réponse a atteint la longueur maximale.', resume:true});
+    } catch (error) {
+      controller.abort();
+      if (epoch.current !== account) return;
+      // What was received stays on screen, marked as interrupted (it is not sent back to Qwen); nothing received:
+      // the question stays alone, ready for « Réessayer ».
+      if (assistant !== start) show({...assistant, interrupted:true});
+      else if (resume) show(start);
+      else if (ephemeralRef.current?.id === id) setEphemeral({...draft, messages:history, message_count:history.length});
+      if (error instanceof APIError && error.status === 401) failure(error, id);
+      else setNotice(id, {message:aborted(error) ? 'Génération arrêtée.' : errorMessage(error), retry:true});
+    } finally {
+      if (epoch.current === account) {controllers.current.delete(id); setActivity(id); if (ephemeralAnswer.current === answer) ephemeralAnswer.current = undefined;}
+    }
+  }
+
   async function renameChat(id: string, title: string) {
     const name = title.trim(); const chat = chatsRef.current.find(value => value.id === id);
     if (!chat || !name || name === chat.title || !authRef.current) return;
@@ -372,9 +468,15 @@ export function useObservatoire() {
   const removePending = (key: string) => setPending(list => list.filter(item => item.key !== key));
 
   async function send(content: string) {
-    const chat = chatsRef.current.find(value => value.id === currentRef.current);
+    const chat = shown();
     const images = pendingRef.current;
     if (!chat || activityRef.current[chat.id] || navigating || !content.trim() && !images.length) return;
+    if (isEphemeral(chat)) {
+      if (images.length) {notify('Un chat éphémère n’accepte pas de fichiers : ils seraient gardés dans la bibliothèque. Retire-les avant d’envoyer.'); return;}
+      setPrompt('');
+      await requestEphemeral({...chat, messages:[...chat.messages, {role:'user', content:content.trim()}]});
+      return;
+    }
     if (images.some(item => item.status === 'uploading')) {notify('Attends la fin de l’envoi des fichiers.'); return;}
     if (images.some(item => item.status === 'reading')) {notify('Attends la fin de la lecture des documents.'); return;}
     if (images.some(item => item.status === 'error')) {notify('Retire les fichiers refusés avant d’envoyer.'); return;}
@@ -411,16 +513,19 @@ export function useObservatoire() {
   const documentText = (id: string) => client.json<{content: string}>(`/api/attachments/${id}/text`).then(value => value.content);
 
   async function continueAnswer() {
-    const chat = chatsRef.current.find(value => value.id === currentRef.current);
+    const chat = shown();
     if (!chat || activityRef.current[chat.id] || chat.messages[chat.messages.length - 1]?.role !== 'assistant') return;
-    await requestAnswer(chat, undefined, [], true);
+    if (isEphemeral(chat)) await requestEphemeral(chat, true);
+    else await requestAnswer(chat, undefined, [], true);
   }
 
   async function regenerate() {
-    const chat = chatsRef.current.find(value => value.id === currentRef.current);
+    const chat = shown();
     if (!chat || activityRef.current[chat.id]) return;
     const last = chat.messages.findLastIndex(message => message.role === 'user');
-    if (last >= 0) await requestAnswer({...chat, messages:chat.messages.slice(0,last+1)});
+    if (last < 0) return;
+    if (isEphemeral(chat)) await requestEphemeral({...chat, messages:chat.messages.slice(0,last+1)});
+    else await requestAnswer({...chat, messages:chat.messages.slice(0,last+1)});
   }
 
   async function importLegacy() {
@@ -443,12 +548,16 @@ export function useObservatoire() {
     chats, current:activeChat, activity, busy:currentActivity === 'generating', navigating,
     notice:(currentId && notices[currentId]) || notices[''] || null, notify,
     prompt, setPrompt, pending, addImages, addFromLibrary, removePending, library, loadLibrary, deleteImage, imageConversations, documentText, removedImages,
-    settings, setSettings, newChat, openChat, deleteChat, renameChat, send, regenerate, continueAnswer,
+    settings, setSettings, newChat, openChat, ephemeral:isEphemeral(activeChat), toggleEphemeral, deleteChat, renameChat, send, regenerate, continueAnswer,
     contextUsage:contextUsage && contextUsage.conversation_id === currentId && contextUsage.version === activeChat?.version ? contextUsage : null,
     compacting:currentActivity === 'compacting', compactContext, summaryFocus,
     stop:() => {
       const id = currentRef.current; const controller = id ? controllers.current.get(id) : undefined;
       if (!id || !controller) return;
+      if (ephemeralRef.current?.id === id) {
+        if (ephemeralAnswer.current) void client.json(`/api/ephemere/${ephemeralAnswer.current}/stop`, {method:'POST'}).catch(() => {});
+        controller.abort(); return;
+      }
       // The server stops the answer at once and saves it, even if proxies keep the closed connection open a while.
       stopping.current.set(id, client.json(`/api/conversations/${id}/stop`, {method:'POST'}));
       controller.abort();

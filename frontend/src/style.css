@@ -254,3 +254,4 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .message-content :is(th,td):first-child{position:sticky;left:0;z-index:1;background:#0b0b0b;box-shadow:inset -1px 0 #333;min-width:7em}
 .message-content th:first-child{background:#1b1b1b}
 }
+.ephemeral-toggle{margin-left:auto}.ephemeral-toggle.active{background:#262626;color:#f2f2f2}.welcome-note{color:#9a9a9a;font-size:14px;line-height:1.6;max-width:460px;margin:12px auto 0}.ephemeral-banner{display:flex;align-items:center;justify-content:center;gap:8px;max-width:780px;margin:0 auto 8px;color:#8a8a8a;font-size:12px}.ephemeral-banner svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}@media(max-width:760px){.welcome-note{font-size:13px;padding:0 6px}}

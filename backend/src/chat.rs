@@ -45,7 +45,7 @@ pub struct Running {
 /// Tool steps kept with one answer: enough for a very deep search (a few dozen events).
 pub const MAX_TOOL_EVENTS: usize = 300;
 pub const MAX_TOOL_BYTES: usize = 256 * 1024;
-const SEARCH_MODES: [&str; 4] = ["auto", "web", "approfondie", "tres_approfondie"];
+pub(crate) const SEARCH_MODES: [&str; 4] = ["auto", "web", "approfondie", "tres_approfondie"];
 
 #[derive(Serialize, FromRow)]
 pub struct Conversation {
@@ -82,7 +82,7 @@ pub struct Summary {
     updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-fn validate_messages(messages: &[Message]) -> Result<(), Error> {
+pub(crate) fn validate_messages(messages: &[Message]) -> Result<(), Error> {
     if messages.len() > context::MAX_MESSAGES {
         return Err(Error::bad("La limite technique de 10 000 messages est atteinte."));
     }
@@ -382,26 +382,32 @@ fn default_temperature() -> f64 {
 fn default_tokens() -> u32 {
     context::MAX_OUTPUT as u32
 }
+/// Answer settings, shared by saved conversations and ephemeral chats.
 #[derive(Deserialize)]
-pub struct Generate {
-    version: i64,
+pub struct Settings {
     #[serde(default = "default_effort")]
-    reasoning_effort: String,
+    pub(crate) reasoning_effort: String,
     #[serde(default = "default_temperature")]
-    temperature: f64,
+    pub(crate) temperature: f64,
     /// Upper bound; the answer actually gets the room left in the context window.
     #[serde(default = "default_tokens")]
-    max_tokens: u32,
+    pub(crate) max_tokens: u32,
     /// Resume the last assistant message where the length limit cut it.
     #[serde(default, rename = "continue")]
-    resume: bool,
+    pub(crate) resume: bool,
     /// Web search for this answer (accounts allowed only): "auto" (Qwen decides whether and how deep),
     /// "web", "approfondie" or "tres_approfondie" (search imposed at that depth).
     #[serde(default)]
-    recherche: Option<String>,
+    pub(crate) recherche: Option<String>,
 }
-impl Generate {
-    fn validate(&self) -> Result<(), Error> {
+#[derive(Deserialize)]
+pub struct Generate {
+    version: i64,
+    #[serde(flatten)]
+    settings: Settings,
+}
+impl Settings {
+    pub(crate) fn validate(&self) -> Result<(), Error> {
         if !matches!(
             self.reasoning_effort.as_str(),
             "none" | "low" | "medium" | "xhigh"
@@ -459,6 +465,81 @@ pub(crate) async fn release(app: &App, id: Uuid, generation: Uuid) {
     let _=sqlx::query("UPDATE conversations SET active_generation=NULL,generation_started_at=NULL WHERE id=$1 AND active_generation=$2").bind(id).bind(generation).execute(&app.db).await;
 }
 
+/// Request sent to the orchestrator (or to Qwen): the prompt and the user's settings.
+pub(crate) fn payload(app: &App, messages: Vec<Value>, settings: &Settings, max_tokens: u64) -> Value {
+    let mut payload = json!({"model":app.config.model,"messages":messages,"reasoning_effort":settings.reasoning_effort,"temperature":settings.temperature,"max_tokens":max_tokens,"stream":true,"stream_options":{"include_usage":true}});
+    if settings.resume {
+        // vLLM extension: extend the final assistant message instead of starting a new turn.
+        payload["continue_final_message"] = json!(true);
+        payload["add_generation_prompt"] = json!(false);
+        payload["reasoning_effort"] = json!("none");
+    }
+    if let Some(mode) = &settings.recherche {
+        // Extension read by the orchestrator only (removed before Qwen): tools allowed for this answer.
+        payload["observatoire"] = json!({"outils":{"recherche_web":mode}});
+    }
+    payload
+}
+
+/// Opens the answer stream. The orchestrator answers like Qwen (same stream); when it cannot be reached, Qwen is
+/// asked directly, without tools, and the notice returned tells the user that the search was not available.
+pub(crate) async fn open_stream(app: &App, mut payload: Value, searching: bool) -> Result<(reqwest::Response, Option<Value>), Error> {
+    let mut notice: Option<Value> = None;
+    let response = if app.config.orchestrator_url.is_empty() {
+        send_completion(app, &app.config.api_url, &app.config.api_key, &payload).await
+    } else {
+        match send_completion(app, &app.config.orchestrator_url, &app.config.orchestrator_key, &payload).await {
+            Err(error) if error.is_connect() || error.is_timeout() => {
+                tracing::warn!("orchestrator unreachable, answering with Qwen directly");
+                if searching {
+                    notice = Some(json!({"outil":"recherche_web","type":"indisponible","message":"La recherche web est indisponible pour le moment : réponse sans elle."}));
+                }
+                if let Some(object) = payload.as_object_mut() {
+                    object.remove("observatoire");
+                }
+                send_completion(app, &app.config.api_url, &app.config.api_key, &payload).await
+            }
+            other => other,
+        }
+    };
+    match response {
+        Ok(response)
+            if response.status().is_success()
+                && response
+                    .headers()
+                    .get(header::CONTENT_TYPE)
+                    .is_some_and(|h| h.to_str().unwrap_or("").contains("text/event-stream")) =>
+        {
+            Ok((response, notice))
+        }
+        Ok(response) => Err(Error(
+            StatusCode::BAD_GATEWAY,
+            format!("L’API Qwen a répondu HTTP {} ou n’a pas renvoyé de flux SSE.", response.status().as_u16()),
+        )),
+        Err(_) => Err(Error(StatusCode::BAD_GATEWAY, "Le serveur Qwen est inaccessible.".into())),
+    }
+}
+
+/// Next complete server-sent event in `buffer` (removed from it): its joined "data:" lines, empty when it has none.
+pub(crate) fn next_event(buffer: &mut Vec<u8>) -> Option<String> {
+    let (position, width) = buffer
+        .windows(2)
+        .position(|w| w == b"\n\n")
+        .map(|p| (p, 2))
+        .or_else(|| buffer.windows(4).position(|w| w == b"\r\n\r\n").map(|p| (p, 4)))?;
+    let event = String::from_utf8_lossy(&buffer[..position]).to_string();
+    buffer.drain(..position + width);
+    Some(event.lines().filter_map(|l| l.strip_prefix("data:")).map(str::trim_start).collect::<Vec<_>>().join("\n"))
+}
+
+/// Streamed answer for the browser (no buffering by Nginx).
+pub(crate) fn event_stream(receiver: mpsc::Receiver<Result<Bytes, Infallible>>) -> Response {
+    let mut response = Body::from_stream(tokio_stream::wrappers::ReceiverStream::new(receiver)).into_response();
+    response.headers_mut().insert(header::CONTENT_TYPE, "text/event-stream; charset=utf-8".parse().unwrap());
+    response.headers_mut().insert("x-accel-buffering", "no".parse().unwrap());
+    response
+}
+
 pub async fn generate(
     State(app): State<App>,
     headers: HeaderMap,
@@ -466,17 +547,17 @@ pub async fn generate(
     Json(input): Json<Generate>,
 ) -> Result<Response, Error> {
     let user = session(&app, &headers, true).await?;
-    input.validate()?;
+    input.settings.validate()?;
     if app.config.api_key.is_empty() || app.config.api_url.is_empty() {
         return Err(Error(
             StatusCode::SERVICE_UNAVAILABLE,
             "L’API Qwen n’est pas configurée.".into(),
         ));
     }
-    if input.recherche.is_some() && !user.recherche_web {
+    if input.settings.recherche.is_some() && !user.recherche_web {
         return Err(Error(StatusCode::FORBIDDEN, "La recherche web n’est pas ouverte à ce compte.".into()));
     }
-    if input.recherche.is_some() && app.config.orchestrator_url.is_empty() {
+    if input.settings.recherche.is_some() && app.config.orchestrator_url.is_empty() {
         return Err(Error(StatusCode::SERVICE_UNAVAILABLE, "La recherche web n’est pas disponible sur ce serveur.".into()));
     }
     let permit = app.generations.clone().try_acquire_owned().map_err(|_| {
@@ -492,8 +573,8 @@ pub async fn generate(
         Some(row) => row,
         None => return Err(not_found_or_conflict(&app, id, user.user_id).await),
     };
-    let expected = if input.resume { "assistant" } else { "user" };
-    let resumable = !input.resume
+    let expected = if input.settings.resume { "assistant" } else { "user" };
+    let resumable = !input.settings.resume
         || row.messages.0.last().is_some_and(|m| !m.interrupted && !m.content.trim().is_empty());
     if row.messages.0.is_empty()
         || row.messages.0.len() >= context::MAX_MESSAGES
@@ -501,25 +582,25 @@ pub async fn generate(
         || !resumable
     {
         release(&app, id, generation).await;
-        return Err(Error::bad(if input.resume {
+        return Err(Error::bad(if input.settings.resume {
             "Il n’y a pas de réponse à continuer."
         } else {
             "Ajoute une question avant de demander une réponse."
         }));
     }
-    let reserve = (input.max_tokens as u64).min(context::MIN_OUTPUT);
+    let reserve = (input.settings.max_tokens as u64).min(context::MIN_OUTPUT);
     let prepared = tokio::time::timeout(std::time::Duration::from_secs(210), context::prepare(&app, user.user_id, &mut row, generation, reserve)).await;
     let counted = match prepared {
         Ok(Ok(counted)) => counted,
         Ok(Err(error)) => {release(&app,id,generation).await;return Err(error);},
         Err(_) => {release(&app,id,generation).await;return Err(Error(StatusCode::GATEWAY_TIMEOUT,"La compression du contexte a pris trop de temps. Les messages d’origine sont conservés.".into()));}
     };
-    let max_tokens = context::output_budget(&counted, input.max_tokens as u64);
+    let max_tokens = context::output_budget(&counted, input.settings.max_tokens as u64);
     let messages = context::prompt(&row);
     let measured_messages = messages.len() as i32;
     let measured_digest = context::measure(&app.config.model, &messages);
     // Qwen names the conversation from its first question while the answer streams.
-    let mut naming = (row.title_source == "question" && !input.resume)
+    let mut naming = (row.title_source == "question" && !input.settings.resume)
         .then(|| row.messages.0.iter().find(|m| m.role == "user").map(|m| m.content.clone()).filter(|q| !q.trim().is_empty()))
         .flatten()
         .map(|question| {
@@ -535,65 +616,16 @@ pub async fn generate(
             return Err(error);
         }
     };
-    let mut payload = json!({"model":app.config.model,"messages":messages,"reasoning_effort":input.reasoning_effort,"temperature":input.temperature,"max_tokens":max_tokens,"stream":true,"stream_options":{"include_usage":true}});
-    if input.resume {
-        // vLLM extension: extend the final assistant message instead of starting a new turn.
-        payload["continue_final_message"] = json!(true);
-        payload["add_generation_prompt"] = json!(false);
-        payload["reasoning_effort"] = json!("none");
-    }
-    if let Some(mode) = &input.recherche {
-        // Extension read by the orchestrator only (removed before Qwen): tools allowed for this answer.
-        payload["observatoire"] = json!({"outils":{"recherche_web":mode}});
-    }
-    // The orchestrator answers like Qwen (same stream); when it cannot be reached, Qwen is asked directly,
-    // without tools, and the user is told that the search was not available.
-    let mut notice: Option<Value> = None;
-    let response = if app.config.orchestrator_url.is_empty() {
-        send_completion(&app, &app.config.api_url, &app.config.api_key, &payload).await
-    } else {
-        match send_completion(&app, &app.config.orchestrator_url, &app.config.orchestrator_key, &payload).await {
-            Err(error) if error.is_connect() || error.is_timeout() => {
-                tracing::warn!("orchestrator unreachable, answering with Qwen directly");
-                if input.recherche.is_some() {
-                    notice = Some(json!({"outil":"recherche_web","type":"indisponible","message":"La recherche web est indisponible pour le moment : réponse sans elle."}));
-                }
-                if let Some(object) = payload.as_object_mut() {
-                    object.remove("observatoire");
-                }
-                send_completion(&app, &app.config.api_url, &app.config.api_key, &payload).await
-            }
-            other => other,
-        }
-    };
-    let upstream = match response {
-        Ok(response)
-            if response.status().is_success()
-                && response
-                    .headers()
-                    .get(header::CONTENT_TYPE)
-                    .is_some_and(|h| h.to_str().unwrap_or("").contains("text/event-stream")) =>
-        {
-            response
-        }
-        Ok(response) => {
-            let status = response.status().as_u16();
+    let payload = payload(&app, messages, &input.settings, max_tokens);
+    let (upstream, notice) = match open_stream(&app, payload, input.settings.recherche.is_some()).await {
+        Ok(opened) => opened,
+        Err(error) => {
             release(&app, id, generation).await;
-            return Err(Error(
-                StatusCode::BAD_GATEWAY,
-                format!("L’API Qwen a répondu HTTP {status} ou n’a pas renvoyé de flux SSE."),
-            ));
-        }
-        Err(_) => {
-            release(&app, id, generation).await;
-            return Err(Error(
-                StatusCode::BAD_GATEWAY,
-                "Le serveur Qwen est inaccessible.".into(),
-            ));
+            return Err(error);
         }
     };
     // A resumed answer grows the last message in place; it is not a new Qwen measurement point.
-    let resume = input.resume;
+    let resume = input.settings.resume;
     let resumed = if resume { row.messages.0.pop() } else { None };
     let existing_bytes: usize = row
         .messages
@@ -677,28 +709,7 @@ pub async fn generate(
                 failed = true;
                 break;
             }
-            loop {
-                let split = buffer
-                    .windows(2)
-                    .position(|w| w == b"\n\n")
-                    .map(|p| (p, 2))
-                    .or_else(|| {
-                        buffer
-                            .windows(4)
-                            .position(|w| w == b"\r\n\r\n")
-                            .map(|p| (p, 4))
-                    });
-                let Some((position, width)) = split else {
-                    break;
-                };
-                let event = String::from_utf8_lossy(&buffer[..position]).to_string();
-                buffer.drain(..position + width);
-                let data = event
-                    .lines()
-                    .filter_map(|l| l.strip_prefix("data:"))
-                    .map(str::trim_start)
-                    .collect::<Vec<_>>()
-                    .join("\n");
+            while let Some(data) = next_event(&mut buffer) {
                 if data.is_empty() {
                     continue;
                 }
@@ -832,16 +843,7 @@ pub async fn generate(
         }
         saved_signal.notify_waiters();
     });
-    let mut response =
-        Body::from_stream(tokio_stream::wrappers::ReceiverStream::new(receiver)).into_response();
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        "text/event-stream; charset=utf-8".parse().unwrap(),
-    );
-    response
-        .headers_mut()
-        .insert("x-accel-buffering", "no".parse().unwrap());
-    Ok(response)
+    Ok(event_stream(receiver))
 }
 
 #[cfg(test)]
@@ -885,8 +887,8 @@ mod tests {
     }
     #[test]
     fn search_modes_are_checked() {
-        let generate = |recherche: Option<&str>, resume: bool| Generate {
-            version: 0, reasoning_effort: "none".into(), temperature: 0.7, max_tokens: 4096, resume,
+        let generate = |recherche: Option<&str>, resume: bool| Settings {
+            reasoning_effort: "none".into(), temperature: 0.7, max_tokens: 4096, resume,
             recherche: recherche.map(str::to_string),
         };
         for mode in SEARCH_MODES {
@@ -900,8 +902,7 @@ mod tests {
     fn reasoning_levels_match_live_model() {
         for level in ["none", "low", "medium", "xhigh"] {
             assert!(
-                Generate {
-                    version: 0,
+                Settings {
                     reasoning_effort: level.into(),
                     temperature: 0.7,
                     max_tokens: 4096,
@@ -913,8 +914,7 @@ mod tests {
             );
         }
         assert!(
-            Generate {
-                version: 0,
+            Settings {
                 reasoning_effort: "high".into(),
                 temperature: 0.7,
                 max_tokens: 4096,

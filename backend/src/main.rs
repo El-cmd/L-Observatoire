@@ -3,6 +3,7 @@ mod auth;
 mod chat;
 mod context;
 mod documents;
+mod ephemere;
 
 use anyhow::{Context, Result};
 use axum::{
@@ -33,6 +34,8 @@ pub struct App {
     pub token_counts: Arc<tokio::sync::Mutex<context::TokenCache>>,
     /// Answers being written, by conversation: the Stop button reaches them here.
     pub running: Arc<std::sync::Mutex<std::collections::HashMap<uuid::Uuid, chat::Running>>>,
+    /// Answers of ephemeral chats (never saved), by the identifier their page chose.
+    pub ephemeres: Arc<std::sync::Mutex<std::collections::HashMap<uuid::Uuid, ephemere::Running>>>,
 }
 
 pub struct Config {
@@ -218,6 +221,7 @@ async fn main() -> Result<()> {
         shutdown: shutdown_rx,
         token_counts: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         running: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        ephemeres: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         db: db.clone(),
         http: reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
@@ -264,6 +268,8 @@ async fn main() -> Result<()> {
         )
         .route("/api/conversations/{id}/generate", post(chat::generate))
         .route("/api/conversations/{id}/stop", post(chat::stop))
+        .route("/api/ephemere", post(ephemere::generate))
+        .route("/api/ephemere/{id}/stop", post(ephemere::stop))
         .route("/api/conversations/{id}/title", put(chat::rename).layer(DefaultBodyLimit::max(8192)))
         .route("/api/attachments", get(attachments::list).post(attachments::upload).layer(DefaultBodyLimit::max(documents::MAX_UPLOAD)))
         .route("/api/attachments/{id}", get(attachments::file).delete(attachments::delete))

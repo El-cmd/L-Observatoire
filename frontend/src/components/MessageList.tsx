@@ -57,8 +57,8 @@ const MessageItem = memo(function MessageItem({message, streaming, last, removed
   </article>;
 });
 
-export function MessageList({chat, busy, summaryFocus, removedImages, onRegenerate, onContinue, onOpenImage, onAskImage, onError}: {
-  chat?: Conversation; busy: boolean; summaryFocus: number; removedImages: ReadonlySet<string>; onRegenerate: () => void; onContinue: () => void;
+export function MessageList({chat, busy, summaryFocus, removedImages, onRegenerate, onContinue, onOpenImage, onAskImage, onError, ephemeral = false}: {
+  chat?: Conversation; busy: boolean; ephemeral?: boolean; summaryFocus: number; removedImages: ReadonlySet<string>; onRegenerate: () => void; onContinue: () => void;
   onOpenImage: (image: AttachmentRef) => void; onAskImage: (image: AttachmentRef) => void; onError: (message: string) => void;
 }) {
   const scroll = useRef<HTMLElement>(null);
@@ -81,7 +81,11 @@ export function MessageList({chat, busy, summaryFocus, removedImages, onRegenera
     const element = scroll.current;
     if (element) atBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 130;
   }}>
-    <section className="welcome" id="welcome" hidden={messages.length > 0}><h1>Qu’avez-vous en tête aujourd’hui ?</h1></section>
+    <section className="welcome" id="welcome" hidden={messages.length > 0}>{ephemeral ? <>
+      <h1>Chat éphémère</h1>
+      <p className="welcome-note">Ce chat n’apparaît pas dans votre historique et n’est enregistré nulle part : il disparaît dès que vous le quittez ou fermez la page.</p>
+    </> : <h1>Qu’avez-vous en tête aujourd’hui ?</h1>}</section>
+    {ephemeral && messages.length > 0 && <p className="ephemeral-banner" role="note"><Icon name="ephemeral"/>Chat éphémère : rien n’est enregistré</p>}
     <div id="messages" className="messages" role="log" aria-label="Conversation" aria-live="polite" aria-relevant="additions">
       {through > 0 && chat?.context_summary && <div className="context-memory">
         <details className="context-summary" ref={summary} key={chat.id}>

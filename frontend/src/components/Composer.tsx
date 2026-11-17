@@ -12,7 +12,7 @@ const WEB_MODES: {mode: WebMode; label: string; hint: string}[] = [
   {mode:'tres_approfondie', label:'Très approfondie', hint:'Un dossier complet, quelques minutes'},
 ];
 
-export function Composer({prompt, onPrompt, pending, onAddImages, onRemovePending, onOpenLibrary, onSend, onStop, onRegenerate, onContinue, settings, onSettings, busy, disabled, notice, chatId, contextUsage, compacting, onCompact, webAllowed = false}: {
+export function Composer({prompt, onPrompt, pending, onAddImages, onRemovePending, onOpenLibrary, onSend, onStop, onRegenerate, onContinue, settings, onSettings, busy, disabled, notice, chatId, contextUsage, compacting, onCompact, webAllowed = false, filesAllowed = true}: {
   pending: PendingImage[]; onAddImages: (files: File[]) => void; onRemovePending: (key: string) => void; onOpenLibrary: () => void;
   prompt: string; onPrompt: (value: string) => void; onSend: (value: string) => void; onStop: () => void;
   onRegenerate: () => void; onContinue: () => void; settings: Settings; onSettings: (value: Settings) => void; busy: boolean;
@@ -20,6 +20,8 @@ export function Composer({prompt, onPrompt, pending, onAddImages, onRemovePendin
   contextUsage: ContextUsage | null; compacting: boolean; onCompact: () => void;
   /** The account may search the web: shows the Web button. */
   webAllowed?: boolean;
+  /** Files can be added (not in an ephemeral chat: they would be kept in the library). */
+  filesAllowed?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [webOpen, setWebOpen] = useState(false);
@@ -66,9 +68,9 @@ export function Composer({prompt, onPrompt, pending, onAddImages, onRemovePendin
   }, [open]);
   const temperature = settings.temperature.toLocaleString('fr-FR', {minimumFractionDigits:1, maximumFractionDigits:1});
   return <div className={`composer-area${dragging ? ' dragging' : ''}`}
-    onDragOver={event => {if (!disabled && event.dataTransfer.types.includes('Files')) {event.preventDefault(); setDragging(true);}}}
+    onDragOver={event => {if (!disabled && filesAllowed && event.dataTransfer.types.includes('Files')) {event.preventDefault(); setDragging(true);}}}
     onDragLeave={event => {if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false);}}
-    onDrop={event => {setDragging(false); const list = images(event.dataTransfer.files); if (list.length && !disabled) {event.preventDefault(); onAddImages(list);}}}>
+    onDrop={event => {setDragging(false); const list = images(event.dataTransfer.files); if (list.length && !disabled && filesAllowed) {event.preventDefault(); onAddImages(list);}}}>
     <div id="error" className="error" role="alert" hidden={!notice}>{notice?.message}{notice?.resume && <button type="button" onClick={onContinue}>Continuer</button>}{notice?.retry && <button type="button" onClick={onRegenerate}>Réessayer</button>}</div>
     <section id="generation-settings" className="generation-settings" aria-label="Réglages de génération" hidden={!open} ref={panel}>
       <div className="generation-heading"><span>Réglages</span><button id="generation-close" type="button" className="icon-button" aria-label="Fermer les réglages" onClick={() => {setOpen(false); toggle.current?.focus();}}><Icon name="close"/></button></div>
@@ -96,7 +98,7 @@ export function Composer({prompt, onPrompt, pending, onAddImages, onRemovePendin
     </ul>}
     <form id="chat-form" className="composer" onSubmit={event => {event.preventDefault(); if (canSend) onSend(prompt);}}>
       <div className="attach" ref={addMenu}>
-        <button id="attach-toggle" type="button" className="attach-toggle icon-button" aria-label="Ajouter des images ou des documents" title="Ajouter des images ou des documents" aria-haspopup="menu" aria-expanded={adding} disabled={disabled} onClick={() => setAdding(value => !value)}><Icon name="plus"/></button>
+        <button id="attach-toggle" type="button" className="attach-toggle icon-button" aria-label="Ajouter des images ou des documents" title={filesAllowed ? 'Ajouter des images ou des documents' : 'Pas de fichiers dans un chat éphémère : ils seraient enregistrés'} aria-haspopup="menu" aria-expanded={adding} disabled={disabled || !filesAllowed} onClick={() => setAdding(value => !value)}><Icon name="plus"/></button>
         {adding && <div className="attach-menu" role="menu">
           <button type="button" role="menuitem" onClick={() => {setAdding(false); files.current?.click();}}><Icon name="image"/>Images et documents de l’ordinateur</button>
           <button type="button" role="menuitem" onClick={() => {setAdding(false); onOpenLibrary();}}><Icon name="link"/>Depuis la bibliothèque</button>
@@ -118,7 +120,7 @@ export function Composer({prompt, onPrompt, pending, onAddImages, onRemovePendin
       </div>}
       <label className="sr-only" htmlFor="prompt">Votre message</label>
       <textarea id="prompt" ref={area} rows={1} placeholder="Demander à L’Observatoire" maxLength={100000} value={prompt} onChange={event => onPrompt(event.target.value)}
-        onPaste={event => {const list = images(event.clipboardData.files); if (list.length) {event.preventDefault(); onAddImages(list);}}}
+        onPaste={event => {const list = images(event.clipboardData.files); if (list.length && filesAllowed) {event.preventDefault(); onAddImages(list);}}}
         onKeyDown={event => {
           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {event.preventDefault(); if (canSend) onSend(prompt);}
         }}/>

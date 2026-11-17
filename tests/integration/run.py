@@ -16,6 +16,7 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import zipfile
 import io
 import zlib
@@ -489,6 +490,47 @@ class Integration(unittest.TestCase):
         self.assertEqual(self.alice.call(path, 'PUT', {'version': saved['version'], 'messages': [{'role': 'user', 'content': 'Après Stop'}]})[0], 200)
         self.assertEqual(self.alice.call(path+'/stop', 'POST')[0], 204, 'nothing running: nothing to do')
         response.close()
+
+    def test_13c_ephemeral_chat_is_answered_but_never_saved(self):
+        before = sql('SELECT count(*), coalesce(sum(version), 0) FROM conversations', admin=True)
+        def ephemere(messages, **settings):
+            body = {'id': str(uuid.uuid4()), 'messages': messages, **settings}
+            return self.alice.call('/api/ephemere', 'POST', body, stream=True), body['id']
+        exchange = [{'role': 'user', 'content': 'premier secret éphémère'}, {'role': 'assistant', 'content': 'Noté.', 'outils': [{'type': 'fin'}]},
+                    {'role': 'user', 'content': 'second secret éphémère'}]
+        response, _ = ephemere(exchange, temperature=1.1)
+        with response:
+            self.assertEqual(response.status, 200); raw = response.read().decode()
+        self.assertIn('data: [DONE]', raw)
+        reply = json.loads(''.join(json.loads(line[6:])['choices'][0]['delta'].get('content', '')
+                                   for line in raw.splitlines() if line.startswith('data: {') and '"choices": [{"delta"' in line))
+        self.assertEqual((reply['question'], reply['temperature']), ('second secret éphémère', 1.1))
+        self.assertEqual(sql('SELECT count(*), coalesce(sum(version), 0) FROM conversations', admin=True), before, 'nothing written')
+        self.assertEqual(sql("SELECT count(*) FROM conversations WHERE messages::text LIKE '%secret éphémère%'", admin=True), '0')
+        # Web search, at the depth chosen in the menu.
+        response, _ = ephemere([{'role': 'user', 'content': 'Rust ou Go ?'}], recherche='tres_approfondie')
+        with response: raw = response.read().decode()
+        self.assertIn('(tres_approfondie)', raw); self.assertIn('data: [DONE]', raw)
+        # Files would be kept in the library: refused, like an invalid exchange.
+        image = {'id': str(uuid.uuid4()), 'name': 'a.png', 'width': 10, 'height': 10}
+        code, result, _ = self.alice.call('/api/ephemere', 'POST', {'id': str(uuid.uuid4()), 'messages': [{'role': 'user', 'content': 'et ça ?', 'attachments': [image]}]})
+        self.assertEqual(code, 400, result); self.assertIn('fichiers', result['error'])
+        self.assertEqual(self.alice.call('/api/ephemere', 'POST', {'id': str(uuid.uuid4()), 'messages': exchange[:2]})[0], 400)
+        self.assertEqual(self.alice.call('/api/ephemere', 'POST', {'id': str(uuid.uuid4()), 'messages': exchange}, csrf=False)[0], 403)
+        # Stop: only its owner reaches it; one ephemeral answer at a time per account.
+        response, answer = ephemere([{'role': 'user', 'content': 'slow'}])
+        self.assertTrue(response.readline())
+        self.assertEqual(self.alice.call('/api/ephemere', 'POST', {'id': answer, 'messages': exchange})[0], 409)
+        other = Client(); other.login('bob', 'New-integration-password-2026!')
+        self.assertEqual(other.call(f'/api/ephemere/{answer}/stop', 'POST')[0], 204)
+        self.assertEqual(self.alice.call(f'/api/ephemere/{answer}/stop', 'POST')[0], 204)
+        rest = response.read().decode(); response.close()
+        self.assertNotIn('[DONE]', rest, 'stopped before the end')
+        for _ in range(20):
+            response, _ = ephemere(exchange)
+            if response.status == 200: break
+            response.close(); time.sleep(0.1)
+        with response: self.assertIn('data: [DONE]', response.read().decode(), 'free again after Stop')
 
     def test_14_without_orchestrator_qwen_answers_directly(self):
         compose('stop', 'orchestrateur', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

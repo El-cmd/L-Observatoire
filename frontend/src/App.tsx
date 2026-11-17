@@ -54,20 +54,24 @@ export default function App() {
       <button id="sidebar-backdrop" className="sidebar-backdrop" aria-label="Fermer les conversations" tabIndex={-1} onClick={() => setSidebarOpen(false)}/>
       <div className={`workspace${empty ? ' empty' : ''}`} id="workspace">
         <header className="topbar"><button id="menu" className="icon-button" aria-label="Ouvrir les conversations" title="Conversations" onClick={() => {if (innerWidth <= 760) setSidebarOpen(value => !value); else setSidebarCollapsed(value => !value);}}><Icon name="sidebar"/></button>
-          <span className="topbar-title">L’Observatoire</span><span id="connection" className="sr-only" role="status">{chat.navigating ? 'Chargement…' : chat.auth.configured ? 'API configurée' : 'Configuration requise'}</span>
+          <span className="topbar-title">L’Observatoire</span>
+          <button id="ephemeral-toggle" type="button" className={`icon-button ephemeral-toggle${chat.ephemeral ? ' active' : ''}`} aria-pressed={chat.ephemeral}
+            aria-label={chat.ephemeral ? 'Quitter le chat éphémère' : 'Ouvrir un chat éphémère, qui n’est pas enregistré'}
+            title={chat.ephemeral ? 'Quitter le chat éphémère' : 'Chat éphémère : rien n’est enregistré'}
+            onClick={() => {setLibrary('closed'); setNews(false); void chat.toggleEphemeral();}}><Icon name="ephemeral"/></button><span id="connection" className="sr-only" role="status">{chat.navigating ? 'Chargement…' : chat.auth.configured ? 'API configurée' : 'Configuration requise'}</span>
         </header>
         {news ? <NewsView items={newsFor(chat.auth.user)} onClose={() => setNews(false)}/> : library !== 'closed' ? <LibraryView library={chat.library} picking={library === 'pick'} room={MAX_IMAGES - chat.pending.length}
           onLoad={() => {void chat.loadLibrary();}} onClose={() => setLibrary('closed')} onOpen={setViewer} onDelete={id => {void chat.deleteImage(id);}}
           onPick={images => {chat.addFromLibrary(images); setLibrary('closed');}}
           onStartChat={image => {setLibrary('closed'); void chat.newChat().then(() => {chat.addFromLibrary([image]); askAbout();});}} onOpenChat={id => {setLibrary('closed'); void chat.openChat(id);}}
           findConversations={chat.imageConversations} onError={chat.notify}/> : <>
-        <MessageList chat={chat.current} busy={chat.busy} summaryFocus={chat.summaryFocus} removedImages={chat.removedImages} onRegenerate={() => {void chat.regenerate();}} onContinue={() => {void chat.continueAnswer();}} onOpenImage={setViewer} onAskImage={image => {chat.addFromLibrary([image]); askAbout();}} onError={chat.notify}/>
+        <MessageList chat={chat.current} ephemeral={chat.ephemeral} busy={chat.busy} summaryFocus={chat.summaryFocus} removedImages={chat.removedImages} onRegenerate={() => {void chat.regenerate();}} onContinue={() => {void chat.continueAnswer();}} onOpenImage={setViewer} onAskImage={image => {chat.addFromLibrary([image]); askAbout();}} onError={chat.notify}/>
         <Composer prompt={chat.prompt} onPrompt={chat.setPrompt} pending={chat.pending} onAddImages={files => {void chat.addImages(files);}}
           onRemovePending={chat.removePending} onOpenLibrary={() => setLibrary('pick')} onSend={value => {void chat.send(value);}} onStop={chat.stop}
           onRegenerate={() => {void chat.regenerate();}} onContinue={() => {void chat.continueAnswer();}} settings={chat.settings} onSettings={chat.setSettings} busy={chat.busy}
           contextUsage={chat.contextUsage} compacting={chat.compacting} onCompact={() => {void chat.compactContext();}}
           disabled={!chat.auth.configured || chat.navigating || chat.compacting || !chat.current} notice={chat.notice} chatId={chat.current?.id}
-          webAllowed={chat.auth.user.recherche_web === true}/>
+          webAllowed={chat.auth.user.recherche_web === true} filesAllowed={!chat.ephemeral}/>
         </>}
       </div>
     </div>
