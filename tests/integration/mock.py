@@ -70,6 +70,10 @@ class Mock(BaseHTTPRequestHandler):
                 # Description of an image rewritten by Qwen, with what the API must clean up.
                 assert body.get('reasoning_effort') == 'none'
                 content = '<think>Idée</think>\nPrompt: "A detailed red apple on a wooden table."'
+            if 'style words' in system:
+                # Words of a user's style proposed by Qwen, with what the API must clean up.
+                assert body.get('reasoning_effort') == 'none'
+                content = '<think>Style</think>\nStyle: "neon glow, synthwave palette, chrome reflections."'
             if 'SANS recopier' in last:
                 # Document page laid out: the first segment is a title, the others one paragraph.
                 assert body.get('response_format') == {'type': 'json_object'} and len(images) == 1

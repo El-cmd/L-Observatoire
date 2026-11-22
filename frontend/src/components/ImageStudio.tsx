@@ -1,14 +1,20 @@
 import {useEffect, useRef, useState} from 'react';
-import type {AttachmentRef, CreationConfig, Library, LibraryItem} from '../types';
+import type {AttachmentRef, CreationConfig, CreationStyle, Library, LibraryItem, MyStyle} from '../types';
 import {imageURL, thumbnailURL, toRef} from '../lib/images';
 import {errorMessage} from '../lib/api';
 import {Icon} from './Icon';
+import {StyleDialog, type StyleApi} from './StyleDialog';
 
 /** Settings kept in the browser, per account. */
 interface Settings { style: string; format: string; size: string; count: number; improve: boolean }
 type Waiting = {key: string; size: string; label: string; error?: string};
 
-const example = (style: string) => `/creation/styles/${style}.webp`;
+/** Example of a style: a file for the built-in ones, created by the image model for "Mes styles". */
+function example(style: CreationStyle | MyStyle): string | null {
+  if (!('version' in style)) return `/creation/styles/${style.id}.webp`;
+  return style.example ? `/api/creation/styles/${style.id}/example?v=${style.version}` : null;
+}
+const allStyles = (config: CreationConfig): (CreationStyle | MyStyle)[] => [...config.styles, ...config.my_styles];
 const times = (size: string) => size.replace('x', '×');
 
 function defaults(config: CreationConfig): Settings {
@@ -18,7 +24,7 @@ function defaults(config: CreationConfig): Settings {
 
 function restore(config: CreationConfig, saved: Partial<Settings> | null): Settings {
   const value = {...defaults(config), ...saved};
-  if (!config.styles.some(style => style.id === value.style)) value.style = config.default_style;
+  if (!allStyles(config).some(style => style.id === value.style)) value.style = config.default_style;
   const format = config.formats.find(item => item.name === value.format);
   if (format) value.size = format.size;
   else if (value.format !== 'custom' || !config.sizes.includes(value.size)) Object.assign(value, {format: defaults(config).format, size: defaults(config).size});
@@ -28,10 +34,11 @@ function restore(config: CreationConfig, saved: Partial<Settings> | null): Setti
 }
 
 /** Images tab: creates images into the library, with a style, a size and a number of images. */
-export function ImageStudio({userId, library, loadConfig, improvePrompt, createImage, onLoad, onClose, onOpen, onDelete, onStartChat, removed}: {
+export function ImageStudio({userId, library, loadConfig, improvePrompt, createImage, styles, onLoad, onClose, onOpen, onDelete, onStartChat, removed}: {
   userId: string; library: Library | null; loadConfig: () => Promise<CreationConfig>;
   improvePrompt: (prompt: string, style: string, signal?: AbortSignal) => Promise<string>;
   createImage: (body: {prompt: string; style: string; size: string; improved?: string | null}, signal?: AbortSignal) => Promise<LibraryItem>;
+  styles: StyleApi;
   onLoad: () => void; onClose: () => void; onOpen: (image: AttachmentRef) => void; onDelete: (id: string) => void;
   onStartChat: (image: AttachmentRef) => void; removed: ReadonlySet<string>;
 }) {
@@ -47,6 +54,8 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   const [waiting, setWaiting] = useState<Waiting[]>([]);
   const [progress, setProgress] = useState('');
   const [menu, setMenu] = useState<'style' | 'count' | null>(null);
+  const [editing, setEditing] = useState<{style: MyStyle | null} | null>(null);
+  const [making, setMaking] = useState<ReadonlySet<string>>(new Set());
   const running = useRef<AbortController | null>(null);
   const menus = useRef<HTMLDivElement>(null);
 
@@ -73,6 +82,30 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
       try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch {}
       return next;
     });
+  }
+
+  function keepStyle(style: MyStyle) {
+    setConfig(value => value && {...value, my_styles: value.my_styles.some(other => other.id === style.id)
+      ? value.my_styles.map(other => other.id === style.id ? style : other) : [...value.my_styles, style]});
+  }
+
+  /** The example takes as long as an image: made in the background, the tile waits meanwhile. */
+  async function makeExample(id: string) {
+    setMaking(value => new Set(value).add(id));
+    try { keepStyle(await styles.example(id)); }
+    catch (failure) { setError(`L’exemple du style n’a pas pu être créé : ${errorMessage(failure)}`); }
+    finally { setMaking(value => {const next = new Set(value); next.delete(id); return next;}); }
+  }
+
+  function saved(style: MyStyle, created: boolean) {
+    keepStyle(style);
+    if (created) change({style: style.id});
+    if (!style.example) void makeExample(style.id);
+  }
+
+  function deleted(id: string) {
+    setConfig(value => value && {...value, my_styles: value.my_styles.filter(style => style.id !== id)});
+    if (settings?.style === id) change({style: config!.default_style});
   }
 
   // Images created here first, then those of the library (the same image once).
@@ -138,7 +171,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   function reuse(item: LibraryItem) {
     if (!config || !item.generation) return;
     const format = config.formats.find(value => value.size === item.generation!.size);
-    change({style: config.styles.some(style => style.id === item.generation!.style) ? item.generation.style : config.default_style,
+    change({style: allStyles(config).some(style => style.id === item.generation!.style) ? item.generation.style : config.default_style,
       ...(config.sizes.includes(item.generation.size) ? {size: item.generation.size, format: format ? format.name : 'custom'} : {}), count: 1});
     setPrompt(item.generation.prompt); setBeforeImprove(null);
     document.getElementById('studio-prompt')?.focus();
@@ -150,7 +183,12 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     {error ? <p className="studio-error" role="alert">{error}</p> : <p className="library-empty" role="status">Chargement…</p>}
   </section>;
 
-  const style = config.styles.find(value => value.id === settings.style) ?? config.styles[0];
+  const style = allStyles(config).find(value => value.id === settings.style) ?? config.styles[0];
+  const preview = (item: CreationStyle | MyStyle, lazy = false) => {
+    const src = example(item);
+    if (src) return <img src={src} alt="" loading={lazy ? 'lazy' : undefined} width={256} height={256}/>;
+    return <span className="studio-noexample" aria-hidden="true"><Icon name="create"/>{making.has(item.id) && <small>Exemple…</small>}</span>;
+  };
   const more = [6, 8, 10, 12].filter(value => value <= config.max_count);
   const disabled = !config.configured;
   return <section className="studio" id="studio" aria-label="Images">
@@ -160,11 +198,21 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
       <div className="studio-settings" ref={menus}>
         <div className="studio-style">
           <button type="button" id="studio-style" className="studio-style-button" aria-haspopup="listbox" aria-expanded={menu === 'style'} onClick={() => setMenu(value => value === 'style' ? null : 'style')}>
-            <img src={example(style.id)} alt=""/><span><small>Style</small>{style.name}</span><Icon name="chevron"/>
+            {preview(style)}<span><small>Style</small>{style.name}</span><Icon name="chevron"/>
           </button>
           {menu === 'style' && <ul className="studio-styles" role="listbox" aria-label="Styles">{config.styles.map(item =>
             <li key={item.id}><button type="button" role="option" aria-selected={item.id === settings.style} title={item.words ? `Ajouté à la description : ${item.words}` : 'La description est envoyée telle quelle'}
-              onClick={() => {change({style: item.id}); setMenu(null);}}><img src={example(item.id)} alt="" loading="lazy" width={256} height={256}/><span>{item.name}</span></button></li>)}
+              onClick={() => {change({style: item.id}); setMenu(null);}}>{preview(item, true)}<span>{item.name}</span></button></li>)}
+            <li className="studio-styles-title" role="presentation">Mes styles</li>
+            {config.my_styles.map(item => <li key={item.id} className="studio-mine">
+              <button type="button" role="option" aria-selected={item.id === settings.style} title={`Ajouté à la description : ${item.words}`}
+                onClick={() => {change({style: item.id}); setMenu(null);}}>{preview(item, true)}<span>{item.name}</span></button>
+              <button type="button" className="studio-style-edit" aria-label={`Modifier le style ${item.name}`} title="Modifier ou supprimer"
+                onClick={() => {setMenu(null); setEditing({style: item});}}><Icon name="edit"/></button></li>)}
+            {config.my_styles.length < config.max_styles
+              ? <li><button type="button" id="studio-new-style" className="studio-new-style" onClick={() => {setMenu(null); setEditing({style: null});}}>
+                <Icon name="plus"/><span>Créer un style</span></button></li>
+              : <li className="studio-styles-title" role="presentation">{config.max_styles} styles au maximum : supprimez-en un pour en créer un autre.</li>}
           </ul>}
         </div>
 
@@ -243,5 +291,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
           </ul>}
       </div>
     </div>
+    <StyleDialog open={editing !== null} style={editing?.style ?? null} limits={{name: config.max_style_name, words: config.max_style_words}} api={styles}
+      onSaved={saved} onDeleted={deleted} onClose={() => setEditing(null)}/>
   </section>;
 }

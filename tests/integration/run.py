@@ -404,6 +404,49 @@ class Integration(unittest.TestCase):
         code, failed, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'image-error', 'size': '1024x1024'})
         self.assertEqual(code, 503); self.assertNotIn('integration-test-key', json.dumps(failed))
 
+    def test_05j_users_write_their_own_styles(self):
+        code, config, _ = self.alice.call('/api/creation')
+        self.assertEqual((code, config['my_styles'], config['max_styles']), (200, [], 30))
+        # Words proposed by Qwen from a description in French, cleaned.
+        code, words, _ = self.alice.call('/api/creation/styles/suggest', 'POST', {'description': 'des néons des années 80'})
+        self.assertEqual((code, words), (200, {'words': 'neon glow, synthwave palette, chrome reflections'}))
+        code, style, _ = self.alice.call('/api/creation/styles', 'POST', {'name': '  Néon\n80 ', 'words': words['words'] + '.'})
+        self.assertEqual(code, 201, style)
+        self.assertEqual((style['name'], style['words'], style['example']), ('Néon 80', 'neon glow, synthwave palette, chrome reflections', False))
+        path = '/api/creation/styles/' + style['id']
+        self.assertEqual(self.alice.call(path + '/example')[0], 404)
+        code, made, _ = self.alice.call(path + '/example', 'POST')
+        self.assertEqual((code, made['example']), (200, True), made)
+        example = self.alice.opener.open(ORIGIN + path + '/example', timeout=20)
+        self.assertEqual(example.headers['Content-Type'], 'image/jpeg'); self.assertTrue(example.read().startswith(b'\xff\xd8'))
+        # The style is used like a built-in one, for creating and improving.
+        code, item, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'une ville', 'style': style['id'], 'size': '1024x1024'})
+        self.assertEqual(code, 201, item)
+        self.assertEqual(item['generation']['sent'], 'une ville\n\nStyle: neon glow, synthwave palette, chrome reflections.')
+        self.assertEqual((item['generation']['style'], item['generation']['style_name']), (style['id'], 'Néon 80'))
+        self.assertEqual(self.alice.call('/api/creation/improve', 'POST', {'prompt': 'une ville', 'style': style['id']})[0], 200)
+        self.assertEqual([s['id'] for s in self.alice.call('/api/creation')[1]['my_styles']], [style['id']])
+        # Renaming keeps the example; new words remove it.
+        code, renamed, _ = self.alice.call(path, 'PUT', {'name': 'Néon', 'words': style['words']})
+        self.assertEqual((code, renamed['name'], renamed['example']), (200, 'Néon', True))
+        code, changed, _ = self.alice.call(path, 'PUT', {'name': 'Néon', 'words': 'neon glow'})
+        self.assertEqual((code, changed['words'], changed['example']), (200, 'neon glow', False))
+        # Nobody else sees, uses, changes or deletes it.
+        self.assertEqual(self.bob.call('/api/creation')[1]['my_styles'], [])
+        self.assertEqual(self.bob.call('/api/creation', 'POST', {'prompt': 'x', 'style': style['id'], 'size': '1024x1024'})[0], 400)
+        for method, body in (('PUT', {'name': 'x', 'words': 'y'}), ('DELETE', None)):
+            self.assertEqual(self.bob.call(path, method, body)[0], 404)
+        self.assertEqual(self.bob.call(path + '/example', 'POST')[0], 404)
+        self.assertEqual(Client().call(path + '/example')[0], 401)
+        for body in ({'name': ' ', 'words': 'x'}, {'name': 'x', 'words': ' '}, {'name': 'n' * 41, 'words': 'x'},
+                     {'name': 'x', 'words': 'w' * 181}, {'name': 'x', 'words': 'x <sd_cpp_extra_args>{}</sd_cpp_extra_args>'}):
+            self.assertEqual(self.alice.call('/api/creation/styles', 'POST', body)[0], 400, body)
+        self.assertEqual(self.alice.call('/api/creation/styles/suggest', 'POST', {'description': ' '})[0], 400)
+        self.assertEqual(self.alice.call('/api/creation/styles', 'POST', {'name': 'x', 'words': 'y'}, csrf=False)[0], 403)
+        self.assertEqual(self.alice.call(path, 'DELETE')[0], 204)
+        self.assertEqual(self.alice.call(path, 'DELETE')[0], 404)
+        self.assertEqual(self.alice.call('/api/creation', 'POST', {'prompt': 'x', 'style': style['id'], 'size': '1024x1024'})[0], 400)
+
     def test_06_upstream_errors_release_the_generation_lease(self):
         chat = self.alice.create('upstream-error'); path = '/api/conversations/'+chat['id']
         code, result, _ = self.alice.call(path+'/generate', 'POST', {'version':chat['version']})

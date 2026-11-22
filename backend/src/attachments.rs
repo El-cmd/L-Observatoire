@@ -82,6 +82,9 @@ pub(crate) struct Clean {
     data: Vec<u8>,
     thumbnail: Vec<u8>,
 }
+impl Clean {
+    pub fn thumbnail(&self) -> &[u8] { &self.thumbnail }
+}
 
 pub(crate) async fn sanitize(app: &App, body: Bytes) -> Result<Clean, Error> {
     let unavailable = || Error(StatusCode::SERVICE_UNAVAILABLE, "Le traitement des images est indisponible. Réessaie dans un instant.".into());
@@ -222,7 +225,7 @@ fn disposition(name: &str, download: bool) -> HeaderValue {
     HeaderValue::from_str(&format!("{kind}; filename*=UTF-8''{encoded}")).unwrap_or(HeaderValue::from_static("inline"))
 }
 
-fn image_response(headers: &HeaderMap, etag: String, mime: &str, data: Vec<u8>, disposition: Option<HeaderValue>) -> Response {
+pub(crate) fn image_response(headers: &HeaderMap, etag: String, mime: &str, data: Vec<u8>, disposition: Option<HeaderValue>) -> Response {
     let etag = HeaderValue::from_str(&format!("\"{etag}\"")).expect("hex etag");
     let mut response = if headers.get(header::IF_NONE_MATCH) == Some(&etag) {
         StatusCode::NOT_MODIFIED.into_response()

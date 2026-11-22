@@ -27,11 +27,14 @@ export interface LibraryItem {
   generation?: Generation | null;
 }
 /** `prompt`: the user's idea; `sent`: the prompt the image model received (improved, with the style). */
-export interface Generation { prompt: string; sent: string; style: string; size: string; seed: number; seconds: number }
+export interface Generation { prompt: string; sent: string; style: string; style_name?: string; size: string; seed: number; seconds: number }
 export interface CreationStyle { id: string; name: string; words: string }
+/** A style written by the user: `example` once its example image exists, `version` changes with it. */
+export interface MyStyle extends CreationStyle { example: boolean; version: number }
 export interface CreationConfig {
   configured: boolean; styles: CreationStyle[]; default_style: string; formats: {name: string; size: string}[];
   sizes: string[]; default_size: string; max_count: number; max_prompt: number;
+  my_styles: MyStyle[]; max_styles: number; max_style_name: number; max_style_words: number;
 }
 export interface Library { items: LibraryItem[]; used_bytes: number; quota_bytes: number }
 /** A file chosen for the next message: uploading, being read (documents), ready (in the library) or refused. */
