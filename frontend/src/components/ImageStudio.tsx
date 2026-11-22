@@ -4,6 +4,7 @@ import {imageURL, thumbnailURL, toRef} from '../lib/images';
 import {errorMessage} from '../lib/api';
 import {Icon} from './Icon';
 import {StyleDialog, type StyleApi} from './StyleDialog';
+import {PromptsDialog} from './PromptsDialog';
 
 /** Settings kept in the browser, per account. */
 interface Settings { style: string; format: string; size: string; count: number; improve: boolean }
@@ -56,6 +57,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   const [menu, setMenu] = useState<'style' | 'count' | null>(null);
   const [editing, setEditing] = useState<{style: MyStyle | null} | null>(null);
   const [making, setMaking] = useState<ReadonlySet<string>>(new Set());
+  const [prompts, setPrompts] = useState<LibraryItem | null>(null);
   const running = useRef<AbortController | null>(null);
   const menus = useRef<HTMLDivElement>(null);
 
@@ -283,6 +285,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
               </button>
               <div className="studio-item-actions">
                 <button type="button" className="icon-button" aria-label={`Nouvelle conversation avec ${item.name}`} title="Nouvelle conversation avec cette image" onClick={() => onStartChat(toRef(item))}><Icon name="ask"/></button>
+                {item.generation && <button type="button" className="icon-button" aria-label={`Descriptions de ${item.name}`} title="Voir les descriptions (la vôtre, l’améliorée, l’envoyée)" onClick={() => setPrompts(item)}><Icon name="document"/></button>}
                 <button type="button" className="icon-button" aria-label={`Reprendre les réglages de ${item.name}`} title="Reprendre la description et les réglages" onClick={() => reuse(item)}><Icon name="retry"/></button>
                 <a className="icon-button" href={`${imageURL(item.id)}?download=1`} download={item.name} aria-label={`Télécharger ${item.name}`} title="Télécharger"><Icon name="download"/></a>
                 <button type="button" className="icon-button library-delete" aria-label={`Supprimer ${item.name}`} title="Supprimer" onClick={() => onDelete(item.id)}><Icon name="trash"/></button>
@@ -293,5 +296,6 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     </div>
     <StyleDialog open={editing !== null} style={editing?.style ?? null} limits={{name: config.max_style_name, words: config.max_style_words}} api={styles}
       onSaved={saved} onDeleted={deleted} onClose={() => setEditing(null)}/>
+    <PromptsDialog item={prompts} onClose={() => setPrompts(null)}/>
   </section>;
 }

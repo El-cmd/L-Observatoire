@@ -197,7 +197,8 @@ pub async fn create(State(app): State<App>, headers: HeaderMap, Json(request): J
     let started = Instant::now();
     let data = generate(&app, &sent, &request.size, seed).await?;
     let clean = attachments::sanitize(&app, Bytes::from(data)).await?;
-    let generation = json!({"prompt": request.prompt.trim(), "sent": sent, "style": style.id, "style_name": style.name, "size": request.size, "seed": seed,
+    // prompt: the user's idea; improved: Qwen's rewriting, if any; sent: what the image model received.
+    let generation = json!({"prompt": request.prompt.trim(), "improved": improved, "sent": sent, "style": style.id, "style_name": style.name, "size": request.size, "seed": seed,
                             "seconds": (started.elapsed().as_secs_f64() * 10.0).round() / 10.0});
     let id = attachments::store_image(&app, user.user_id, &clean, &image_name(&request.prompt, &clean.mime), Some(generation)).await?;
     Ok((StatusCode::CREATED, Json(attachments::item(&app, user.user_id, id).await?)))

@@ -385,6 +385,7 @@ class Integration(unittest.TestCase):
         generation = item['generation']
         self.assertEqual((generation['prompt'], generation['style'], generation['size']), ('une pomme rouge', 'aquarelle', '896x1152'))
         self.assertEqual(generation['sent'], 'A detailed red apple on a wooden table.\n\nStyle: watercolor painting, soft washes, visible paper texture.')
+        self.assertEqual(generation['improved'], 'A detailed red apple on a wooden table.')
         self.assertIsInstance(generation['seed'], int)
         listed = {i['id']: i for i in self.alice.call('/api/attachments')[1]['items']}
         self.assertEqual(listed[item['id']]['generation']['prompt'], 'une pomme rouge')
@@ -424,6 +425,7 @@ class Integration(unittest.TestCase):
         self.assertEqual(code, 201, item)
         self.assertEqual(item['generation']['sent'], 'une ville\n\nStyle: neon glow, synthwave palette, chrome reflections.')
         self.assertEqual((item['generation']['style'], item['generation']['style_name']), (style['id'], 'Néon 80'))
+        self.assertIsNone(item['generation']['improved'])
         self.assertEqual(self.alice.call('/api/creation/improve', 'POST', {'prompt': 'une ville', 'style': style['id']})[0], 200)
         self.assertEqual([s['id'] for s in self.alice.call('/api/creation')[1]['my_styles']], [style['id']])
         # Renaming keeps the example; new words remove it.

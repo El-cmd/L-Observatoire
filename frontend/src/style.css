@@ -285,6 +285,12 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .studio-style-button .studio-noexample{width:40px;height:40px;flex:none;border-radius:8px}.studio-style-button .studio-noexample small{display:none}
 @keyframes studio-pulse{from{opacity:.45}to{opacity:1}}
 .style-dialog{width:min(520px,calc(100vw - 32px))}
+.prompts-dialog{width:min(640px,calc(100vw - 32px))}
+.prompts-row{margin:0 0 16px}.prompts-row header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
+.prompts-row h3{margin:0;font-size:12px;font-weight:500;color:#bbb}
+.prompts-row p{margin:0;padding:11px 13px;background:#181818;border:1px solid #333;border-radius:9px;font-size:13.5px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto}
+.prompts-row p.prompts-none{color:#888;font-style:italic}
+.prompts-row .studio-link{display:inline-flex;align-items:center;gap:5px}.prompts-row .studio-link svg{width:14px;height:14px}
 .style-dialog textarea{width:100%;background:#181818;border:1px solid #3c3c3c;border-radius:9px;color:#eee;padding:11px 13px;font:inherit;font-size:15px;line-height:1.5;resize:vertical}
 .style-dialog textarea:focus-visible{outline:2px solid #999;outline-offset:2px}
 .style-suggest{display:flex;flex-direction:column;gap:8px}.style-suggest .studio-secondary{align-self:flex-start}

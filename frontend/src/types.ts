@@ -26,8 +26,9 @@ export interface LibraryItem {
   /** Images created in the Images tab: how they were made. */
   generation?: Generation | null;
 }
-/** `prompt`: the user's idea; `sent`: the prompt the image model received (improved, with the style). */
-export interface Generation { prompt: string; sent: string; style: string; style_name?: string; size: string; seed: number; seconds: number }
+/** `prompt`: the user's idea; `improved`: rewritten by Qwen (absent on images made before 22/11);
+ * `sent`: the prompt the image model received (improved, with the style). */
+export interface Generation { prompt: string; improved?: string | null; sent: string; style: string; style_name?: string; size: string; seed: number; seconds: number }
 export interface CreationStyle { id: string; name: string; words: string }
 /** A style written by the user: `example` once its example image exists, `version` changes with it. */
 export interface MyStyle extends CreationStyle { example: boolean; version: number }

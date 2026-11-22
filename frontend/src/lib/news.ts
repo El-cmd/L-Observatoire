@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-22-descriptions-images', date: '2026-11-22', level: 'improvement', title: 'Retrouver la description d’une image créée',
+    text: 'Dans l’onglet Images, passez sur une image créée et touchez l’icône de document : vous voyez votre description, la version améliorée par L’Observatoire (si vous l’avez utilisée) et le texte exact reçu par le modèle d’images, chacun avec un bouton Copier.'},
   {id: '2026-11-22-styles-personnage', date: '2026-11-22', level: 'improvement', title: 'Des styles avec un personnage',
     text: 'Quand vous décrivez un style autour d’un personnage ou d’un univers (par exemple « Spider-Man »), « Proposer les mots » garde son nom en tête des mots, et l’image d’exemple du style le montre au lieu du renard habituel. Pour mettre à jour un style déjà créé, ouvrez-le avec le crayon, touchez de nouveau « Proposer les mots » puis Enregistrer.'},
   {id: '2026-11-22-mes-styles', date: '2026-11-22', level: 'major', title: 'Créez vos propres styles d’image',
