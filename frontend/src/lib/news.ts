@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-22-styles-personnage', date: '2026-11-22', level: 'improvement', title: 'Des styles avec un personnage',
+    text: 'Quand vous décrivez un style autour d’un personnage ou d’un univers (par exemple « Spider-Man »), « Proposer les mots » garde son nom en tête des mots, et l’image d’exemple du style le montre au lieu du renard habituel. Pour mettre à jour un style déjà créé, ouvrez-le avec le crayon, touchez de nouveau « Proposer les mots » puis Enregistrer.'},
   {id: '2026-11-22-mes-styles', date: '2026-11-22', level: 'major', title: 'Créez vos propres styles d’image',
     text: 'Dans l’onglet Images, ouvrez la liste des styles puis touchez « Créer un style », tout en bas. Donnez-lui un nom et écrivez les mots qui décrivent son rendu, ou décrivez simplement le style voulu en français et touchez « Proposer les mots » : L’Observatoire les écrit pour vous. Une image d’exemple est créée pour le reconnaître. Vos styles sont rangés sous « Mes styles », visibles par vous seul ; le crayon sur un style permet de le modifier ou de le supprimer.'},
   {id: '2026-11-22-telecharger', date: '2026-11-22', level: 'fix', title: 'Le bouton Télécharger de la bibliothèque fonctionne',

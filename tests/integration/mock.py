@@ -6,11 +6,11 @@ import time
 import zlib
 
 
-def png(width, height):
-    """Plain grey PNG of the asked size, like an image returned by the image model."""
+def png(width, height, color=b'\x80\x60\x40'):
+    """Plain PNG of the asked size and color, like an image returned by the image model."""
     def chunk(kind, data):
         return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
-    rows = b''.join(b'\x00' + b'\x80\x60\x40' * width for _ in range(height))
+    rows = b''.join(b'\x00' + color * width for _ in range(height))
     return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
             + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b''))
 
@@ -29,7 +29,9 @@ class Mock(BaseHTTPRequestHandler):
                 self.send_error(500, 'Private upstream detail: integration-test-key')
                 return
             width, height = (int(v) for v in body['size'].split('x'))
-            payload = json.dumps({'created': 1, 'data': [{'b64_json': base64.b64encode(png(width, height)).decode()}]}).encode()
+            # A style's example drawn with the style's own subject is red: the test sees which subject was used.
+            color = b'\xc0\x10\x10' if body['prompt'].startswith('Spider-Man crouching on a rooftop at night\n\nStyle: Spider-Man') else b'\x80\x60\x40'
+            payload = json.dumps({'created': 1, 'data': [{'b64_json': base64.b64encode(png(width, height, color)).decode()}]}).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(payload)))
@@ -74,6 +76,12 @@ class Mock(BaseHTTPRequestHandler):
                 # Words of a user's style proposed by Qwen, with what the API must clean up.
                 assert body.get('reasoning_effort') == 'none'
                 content = '<think>Style</think>\nStyle: "neon glow, synthwave palette, chrome reflections."'
+                if 'spiderman' in last.lower():
+                    content = 'Spider-Man, comic book art, halftone dots, bold outlines'
+            if 'example image of a style' in system:
+                # Subject of a style's example: its own when the words name one, the usual fox otherwise.
+                assert body.get('reasoning_effort') == 'none'
+                content = 'Scene: Spider-Man crouching on a rooftop at night.' if 'Spider-Man' in last else 'DEFAULT'
             if 'SANS recopier' in last:
                 # Document page laid out: the first segment is a title, the others one paragraph.
                 assert body.get('response_format') == {'type': 'json_object'} and len(images) == 1

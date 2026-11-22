@@ -443,6 +443,15 @@ class Integration(unittest.TestCase):
             self.assertEqual(self.alice.call('/api/creation/styles', 'POST', body)[0], 400, body)
         self.assertEqual(self.alice.call('/api/creation/styles/suggest', 'POST', {'description': ' '})[0], 400)
         self.assertEqual(self.alice.call('/api/creation/styles', 'POST', {'name': 'x', 'words': 'y'}, csrf=False)[0], 403)
+        # A named character stays in the proposed words, and the example shows it instead of the fox.
+        code, words, _ = self.alice.call('/api/creation/styles/suggest', 'POST', {'description': 'spiderman et tout ce qui va avec'})
+        self.assertEqual((code, words), (200, {'words': 'Spider-Man, comic book art, halftone dots, bold outlines'}))
+        hero = self.alice.call('/api/creation/styles', 'POST', {'name': 'Spider-Man', 'words': words['words']})[1]
+        self.assertTrue(self.alice.call('/api/creation/styles/' + hero['id'] + '/example', 'POST')[1]['example'])
+        self.alice.call(path + '/example', 'POST')
+        examples = [self.alice.opener.open(ORIGIN + '/api/creation/styles/' + i + '/example', timeout=20).read() for i in (hero['id'], style['id'])]
+        self.assertNotEqual(examples[0], examples[1])
+        self.assertEqual(self.alice.call('/api/creation/styles/' + hero['id'], 'DELETE')[0], 204)
         self.assertEqual(self.alice.call(path, 'DELETE')[0], 204)
         self.assertEqual(self.alice.call(path, 'DELETE')[0], 404)
         self.assertEqual(self.alice.call('/api/creation', 'POST', {'prompt': 'x', 'style': style['id'], 'size': '1024x1024'})[0], 400)

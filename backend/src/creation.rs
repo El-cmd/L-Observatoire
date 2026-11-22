@@ -45,7 +45,8 @@ pub const MAX_STYLES: i64 = 30;
 pub const MAX_STYLE_NAME: usize = 40;
 pub const MAX_STYLE_WORDS: usize = 180;
 const MAX_STYLE_DESCRIPTION: usize = 600;
-/// Example of a user's style: the subject and seed of the built-in examples, at a quicker size.
+/// Example of a user's style: the subject and seed of the built-in examples, at a quicker size,
+/// unless the style names its own subject (a character, a universe…): see `EXAMPLE_SCENE`.
 const EXAMPLE_SUBJECT: &str = "un renard roux assis dans une clairière en automne, feuilles dorées, lumière douce";
 const EXAMPLE_SEED: u32 = 42;
 
@@ -342,7 +343,22 @@ pub async fn style_example(State(app): State<App>, headers: HeaderMap, Path(id):
     Ok(attachments::image_response(&headers, format!("style-{id}-{version}"), "image/jpeg", data, None))
 }
 
-/// Creates the example of a style: the subject of the built-in examples, drawn in this style.
+const EXAMPLE_SCENE: &str = "You choose the subject of the example image of a style for the Qwen-Image text-to-image model. You receive the style words, which are added after every prompt.
+
+- If the words name a character, a person, a creature, a franchise or a fictional universe, answer with one short English scene of 8 to 20 words that shows it, in a simple pose, centered. Do not describe the style itself.
+- Otherwise, answer exactly: DEFAULT
+
+Answer with the scene or DEFAULT only: no introduction, no quotes.";
+
+/// The scene proposed by Qwen for an example, or None for the usual subject (DEFAULT, empty, odd).
+pub fn example_scene(answer: &str) -> Option<String> {
+    let scene = one_line(unwrap_answer(answer, &["Scene:", "scene:"])).trim_end_matches('.').to_string();
+    let words = scene.split_whitespace().count();
+    (!scene.to_uppercase().contains("DEFAULT") && (3..=40).contains(&words) && !reserved(&scene)).then_some(scene)
+}
+
+/// Creates the example of a style: the subject of the built-in examples drawn in this style, or a
+/// scene with the style's own subject when it names one (Spider-Man, Star Wars…).
 /// Kept only if the words did not change meanwhile.
 pub async fn make_example(State(app): State<App>, headers: HeaderMap, Path(id): Path<Uuid>) -> Result<Json<Value>, Error> {
     let user = session(&app, &headers, true).await?;
@@ -352,7 +368,11 @@ pub async fn make_example(State(app): State<App>, headers: HeaderMap, Path(id): 
     let sizes = sizes(&app);
     let size = ["768x768", "1024x1024"].into_iter().find(|s| sizes.iter().any(|v| v == s)).map(String::from)
         .or_else(|| closest(&sizes, 1.0)).ok_or_else(not_configured)?;
-    let data = generate(&app, &compose(EXAMPLE_SUBJECT, &words), &size, EXAMPLE_SEED).await?;
+    let scene = match ask_qwen(&app, EXAMPLE_SCENE, &words, 0.3, 80).await {
+        Some(answer) => example_scene(&answer),
+        None => None,
+    };
+    let data = generate(&app, &compose(scene.as_deref().unwrap_or(EXAMPLE_SUBJECT), &words), &size, EXAMPLE_SEED).await?;
     let clean = attachments::sanitize(&app, Bytes::from(data)).await?;
     let row: Option<StyleRow> = sqlx::query_as(&format!(
         "UPDATE image_styles SET example=$4,updated_at=now() WHERE id=$1 AND user_id=$2 AND words=$3 RETURNING {STYLE_COLUMNS}"))
@@ -370,7 +390,8 @@ const SUGGEST: &str = "You write the style words that are added after every prom
 The user describes, in any language, a visual style they want. Answer with 4 to 14 short English keywords or phrases, separated by commas, that make the image model draw in this style: medium or technique, palette and colors, lighting, texture, era or influence, mood.
 
 Rules:
-- Describe only the look: never a subject, a scene or an object to draw.
+- If the user explicitly names a character, a person, a franchise or a fictional universe they want in their images, put its usual English name first (for example \"Spider-Man\"), then the keywords of its look.
+- Otherwise, describe only the look: never a subject, a scene or an object to draw.
 - No negative words (\"no ...\", \"without ...\"): the model ignores them.
 - At most 170 characters in total.
 - Answer with the keywords only: no introduction, no quotes, no final period.";
@@ -461,6 +482,16 @@ mod tests {
         assert_eq!(clean_words("ink wash\nmuted colors\n"), "ink wash, muted colors");
         let long = clean_words(&vec!["abcdefghij"; 40].join(", "));
         assert!(long.chars().count() <= MAX_STYLE_WORDS && long.ends_with("abcdefghij"));
+    }
+    #[test]
+    fn example_scenes_are_checked() {
+        assert_eq!(example_scene("<think>x</think>\nScene: Spider-Man crouching on a rooftop at night, city lights behind him."),
+                   Some("Spider-Man crouching on a rooftop at night, city lights behind him".into()));
+        assert_eq!(example_scene("DEFAULT"), None);
+        assert_eq!(example_scene("\"DEFAULT.\""), None);
+        assert_eq!(example_scene("fox"), None);
+        assert_eq!(example_scene(&"word ".repeat(41)), None);
+        assert_eq!(example_scene("a hero <lora:x:1> on a roof"), None);
     }
     #[test]
     fn names_come_from_the_idea() {
