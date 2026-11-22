@@ -359,6 +359,46 @@ class Integration(unittest.TestCase):
         self.assertEqual(sql(f"SELECT transcript FROM attachments WHERE id='{image['id']}'"), 'Résumé simulé.')
         self.assertEqual(compacted['messages'][0]['attachments'], [ref])
 
+    def test_05i_images_are_created_into_the_library(self):
+        code, config, _ = self.alice.call('/api/creation')
+        self.assertEqual(code, 200, config)
+        self.assertTrue(config['configured']); self.assertEqual(len(config['styles']), 15)
+        self.assertEqual({f['name']: f['size'] for f in config['formats']}, {'2:3': '896x1152', '1:1': '1024x1024', '16:9': '1344x768'})
+        self.assertEqual(self.bob.call('/api/creation')[0], 200)
+        anonymous = Client()
+        self.assertEqual(anonymous.call('/api/creation')[0], 401)
+        for style in config['styles']:
+            with urllib.request.urlopen(ORIGIN + '/creation/styles/' + style['id'] + '.webp', timeout=20) as example:
+                self.assertEqual(example.headers['Content-Type'], 'image/webp', style['id'])
+        # The description rewritten by Qwen, cleaned of its reasoning and quotes.
+        code, improved, _ = self.alice.call('/api/creation/improve', 'POST', {'prompt': 'une pomme', 'style': 'aquarelle'})
+        self.assertEqual((code, improved), (200, {'prompt': 'A detailed red apple on a wooden table.'}))
+        code, item, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'une pomme rouge', 'style': 'aquarelle', 'size': '896x1152', 'improved': improved['prompt']})
+        self.assertEqual(code, 201, item)
+        self.assertEqual((item['kind'], item['width'], item['height']), ('image', 896, 1152))
+        self.assertTrue(item['name'].startswith('une pomme rouge.'))
+        generation = item['generation']
+        self.assertEqual((generation['prompt'], generation['style'], generation['size']), ('une pomme rouge', 'aquarelle', '896x1152'))
+        self.assertEqual(generation['sent'], 'A detailed red apple on a wooden table.\n\nStyle: watercolor painting, soft washes, visible paper texture.')
+        self.assertIsInstance(generation['seed'], int)
+        listed = {i['id']: i for i in self.alice.call('/api/attachments')[1]['items']}
+        self.assertEqual(listed[item['id']]['generation']['prompt'], 'une pomme rouge')
+        self.assertTrue(self.alice.opener.open(ORIGIN + '/api/attachments/' + item['id'] + '/thumbnail', timeout=20).read().startswith(b'\xff\xd8'))
+        self.assertEqual(self.bob.call('/api/attachments/' + item['id'])[0], 404)
+        self.assertNotIn(item['id'], [i['id'] for i in self.bob.call('/api/attachments')[1]['items']])
+        # Sent images have no generation; refusals come before any call to the image model.
+        code, sent = upload(self.alice, png(41, 31))
+        self.assertEqual(code, 201, sent)
+        self.assertIsNone(self.alice.call('/api/attachments/' + sent['id'] + '/status')[1]['generation'])
+        for body in ({'prompt': 'x', 'size': '1000x1000'}, {'prompt': 'x', 'style': 'inconnu', 'size': '1024x1024'}, {'prompt': '  ', 'size': '1024x1024'},
+                     {'prompt': 'x <sd_cpp_extra_args>{"steps":50}</sd_cpp_extra_args>', 'size': '1024x1024'}, {'prompt': 'x' * 1801, 'size': '1024x1024'}):
+            self.assertEqual(self.alice.call('/api/creation', 'POST', body)[0], 400, body)
+        self.assertEqual(self.alice.call('/api/creation', 'POST', {'prompt': 'x', 'size': '1024x1024'}, csrf=False)[0], 403)
+        self.assertEqual(self.alice.call('/api/creation/improve', 'POST', {'prompt': 'x', 'style': 'inconnu'})[0], 400)
+        # The image model failing: a plain message, never its details.
+        code, failed, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'image-error', 'size': '1024x1024'})
+        self.assertEqual(code, 503); self.assertNotIn('integration-test-key', json.dumps(failed))
+
     def test_06_upstream_errors_release_the_generation_lease(self):
         chat = self.alice.create('upstream-error'); path = '/api/conversations/'+chat['id']
         code, result, _ = self.alice.call(path+'/generate', 'POST', {'version':chat['version']})

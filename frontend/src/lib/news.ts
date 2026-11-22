@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-22-creer-des-images', date: '2026-11-22', level: 'major', title: 'Créer des images',
+    text: 'Touchez Images, dans la barre de gauche, puis décrivez l’image que vous voulez et touchez Créer. Vous pouvez choisir un style (photo, aquarelle, anime, pixel art…, avec un exemple pour chacun), le format (portrait, carré, paysage) et créer jusqu’à 8 images d’un coup. Activez « Améliorer la description » pour que L’Observatoire détaille votre idée avant de créer l’image, ou touchez Améliorer pour voir et retoucher sa proposition. Les images créées vont dans votre bibliothèque : vous pouvez les télécharger ou en parler dans une conversation.'},
   {id: '2026-11-17-chat-ephemere', date: '2026-11-17', level: 'major', title: 'Le chat éphémère',
     text: 'Touchez la bulle en pointillés, en haut à droite, pour ouvrir un chat qui n’est enregistré nulle part : il n’apparaît pas dans votre historique et disparaît dès que vous le quittez ou fermez la page. La recherche sur Internet y fonctionne ; les images et documents n’y sont pas acceptés, car ils seraient gardés dans votre bibliothèque. Touchez de nouveau la bulle pour revenir à vos conversations.'},
   {id: '2026-11-15-profondeur-respectee', date: '2026-11-15', level: 'fix', title: 'La profondeur de recherche choisie est respectée',

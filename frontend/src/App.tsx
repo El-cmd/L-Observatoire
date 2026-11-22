@@ -10,6 +10,7 @@ import {ImageViewer} from './components/ImageViewer';
 import {DocumentViewer} from './components/DocumentViewer';
 import {LibraryView} from './components/LibraryView';
 import {NewsView} from './components/NewsView';
+import {ImageStudio} from './components/ImageStudio';
 import {hasUnreadNews, markNewsRead, newsFor} from './lib/news';
 import {MAX_IMAGES, isDocument} from './lib/images';
 import type {AttachmentRef} from './types';
@@ -23,32 +24,35 @@ export default function App() {
   const [library, setLibrary] = useState<'closed' | 'browse' | 'pick'>('closed');
   const [viewer, setViewer] = useState<AttachmentRef | null>(null);
   const [news, setNews] = useState(false);
+  // Images tab: creates images into the library; replaces the conversation like the library.
+  const [studio, setStudio] = useState(false);
   const [unreadNews, setUnreadNews] = useState(false);
   const userId = chat.auth?.user.id;
   const searcher = chat.auth?.user.recherche_web === true;
   useEffect(() => {
-    setSidebarOpen(false); setPasswordOpen(false); setLibrary('closed'); setViewer(null); setNews(false);
+    setSidebarOpen(false); setPasswordOpen(false); setLibrary('closed'); setViewer(null); setNews(false); setStudio(false);
     setUnreadNews(chat.auth ? hasUnreadNews(chat.auth.user) : false);
   }, [userId, searcher]);
   useEffect(() => {
     function key(event: KeyboardEvent) {
       if (event.key === 'Escape') setSidebarOpen(false);
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'n') {event.preventDefault(); setLibrary('closed'); setNews(false); void chat.newChat();}
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'n') {event.preventDefault(); setLibrary('closed'); setNews(false); setStudio(false); void chat.newChat();}
     }
     document.addEventListener('keydown', key); return () => document.removeEventListener('keydown', key);
   }, [chat.newChat]);
   if (!chat.auth) return <Login initializing={chat.initializing} pending={chat.signingIn} error={chat.loginError} onLogin={chat.login}/>;
-  const empty = library === 'closed' && !news && !chat.current?.messages.length;
+  const empty = library === 'closed' && !news && !studio && !chat.current?.messages.length;
   // The chosen image waits above the input: the user only has to type the question.
   const askAbout = () => document.getElementById('prompt')?.focus();
   return <>
     <div className="app" id="chat-app">
-      <Sidebar user={chat.auth.user} chats={chat.chats} activity={chat.activity} currentId={chat.current?.id} libraryOpen={library === 'browse'}
-        onLibrary={() => {setNews(false); setLibrary('browse'); setSidebarOpen(false);}} newsOpen={news} unreadNews={unreadNews}
-        onNews={() => {setLibrary('closed'); setNews(true); setSidebarOpen(false); markNewsRead(chat.auth!.user); setUnreadNews(false);}} open={sidebarOpen} collapsed={sidebarCollapsed}
+      <Sidebar user={chat.auth.user} chats={chat.chats} activity={chat.activity} currentId={chat.current?.id} libraryOpen={library === 'browse'} imagesOpen={studio}
+        onLibrary={() => {setNews(false); setStudio(false); setLibrary('browse'); setSidebarOpen(false);}}
+        onImages={() => {setNews(false); setLibrary('closed'); setStudio(true); setSidebarOpen(false);}} newsOpen={news} unreadNews={unreadNews}
+        onNews={() => {setLibrary('closed'); setStudio(false); setNews(true); setSidebarOpen(false); markNewsRead(chat.auth!.user); setUnreadNews(false);}} open={sidebarOpen} collapsed={sidebarCollapsed}
         navigating={chat.navigating} canImport={chat.canImport} importing={chat.importing} onClose={() => {if (innerWidth <= 760) setSidebarOpen(false); else setSidebarCollapsed(true);}}
-        onNew={() => {setLibrary('closed'); setNews(false); void chat.newChat().then(() => setSidebarOpen(false));}}
-        onSelect={id => {setLibrary('closed'); setNews(false); void chat.openChat(id).then(() => setSidebarOpen(false));}}
+        onNew={() => {setLibrary('closed'); setNews(false); setStudio(false); void chat.newChat().then(() => setSidebarOpen(false));}}
+        onSelect={id => {setLibrary('closed'); setNews(false); setStudio(false); void chat.openChat(id).then(() => setSidebarOpen(false));}}
         onRename={(id, title) => {void chat.renameChat(id, title);}} onDelete={id => {void chat.deleteChat(id);}} onImport={() => {void chat.importLegacy();}}
         onPassword={() => setPasswordOpen(true)} onLogout={() => {void chat.logout();}}/>
       <button id="sidebar-backdrop" className="sidebar-backdrop" aria-label="Fermer les conversations" tabIndex={-1} onClick={() => setSidebarOpen(false)}/>
@@ -58,9 +62,12 @@ export default function App() {
           <button id="ephemeral-toggle" type="button" className={`icon-button ephemeral-toggle${chat.ephemeral ? ' active' : ''}`} aria-pressed={chat.ephemeral}
             aria-label={chat.ephemeral ? 'Quitter le chat éphémère' : 'Ouvrir un chat éphémère, qui n’est pas enregistré'}
             title={chat.ephemeral ? 'Quitter le chat éphémère' : 'Chat éphémère : rien n’est enregistré'}
-            onClick={() => {setLibrary('closed'); setNews(false); void chat.toggleEphemeral();}}><Icon name="ephemeral"/></button><span id="connection" className="sr-only" role="status">{chat.navigating ? 'Chargement…' : chat.auth.configured ? 'API configurée' : 'Configuration requise'}</span>
+            onClick={() => {setLibrary('closed'); setNews(false); setStudio(false); void chat.toggleEphemeral();}}><Icon name="ephemeral"/></button><span id="connection" className="sr-only" role="status">{chat.navigating ? 'Chargement…' : chat.auth.configured ? 'API configurée' : 'Configuration requise'}</span>
         </header>
-        {news ? <NewsView items={newsFor(chat.auth.user)} onClose={() => setNews(false)}/> : library !== 'closed' ? <LibraryView library={chat.library} picking={library === 'pick'} room={MAX_IMAGES - chat.pending.length}
+        {news ? <NewsView items={newsFor(chat.auth.user)} onClose={() => setNews(false)}/> : studio ? <ImageStudio userId={chat.auth.user.id} library={chat.library}
+          loadConfig={chat.creationConfig} improvePrompt={chat.improvePrompt} createImage={chat.createImage} onLoad={() => {void chat.loadLibrary();}}
+          onClose={() => setStudio(false)} onOpen={setViewer} onDelete={id => {void chat.deleteImage(id);}} removed={chat.removedImages}
+          onStartChat={image => {setStudio(false); void chat.newChat().then(() => {chat.addFromLibrary([image]); askAbout();});}}/> : library !== 'closed' ? <LibraryView library={chat.library} picking={library === 'pick'} room={MAX_IMAGES - chat.pending.length}
           onLoad={() => {void chat.loadLibrary();}} onClose={() => setLibrary('closed')} onOpen={setViewer} onDelete={id => {void chat.deleteImage(id);}}
           onPick={images => {chat.addFromLibrary(images); setLibrary('closed');}}
           onStartChat={image => {setLibrary('closed'); void chat.newChat().then(() => {chat.addFromLibrary([image]); askAbout();});}} onOpenChat={id => {setLibrary('closed'); void chat.openChat(id);}}

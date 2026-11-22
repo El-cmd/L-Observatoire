@@ -2,6 +2,7 @@ mod attachments;
 mod auth;
 mod chat;
 mod context;
+mod creation;
 mod documents;
 mod ephemere;
 
@@ -28,6 +29,8 @@ pub struct App {
     pub generations: Arc<Semaphore>,
     /// Documents whose pages are laid out by Qwen at the same time.
     pub documents: Arc<Semaphore>,
+    /// Images asked to the image model at the same time (it makes one at a time and queues 4).
+    pub images: Arc<Semaphore>,
     pub password_work: Arc<Semaphore>,
     pub dummy_hash: Arc<String>,
     pub shutdown: tokio::sync::watch::Receiver<bool>,
@@ -49,6 +52,9 @@ pub struct Config {
     pub image_guard: String,
     /// Isolated service that opens documents sent by users.
     pub doc_guard: String,
+    /// Image model of the Images tab, served by the same LiteLLM as Qwen, and the sizes it accepts.
+    pub image_model: String,
+    pub image_sizes: Vec<String>,
     pub origin: String,
     pub secure_cookie: bool,
 }
@@ -199,6 +205,9 @@ async fn main() -> Result<()> {
             .unwrap_or_else(|_| "http://doc-guard:8080".into())
             .trim_end_matches('/')
             .to_string(),
+        image_model: env::var("IMAGE_MODEL").unwrap_or_else(|_| "qwen-image-turbo".into()),
+        image_sizes: env::var("IMAGE_SIZES").ok().filter(|v| !v.trim().is_empty()).unwrap_or_else(|| creation::DEFAULT_SIZES.into())
+            .split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
         secure_cookie: parsed.scheme() == "https",
         origin,
     };
@@ -233,6 +242,7 @@ async fn main() -> Result<()> {
         config: Arc::new(config),
         generations: Arc::new(Semaphore::new(6)),
         documents: Arc::new(Semaphore::new(2)),
+        images: Arc::new(Semaphore::new(3)),
         password_work: Arc::new(Semaphore::new(4)),
         dummy_hash: Arc::new(auth::hash_password("dummy-not-a-real-user-password".into()).await?),
     };
@@ -277,6 +287,8 @@ async fn main() -> Result<()> {
         .route("/api/attachments/{id}/status", get(attachments::status))
         .route("/api/attachments/{id}/text", get(attachments::text))
         .route("/api/attachments/{id}/conversations", get(attachments::conversations))
+        .route("/api/creation", get(creation::config).post(creation::create).layer(DefaultBodyLimit::max(64 * 1024)))
+        .route("/api/creation/improve", post(creation::improve).layer(DefaultBodyLimit::max(64 * 1024)))
         .route("/api/conversations/{id}/context", get(context::usage))
         .route("/api/conversations/{id}/compact", post(context::compact))
         .fallback(|| async { Error(StatusCode::NOT_FOUND, "Route introuvable.".into()) })

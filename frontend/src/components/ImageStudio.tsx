@@ -1,0 +1,247 @@
+import {useEffect, useRef, useState} from 'react';
+import type {AttachmentRef, CreationConfig, Library, LibraryItem} from '../types';
+import {imageURL, thumbnailURL, toRef} from '../lib/images';
+import {errorMessage} from '../lib/api';
+import {Icon} from './Icon';
+
+/** Settings kept in the browser, per account. */
+interface Settings { style: string; format: string; size: string; count: number; improve: boolean }
+type Waiting = {key: string; size: string; label: string; error?: string};
+
+const example = (style: string) => `/creation/styles/${style}.webp`;
+const times = (size: string) => size.replace('x', '×');
+
+function defaults(config: CreationConfig): Settings {
+  const square = config.formats.find(format => format.name === '1:1');
+  return {style: config.default_style, format: square ? '1:1' : 'custom', size: square?.size ?? config.default_size, count: 1, improve: false};
+}
+
+function restore(config: CreationConfig, saved: Partial<Settings> | null): Settings {
+  const value = {...defaults(config), ...saved};
+  if (!config.styles.some(style => style.id === value.style)) value.style = config.default_style;
+  const format = config.formats.find(item => item.name === value.format);
+  if (format) value.size = format.size;
+  else if (value.format !== 'custom' || !config.sizes.includes(value.size)) Object.assign(value, {format: defaults(config).format, size: defaults(config).size});
+  value.count = Math.min(Math.max(1, Number(value.count) || 1), config.max_count);
+  value.improve = value.improve === true;
+  return value;
+}
+
+/** Images tab: creates images into the library, with a style, a size and a number of images. */
+export function ImageStudio({userId, library, loadConfig, improvePrompt, createImage, onLoad, onClose, onOpen, onDelete, onStartChat, removed}: {
+  userId: string; library: Library | null; loadConfig: () => Promise<CreationConfig>;
+  improvePrompt: (prompt: string, style: string, signal?: AbortSignal) => Promise<string>;
+  createImage: (body: {prompt: string; style: string; size: string; improved?: string | null}, signal?: AbortSignal) => Promise<LibraryItem>;
+  onLoad: () => void; onClose: () => void; onOpen: (image: AttachmentRef) => void; onDelete: (id: string) => void;
+  onStartChat: (image: AttachmentRef) => void; removed: ReadonlySet<string>;
+}) {
+  const storageKey = `observatoire-creation:${userId}`;
+  const [config, setConfig] = useState<CreationConfig | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [prompt, setPrompt] = useState('');
+  const [beforeImprove, setBeforeImprove] = useState<string | null>(null);
+  const [improved, setImproved] = useState<string | null>(null);
+  const [improving, setImproving] = useState(false);
+  const [error, setError] = useState('');
+  const [created, setCreated] = useState<LibraryItem[]>([]);
+  const [waiting, setWaiting] = useState<Waiting[]>([]);
+  const [progress, setProgress] = useState('');
+  const [menu, setMenu] = useState<'style' | 'count' | null>(null);
+  const running = useRef<AbortController | null>(null);
+  const menus = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    onLoad();
+    loadConfig().then(value => {
+      let saved: Partial<Settings> | null = null;
+      try { saved = JSON.parse(localStorage.getItem(storageKey) || 'null'); } catch {}
+      setConfig(value); setSettings(restore(value, saved));
+    }).catch(failure => setError(errorMessage(failure)));
+    return () => running.current?.abort();
+  }, []);
+  useEffect(() => {
+    if (!menu) return;
+    const outside = (event: MouseEvent) => {if (!menus.current?.contains(event.target as Node)) setMenu(null);};
+    const escape = (event: KeyboardEvent) => {if (event.key === 'Escape') setMenu(null);};
+    document.addEventListener('click', outside); document.addEventListener('keydown', escape);
+    return () => {document.removeEventListener('click', outside); document.removeEventListener('keydown', escape);};
+  }, [menu]);
+
+  function change(update: Partial<Settings>) {
+    setSettings(value => {
+      const next = {...value!, ...update};
+      try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }
+
+  // Images created here first, then those of the library (the same image once).
+  const seen = new Set<string>();
+  const images = [...created, ...(library?.items.filter(item => item.generation) ?? [])]
+    .filter(item => !removed.has(item.id) && !seen.has(item.id) && seen.add(item.id));
+  const busy = running.current !== null;
+
+  async function improveNow() {
+    if (!settings || !prompt.trim() || busy || improving) return;
+    setError(''); setImproving(true);
+    try {
+      const text = await improvePrompt(prompt.trim(), settings.style);
+      setBeforeImprove(prompt); setPrompt(text); setImproved(null);
+    } catch (failure) { setError(errorMessage(failure)); }
+    finally { setImproving(false); }
+  }
+
+  async function create(event: React.FormEvent) {
+    event.preventDefault();
+    if (!settings || !config || running.current) return;
+    const idea = prompt.trim();
+    if (!idea) return;
+    setError(''); setBeforeImprove(null);
+    const controller = new AbortController(); running.current = controller;
+    const batch = Date.now().toString(36);
+    const count = settings.count, size = settings.size;
+    setWaiting(Array.from({length: count}, (_, index) => ({key: `${batch}-${index}`, size, label: `Image ${index + 1} / ${count}`})));
+    const label = (index: number, text: string) => setWaiting(list => list.map(item => item.key === `${batch}-${index}` ? {...item, label: text} : item));
+    const started = performance.now();
+    let done = 0;
+    try {
+      let rewritten: string | null = null;
+      if (settings.improve) {
+        // One rewriting for the whole series: the images share the same improved prompt.
+        setWaiting(list => list.map(item => ({...item, label: 'Amélioration de la description…'})));
+        setImproved(null);
+        rewritten = await improvePrompt(idea, settings.style, controller.signal);
+        setImproved(rewritten);
+      }
+      for (let index = 0; index < count; index++) {
+        label(index, `Création ${index + 1} / ${count}…`);
+        try {
+          const item = await createImage({prompt: idea, style: settings.style, size, improved: rewritten}, controller.signal);
+          done++;
+          setCreated(list => [item, ...list.filter(other => other.id !== item.id)]);
+          setWaiting(list => list.filter(other => other.key !== `${batch}-${index}`));
+          setProgress(`${done} / ${count} · ${((performance.now() - started) / 1000).toFixed(1)} s`);
+        } catch (failure) {
+          if (failure instanceof Error && failure.name === 'AbortError') throw failure;
+          setWaiting(list => list.map(item => item.key === `${batch}-${index}` ? {...item, error: errorMessage(failure)} : item));
+        }
+      }
+    } catch (failure) {
+      if (!(failure instanceof Error && failure.name === 'AbortError')) setError(errorMessage(failure));
+    } finally {
+      running.current = null;
+      setWaiting(list => list.filter(item => item.error));
+      if (done) onLoad();
+    }
+  }
+
+  function reuse(item: LibraryItem) {
+    if (!config || !item.generation) return;
+    const format = config.formats.find(value => value.size === item.generation!.size);
+    change({style: config.styles.some(style => style.id === item.generation!.style) ? item.generation.style : config.default_style,
+      ...(config.sizes.includes(item.generation.size) ? {size: item.generation.size, format: format ? format.name : 'custom'} : {}), count: 1});
+    setPrompt(item.generation.prompt); setBeforeImprove(null);
+    document.getElementById('studio-prompt')?.focus();
+  }
+
+  if (!config || !settings) return <section className="studio" id="studio" aria-label="Images">
+    <header className="library-header"><h2>Images</h2>
+      <button type="button" className="icon-button" aria-label="Fermer" title="Fermer" onClick={onClose}><Icon name="close"/></button></header>
+    {error ? <p className="studio-error" role="alert">{error}</p> : <p className="library-empty" role="status">Chargement…</p>}
+  </section>;
+
+  const style = config.styles.find(value => value.id === settings.style) ?? config.styles[0];
+  const more = [6, 8, 10, 12].filter(value => value <= config.max_count);
+  const disabled = !config.configured;
+  return <section className="studio" id="studio" aria-label="Images">
+    <header className="library-header"><h2>Images</h2>
+      <button type="button" className="icon-button" aria-label="Fermer" title="Fermer" onClick={onClose}><Icon name="close"/></button></header>
+    <div className="studio-body">
+      <div className="studio-settings" ref={menus}>
+        <div className="studio-style">
+          <button type="button" id="studio-style" className="studio-style-button" aria-haspopup="listbox" aria-expanded={menu === 'style'} onClick={() => setMenu(value => value === 'style' ? null : 'style')}>
+            <img src={example(style.id)} alt=""/><span><small>Style</small>{style.name}</span><Icon name="chevron"/>
+          </button>
+          {menu === 'style' && <ul className="studio-styles" role="listbox" aria-label="Styles">{config.styles.map(item =>
+            <li key={item.id}><button type="button" role="option" aria-selected={item.id === settings.style} title={item.words ? `Ajouté à la description : ${item.words}` : 'La description est envoyée telle quelle'}
+              onClick={() => {change({style: item.id}); setMenu(null);}}><img src={example(item.id)} alt="" loading="lazy" width={256} height={256}/><span>{item.name}</span></button></li>)}
+          </ul>}
+        </div>
+
+        <h3>Dimensions <span className="studio-help" tabIndex={0} title="Le service n’accepte que certaines tailles : chaque format prend la taille possible la plus proche. « Personnalisé » les montre toutes.">?</span></h3>
+        <div className="studio-formats">
+          {config.formats.map(format => {
+            const [w, h] = format.size.split('x').map(Number), k = 26 / Math.max(w, h);
+            return <button key={format.name} type="button" aria-pressed={settings.format === format.name} title={times(format.size)} onClick={() => change({format: format.name, size: format.size})}>
+              <span className="studio-shape" style={{width: Math.round(w * k), height: Math.round(h * k)}}/>{format.name}</button>;
+          })}
+          <button type="button" aria-pressed={settings.format === 'custom'} onClick={() => change({format: 'custom'})}><span className="studio-shape custom"/>Personnalisé</button>
+        </div>
+        <div className="studio-sizes">{settings.format === 'custom'
+          ? config.sizes.map(size => <button key={size} type="button" aria-pressed={size === settings.size} onClick={() => change({size})}>{times(size)}</button>)
+          : <span className="studio-size">{times(settings.size)}</span>}</div>
+
+        <h3>Nombre d’images <span className="studio-help" tabIndex={0} title="Les images sont créées l’une après l’autre, chacune un peu différente.">?</span></h3>
+        <div className="studio-counts">
+          {[1, 2, 3, 4].filter(value => value <= config.max_count).map(value =>
+            <button key={value} type="button" aria-pressed={settings.count === value} onClick={() => change({count: value})}>{value}</button>)}
+          {more.length > 0 && <div className="studio-more">
+            <button type="button" aria-label="Plus d’images" aria-pressed={settings.count > 4} aria-expanded={menu === 'count'} onClick={() => setMenu(value => value === 'count' ? null : 'count')}>
+              {settings.count > 4 ? settings.count : ''}<Icon name="chevron"/></button>
+            {menu === 'count' && <ul>{more.map(value => <li key={value}><button type="button" onClick={() => {change({count: value}); setMenu(null);}}>{value} images</button></li>)}</ul>}
+          </div>}
+        </div>
+
+        <label className="studio-switch">
+          <span>Améliorer la description <span className="studio-help" tabIndex={0} title="Activé : avant chaque création, Qwen réécrit votre idée en description détaillée (en anglais, que le modèle d’images suit mieux). Désactivé : le bouton « Améliorer » le fait à la demande, et vous pouvez retoucher le résultat.">?</span></span>
+          <input type="checkbox" id="studio-improve" checked={settings.improve} onChange={event => change({improve: event.target.checked})}/><span className="studio-toggle" aria-hidden="true"/>
+        </label>
+
+        <button type="button" className="studio-reset" onClick={() => change(defaults(config))}><Icon name="retry"/>Rétablir les réglages par défaut</button>
+      </div>
+
+      <div className="studio-main">
+        <form className="studio-prompt" onSubmit={create}>
+          <textarea id="studio-prompt" rows={3} maxLength={config.max_prompt} value={prompt} placeholder="Décrivez l’image à créer…" aria-label="Description de l’image"
+            onChange={event => setPrompt(event.target.value)}
+            onKeyDown={event => {if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {event.preventDefault(); event.currentTarget.form?.requestSubmit();}}}/>
+          <div className="studio-actions">
+            <span className="studio-progress" role="status">{progress}</span>
+            {beforeImprove !== null && <button type="button" className="studio-link" onClick={() => {setPrompt(beforeImprove); setBeforeImprove(null);}}>Revenir à mon texte</button>}
+            {!settings.improve && <button type="button" id="studio-improve-now" className="studio-secondary" disabled={disabled || busy || improving || !prompt.trim()} onClick={() => {void improveNow();}}>
+              <Icon name="news"/>{improving ? 'Amélioration…' : 'Améliorer'}</button>}
+            {busy && <button type="button" className="studio-secondary" onClick={() => running.current?.abort()}>Arrêter</button>}
+            <button type="submit" id="studio-create" className="auth-submit" disabled={disabled || busy || improving || !prompt.trim()} title="Ctrl / Cmd + Entrée">Créer</button>
+          </div>
+        </form>
+        {disabled && <p className="studio-error" role="alert">La création d’images n’est pas configurée sur ce site.</p>}
+        {error && <p className="studio-error" role="alert">{error}</p>}
+        {improved && <div className="studio-improved" id="studio-improved">
+          <span>Description améliorée par Qwen</span><p>{improved}</p>
+          <button type="button" className="studio-link" onClick={() => {setPrompt(improved); setImproved(null);}}>La reprendre pour la retoucher</button>
+        </div>}
+
+        {!waiting.length && !images.length ? <p className="library-empty">{library ? 'Les images que vous créez apparaîtront ici, et dans votre bibliothèque.' : 'Chargement…'}</p>
+          : <ul className="studio-grid">
+            {waiting.map(item => {
+              const [w, h] = item.size.split('x');
+              return <li key={item.key} className={`studio-waiting${item.error ? ' failed' : ''}`} style={{aspectRatio: `${w} / ${h}`}} role="status">{item.error || item.label}
+                {item.error && <button type="button" className="icon-button" aria-label="Retirer" title="Retirer" onClick={() => setWaiting(list => list.filter(other => other.key !== item.key))}><Icon name="close"/></button>}</li>;
+            })}
+            {images.map(item => <li key={item.id} className="studio-item">
+              <button type="button" className="studio-thumb" style={{aspectRatio: `${item.width} / ${item.height}`}} aria-label={`Agrandir ${item.name}`} onClick={() => onOpen(toRef(item))}>
+                <img src={thumbnailURL(item.id)} alt="" loading="lazy"/>
+                {item.generation && <span className="studio-caption">{item.generation.prompt}</span>}
+              </button>
+              <div className="studio-item-actions">
+                <button type="button" className="icon-button" aria-label={`Nouvelle conversation avec ${item.name}`} title="Nouvelle conversation avec cette image" onClick={() => onStartChat(toRef(item))}><Icon name="ask"/></button>
+                <button type="button" className="icon-button" aria-label={`Reprendre les réglages de ${item.name}`} title="Reprendre la description et les réglages" onClick={() => reuse(item)}><Icon name="retry"/></button>
+                <a className="icon-button" href={`${imageURL(item.id)}?download=1`} download={item.name} aria-label={`Télécharger ${item.name}`} title="Télécharger"><Icon name="download"/></a>
+                <button type="button" className="icon-button library-delete" aria-label={`Supprimer ${item.name}`} title="Supprimer" onClick={() => onDelete(item.id)}><Icon name="trash"/></button>
+              </div>
+            </li>)}
+          </ul>}
+      </div>
+    </div>
+  </section>;
+}

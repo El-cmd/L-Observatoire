@@ -69,21 +69,21 @@ pub fn image_tokens(width: u32, height: u32) -> u64 {
     (side(width) * side(height)).max(64) + 2
 }
 
-fn clean_name(name: Option<&str>, fallback: &str) -> String {
+pub(crate) fn clean_name(name: Option<&str>, fallback: &str) -> String {
     let name: String = name.unwrap_or("").chars().filter(|c| !c.is_control() && !matches!(c, '/' | '\\')).take(120).collect();
     let name = name.trim();
     if name.is_empty() { fallback.to_string() } else { name.to_string() }
 }
 
-struct Clean {
-    mime: String,
+pub(crate) struct Clean {
+    pub mime: String,
     width: i32,
     height: i32,
     data: Vec<u8>,
     thumbnail: Vec<u8>,
 }
 
-async fn sanitize(app: &App, body: Bytes) -> Result<Clean, Error> {
+pub(crate) async fn sanitize(app: &App, body: Bytes) -> Result<Clean, Error> {
     let unavailable = || Error(StatusCode::SERVICE_UNAVAILABLE, "Le traitement des images est indisponible. Réessaie dans un instant.".into());
     let response = app.http.post(format!("{}/sanitize", app.config.image_guard))
         .timeout(Duration::from_secs(40)).body(body).send().await.map_err(|_| unavailable())?;
@@ -106,9 +106,22 @@ async fn sanitize(app: &App, body: Bytes) -> Result<Clean, Error> {
     }
 }
 
-async fn used_bytes(app: &App, user: Uuid) -> Result<i64, Error> {
+pub(crate) async fn used_bytes(app: &App, user: Uuid) -> Result<i64, Error> {
     Ok(sqlx::query_scalar("SELECT coalesce(sum(size + octet_length(thumbnail) + coalesce(octet_length(content), 0)), 0)::bigint FROM attachments WHERE user_id=$1")
         .bind(user).fetch_one(&app.db).await?)
+}
+
+pub(crate) const FULL: &str = "Ta bibliothèque est pleine (500 Mo). Supprime des fichiers avant d’en envoyer d’autres.";
+
+/// Keeps a clean image (from image-guard). The same image stored twice is kept once: the existing
+/// entry is returned. `generation` describes an image created in the Images tab.
+pub(crate) async fn store_image(app: &App, user: Uuid, clean: &Clean, name: &str, generation: Option<Value>) -> Result<Uuid, Error> {
+    let sha = hex::encode(Sha256::digest(&clean.data));
+    Ok(sqlx::query_scalar(
+        "INSERT INTO attachments(id,user_id,sha256,kind,name,mime,width,height,size,data,thumbnail,generation) VALUES($1,$2,$3,'image',$4,$5,$6,$7,$8,$9,$10,$11)
+         ON CONFLICT (user_id,sha256) DO UPDATE SET generation=coalesce(attachments.generation,EXCLUDED.generation) RETURNING id")
+        .bind(Uuid::new_v4()).bind(user).bind(&sha).bind(name).bind(&clean.mime).bind(clean.width).bind(clean.height)
+        .bind(clean.data.len() as i32).bind(&clean.data).bind(&clean.thumbnail).bind(generation.map(DbJson)).fetch_one(&app.db).await?)
 }
 
 #[derive(Deserialize)]
@@ -128,21 +141,17 @@ pub async fn upload(
         return Err(Error::bad(if document { "Document vide ou trop lourd (20 Mo au maximum)." } else { "Image vide ou trop lourde (12 Mo au maximum)." }));
     }
     if used_bytes(&app, user.user_id).await? + body.len() as i64 > QUOTA_BYTES {
-        return Err(Error::bad("Ta bibliothèque est pleine (500 Mo). Supprime des fichiers avant d’en envoyer d’autres."));
+        return Err(Error::bad(FULL));
     }
     if document {
         let name = clean_name(query.name.as_deref(), "document");
         return Ok((StatusCode::CREATED, Json(documents::upload(&app, user.user_id, name, body).await?)));
     }
     let clean = sanitize(&app, body).await?;
-    let sha = hex::encode(Sha256::digest(&clean.data));
     let name = clean_name(query.name.as_deref(), if clean.mime == "image/png" { "image.png" } else { "image.jpg" });
-    // The same image sent twice is stored once: the existing entry is returned.
-    let (id, name, width, height, size): (Uuid, String, i32, i32, i32) = sqlx::query_as(
-        "INSERT INTO attachments(id,user_id,sha256,kind,name,mime,width,height,size,data,thumbnail) VALUES($1,$2,$3,'image',$4,$5,$6,$7,$8,$9,$10)
-         ON CONFLICT (user_id,sha256) DO UPDATE SET sha256=EXCLUDED.sha256 RETURNING id,name,width,height,size")
-        .bind(Uuid::new_v4()).bind(user.user_id).bind(&sha).bind(&name).bind(&clean.mime).bind(clean.width).bind(clean.height)
-        .bind(clean.data.len() as i32).bind(&clean.data).bind(&clean.thumbnail).fetch_one(&app.db).await?;
+    let id = store_image(&app, user.user_id, &clean, &name, None).await?;
+    let (name, width, height, size): (String, i32, i32, i32) = sqlx::query_as("SELECT name,width,height,size FROM attachments WHERE id=$1")
+        .bind(id).fetch_one(&app.db).await?;
     Ok((StatusCode::CREATED, Json(json!({"id": id, "name": name, "width": width, "height": height, "size": size}))))
 }
 
@@ -165,8 +174,10 @@ struct Item {
     doubts: i32,
     tokens: i32,
     error: Option<String>,
+    /// Images created in the Images tab: how they were made. None for files sent by the user.
+    generation: Option<DbJson<Value>>,
 }
-const ITEM: &str = "SELECT id,name,kind,mime,width,height,size,created_at,status,pages,progress,scanned,doubts,tokens,error FROM attachments";
+const ITEM: &str = "SELECT id,name,kind,mime,width,height,size,created_at,status,pages,progress,scanned,doubts,tokens,error,generation FROM attachments";
 
 pub async fn item(app: &App, user: Uuid, id: Uuid) -> Result<Value, Error> {
     let found: Item = sqlx::query_as(&format!("{ITEM} WHERE id=$1 AND user_id=$2")).bind(id).bind(user)

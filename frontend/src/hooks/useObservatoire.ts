@@ -2,7 +2,7 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import {APIClient, APIError, errorMessage} from '../lib/api';
 import {consumeCompletion} from '../lib/stream';
 import {MAX_IMAGES, documentSize, isDocument, isImage, prepareImage, thumbnailURL, toRef} from '../lib/images';
-import type {Activity, AttachmentRef, Auth, Conversation, ConversationSummary, Legacy, Library, LibraryItem, Message, Notice, PendingImage, Settings, ContextUsage, WebMode} from '../types';
+import type {Activity, AttachmentRef, Auth, Conversation, ConversationSummary, CreationConfig, Legacy, Library, LibraryItem, Message, Notice, PendingImage, Settings, ContextUsage, WebMode} from '../types';
 
 function readLegacy(): Legacy | null {
   try { return JSON.parse(localStorage.getItem('observatoir-chat-v1') || localStorage.getItem('qwen-chat-v1') || 'null') as Legacy | null; }
@@ -510,6 +510,12 @@ export function useObservatoire() {
   }
 
   const imageConversations = (id: string) => client.json<{id: string; title: string}[]>(`/api/attachments/${id}/conversations`);
+  // Images tab: settings of the image model, prompt rewritten by Qwen, one image created into the library.
+  const creationConfig = () => client.json<CreationConfig>('/api/creation');
+  const improvePrompt = (prompt: string, style: string, signal?: AbortSignal) =>
+    client.json<{prompt: string}>('/api/creation/improve', {method:'POST', body:{prompt, style}, signal}).then(value => value.prompt);
+  const createImage = (body: {prompt: string; style: string; size: string; improved?: string | null}, signal?: AbortSignal) =>
+    client.json<LibraryItem>('/api/creation', {method:'POST', body, signal});
   const documentText = (id: string) => client.json<{content: string}>(`/api/attachments/${id}/text`).then(value => value.content);
 
   async function continueAnswer() {
@@ -547,7 +553,7 @@ export function useObservatoire() {
   return {auth, initializing, loginError, signingIn, login, logout, changePassword,
     chats, current:activeChat, activity, busy:currentActivity === 'generating', navigating,
     notice:(currentId && notices[currentId]) || notices[''] || null, notify,
-    prompt, setPrompt, pending, addImages, addFromLibrary, removePending, library, loadLibrary, deleteImage, imageConversations, documentText, removedImages,
+    prompt, setPrompt, pending, addImages, addFromLibrary, removePending, library, loadLibrary, deleteImage, imageConversations, documentText, removedImages, creationConfig, improvePrompt, createImage,
     settings, setSettings, newChat, openChat, ephemeral:isEphemeral(activeChat), toggleEphemeral, deleteChat, renameChat, send, regenerate, continueAnswer,
     contextUsage:contextUsage && contextUsage.conversation_id === currentId && contextUsage.version === activeChat?.version ? contextUsage : null,
     compacting:currentActivity === 'compacting', compactContext, summaryFocus,

@@ -23,6 +23,15 @@ export interface AttachmentRef { id: string; name: string; width: number; height
 export interface LibraryItem {
   id: string; name: string; kind: 'image' | 'document'; mime: string; width: number; height: number; size: number; created_at: string;
   status: 'reading' | 'ready' | 'failed'; pages: number; progress: number; scanned: number; doubts: number; tokens: number; error: string | null;
+  /** Images created in the Images tab: how they were made. */
+  generation?: Generation | null;
+}
+/** `prompt`: the user's idea; `sent`: the prompt the image model received (improved, with the style). */
+export interface Generation { prompt: string; sent: string; style: string; size: string; seed: number; seconds: number }
+export interface CreationStyle { id: string; name: string; words: string }
+export interface CreationConfig {
+  configured: boolean; styles: CreationStyle[]; default_style: string; formats: {name: string; size: string}[];
+  sizes: string[]; default_size: string; max_count: number; max_prompt: number;
 }
 export interface Library { items: LibraryItem[]; used_bytes: number; quota_bytes: number }
 /** A file chosen for the next message: uploading, being read (documents), ready (in the library) or refused. */

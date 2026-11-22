@@ -1,6 +1,18 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import base64
 import json
+import struct
 import time
+import zlib
+
+
+def png(width, height):
+    """Plain grey PNG of the asked size, like an image returned by the image model."""
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
+    rows = b''.join(b'\x00' + b'\x80\x60\x40' * width for _ in range(height))
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b''))
 
 
 class Mock(BaseHTTPRequestHandler):
@@ -8,6 +20,21 @@ class Mock(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         if self.headers.get('Authorization') != 'Bearer integration-test-key':
             self.send_error(401)
+            return
+        if self.path == '/v1/images/generations':
+            # Image model behind LiteLLM: one image per request, its seed chosen by the caller.
+            ok = body.get('model') == 'qwen-image-turbo' and body.get('n') == 1 and body.get('response_format') == 'b64_json' \
+                and isinstance(body.get('seed'), int) and 'sd_cpp_extra_args' not in body.get('prompt', '')
+            if not ok or 'image-error' in body.get('prompt', ''):
+                self.send_error(500, 'Private upstream detail: integration-test-key')
+                return
+            width, height = (int(v) for v in body['size'].split('x'))
+            payload = json.dumps({'created': 1, 'data': [{'b64_json': base64.b64encode(png(width, height)).decode()}]}).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
             return
         last = body['messages'][-1]['content']
         images = []
@@ -39,6 +66,10 @@ class Mock(BaseHTTPRequestHandler):
             # Non-streaming calls: conversation title (formatted like a model would) or summary.
             system = body['messages'][0]['content'] if body['messages'][0]['role'] == 'system' else ''
             content = f'**Titre : Sujet {last}.**' if 'titre' in system else 'Résumé simulé.'
+            if 'Qwen-Image' in system:
+                # Description of an image rewritten by Qwen, with what the API must clean up.
+                assert body.get('reasoning_effort') == 'none'
+                content = '<think>Idée</think>\nPrompt: "A detailed red apple on a wooden table."'
             if 'SANS recopier' in last:
                 # Document page laid out: the first segment is a title, the others one paragraph.
                 assert body.get('response_format') == {'type': 'json_object'} and len(images) == 1
