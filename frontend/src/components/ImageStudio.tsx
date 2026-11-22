@@ -121,7 +121,8 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     setError(''); setImproving(true);
     try {
       const text = await improvePrompt(prompt.trim(), settings.style);
-      setBeforeImprove(prompt); setPrompt(text); setImproved(null);
+      // Improved twice: "Revenir à mon texte" still goes back to the user's own text.
+      setBeforeImprove(value => value ?? prompt); setPrompt(text); setImproved(null);
     } catch (failure) { setError(errorMessage(failure)); }
     finally { setImproving(false); }
   }
@@ -131,7 +132,10 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     if (!settings || !config || running.current) return;
     const idea = prompt.trim();
     if (!idea) return;
-    setError(''); setBeforeImprove(null);
+    // Text written by the Améliorer button (perhaps retouched): kept as the improved version, with the idea it came from.
+    // Kept after creating, so that creating again keeps it too; forgotten once the text is cleared.
+    const original = !settings.improve && beforeImprove?.trim() ? beforeImprove.trim() : null;
+    setError('');
     const controller = new AbortController(); running.current = controller;
     const batch = Date.now().toString(36);
     const count = settings.count, size = settings.size;
@@ -140,7 +144,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     const started = performance.now();
     let done = 0;
     try {
-      let rewritten: string | null = null;
+      let rewritten: string | null = original ? idea : null;
       if (settings.improve) {
         // One rewriting for the whole series: the images share the same improved prompt.
         setWaiting(list => list.map(item => ({...item, label: 'Amélioration de la description…'})));
@@ -151,7 +155,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
       for (let index = 0; index < count; index++) {
         label(index, `Création ${index + 1} / ${count}…`);
         try {
-          const item = await createImage({prompt: idea, style: settings.style, size, improved: rewritten}, controller.signal);
+          const item = await createImage({prompt: original ?? idea, style: settings.style, size, improved: rewritten}, controller.signal);
           done++;
           setCreated(list => [item, ...list.filter(other => other.id !== item.id)]);
           setWaiting(list => list.filter(other => other.key !== `${batch}-${index}`));
@@ -253,7 +257,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
       <div className="studio-main">
         <form className="studio-prompt" onSubmit={create}>
           <textarea id="studio-prompt" rows={3} maxLength={config.max_prompt} value={prompt} placeholder="Décrivez l’image à créer…" aria-label="Description de l’image"
-            onChange={event => setPrompt(event.target.value)}
+            onChange={event => {setPrompt(event.target.value); if (!event.target.value.trim()) setBeforeImprove(null);}}
             onKeyDown={event => {if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {event.preventDefault(); event.currentTarget.form?.requestSubmit();}}}/>
           <div className="studio-actions">
             <span className="studio-progress" role="status">{progress}</span>
