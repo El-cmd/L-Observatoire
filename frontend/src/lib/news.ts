@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-22-telecharger', date: '2026-11-22', level: 'fix', title: 'Le bouton Télécharger de la bibliothèque fonctionne',
+    text: 'Dans la bibliothèque et dans l’onglet Images, le bouton Télécharger (la flèche vers le bas, au survol d’un fichier) enregistre de nouveau l’image ou le document sur votre appareil. Avant, il ne se passait rien.'},
   {id: '2026-11-22-creer-des-images', date: '2026-11-22', level: 'major', title: 'Créer des images',
     text: 'Touchez Images, dans la barre de gauche, puis décrivez l’image que vous voulez et touchez Créer. Vous pouvez choisir un style (photo, aquarelle, anime, pixel art…, avec un exemple pour chacun), le format (portrait, carré, paysage) et créer jusqu’à 8 images d’un coup. Activez « Améliorer la description » pour que L’Observatoire détaille votre idée avant de créer l’image, ou touchez Améliorer pour voir et retoucher sa proposition. Les images créées vont dans votre bibliothèque : vous pouvez les télécharger ou en parler dans une conversation.'},
   {id: '2026-11-17-chat-ephemere', date: '2026-11-17', level: 'major', title: 'Le chat éphémère',

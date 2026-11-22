@@ -205,10 +205,15 @@ pub async fn list(State(app): State<App>, headers: HeaderMap) -> Result<Json<Val
     Ok(Json(json!({"items": items, "used_bytes": used_bytes(&app, user.user_id).await?, "quota_bytes": QUOTA_BYTES})))
 }
 
+/// `?download=1` (the Download buttons) or `?download=true`: sent as a file to save. A plain
+/// `bool` refused `1` with a 400, so no download ever started.
 #[derive(Deserialize)]
 pub struct FileQuery {
     #[serde(default)]
-    download: bool,
+    download: Option<String>,
+}
+impl FileQuery {
+    fn download(&self) -> bool { matches!(self.download.as_deref(), Some("1" | "true")) }
 }
 
 fn disposition(name: &str, download: bool) -> HeaderValue {
@@ -241,7 +246,7 @@ pub async fn file(State(app): State<App>, headers: HeaderMap, Path(id): Path<Uui
     let (name, kind, mime, sha, data): (String, String, String, String, Vec<u8>) = sqlx::query_as("SELECT name,kind,mime,sha256,data FROM attachments WHERE id=$1 AND user_id=$2")
         .bind(id).bind(user.user_id).fetch_optional(&app.db).await?.ok_or_else(Error::missing)?;
     // Documents are never shown by the browser itself: always downloaded.
-    Ok(image_response(&headers, sha, &mime, data, Some(disposition(&name, query.download || kind == "document"))))
+    Ok(image_response(&headers, sha, &mime, data, Some(disposition(&name, query.download() || kind == "document"))))
 }
 
 pub async fn thumbnail(State(app): State<App>, headers: HeaderMap, Path(id): Path<Uuid>) -> Result<Response, Error> {

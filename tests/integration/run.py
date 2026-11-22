@@ -251,6 +251,11 @@ class Integration(unittest.TestCase):
         body = raw.read(); etag = raw.headers['ETag']
         self.assertTrue(body.startswith(b'\x89PNG')); self.assertNotIn(b'<script>', body)
         self.assertEqual(raw.headers['Content-Type'], 'image/png'); self.assertIn('sandbox', raw.headers['Content-Security-Policy'])
+        # The Download buttons ask ?download=1: the file comes as an attachment, not a 400.
+        for flag in ('1', 'true'):
+            saved = self.alice.opener.open(ORIGIN + '/api/attachments/' + image['id'] + '?download=' + flag, timeout=20)
+            self.assertTrue(saved.headers['Content-Disposition'].startswith('attachment;'), flag); self.assertTrue(saved.read().startswith(b'\x89PNG'))
+        self.assertTrue(self.alice.opener.open(ORIGIN + '/api/attachments/' + image['id'], timeout=20).headers['Content-Disposition'].startswith('inline;'))
         cached = urllib.request.Request(ORIGIN + '/api/attachments/' + image['id'], headers={'If-None-Match': etag})
         with self.assertRaises(urllib.error.HTTPError) as unchanged: self.alice.opener.open(cached, timeout=20)
         self.assertEqual(unchanged.exception.code, 304)
