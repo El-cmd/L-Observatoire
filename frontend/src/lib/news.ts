@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-23-icone-image-depart', date: '2026-11-23', level: 'improvement', title: 'Partir d’une image : une simple icône',
+    text: 'Dans l’onglet Images, le lien « Partir d’une image » est remplacé par une icône d’image, en haut à gauche de la zone où vous décrivez l’image. Touchez-la pour choisir une image de départ.'},
   {id: '2026-11-23-qualite-hd-retiree', date: '2026-11-23', level: 'fix', title: 'Qualité HD mise de côté',
     text: 'Le réglage « Qualité » (HD et Très HD) ajouté aujourd’hui dans l’onglet Images est retiré le temps de l’améliorer : il rendait les images moins belles (peau granuleuse, traits tremblés). Les images sont de nouveau créées en qualité standard.'},
   {id: '2026-11-23-zone-peinte', date: '2026-11-23', level: 'major', title: 'Peindre la zone à retoucher',

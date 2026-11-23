@@ -343,13 +343,16 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
             </div>
             <button type="button" className="icon-button" id="studio-source-remove" aria-label="Ne plus partir de cette image" title="Ne plus partir de cette image" onClick={() => setSource(null)}><Icon name="close"/></button>
           </div>}
+          {/* Without a starting image: its icon in the top left corner, next to the description. */}
+          <div className="studio-input">
+          {!source && <button type="button" id="studio-source-pick" className="icon-button studio-source-icon" disabled={busy} aria-label="Partir d’une image" title="Partir d’une image"
+            onClick={() => setPicking(true)}><Icon name="image"/></button>}
           <textarea id="studio-prompt" rows={3} maxLength={config.max_prompt} value={prompt}
             placeholder={!source ? 'Décrivez l’image à créer…' : retouch ? 'Dites ce qui doit changer, par exemple : retire-lui son chapeau…' : 'Dites ce que devient l’image, par exemple : en aquarelle…'} aria-label="Description de l’image"
             onChange={event => {setPrompt(event.target.value); if (!event.target.value.trim()) setBeforeImprove(null);}}
             onKeyDown={event => {if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {event.preventDefault(); event.currentTarget.form?.requestSubmit();}}}/>
+          </div>
           <div className="studio-actions">
-            {!source && <button type="button" id="studio-source-pick" className="studio-link studio-source-pick" disabled={busy} onClick={() => setPicking(true)}>
-              <Icon name="image"/>Partir d’une image</button>}
             <span className="studio-progress" role="status">{progress}</span>
             {beforeImprove !== null && <button type="button" className="studio-link" onClick={() => {setPrompt(beforeImprove); setBeforeImprove(null);}}>Revenir à mon texte</button>}
             {!settings.improve && <button type="button" id="studio-improve-now" className="studio-secondary" disabled={disabled || busy || improving || !prompt.trim()} onClick={() => {void improveNow();}}>

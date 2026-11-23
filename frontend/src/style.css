@@ -356,6 +356,8 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .studio-strengths button[aria-pressed=true]{border-color:#ddd;background:#2a2a2a;color:#fff}
 .studio-source>.icon-button{align-self:flex-start}
 .studio-source-pick{display:inline-flex;align-items:center;gap:6px;text-decoration:none}.studio-source-pick svg{width:15px;height:15px}
+.studio-input{display:flex;align-items:flex-start;gap:6px}.studio-input textarea{flex:1;min-width:0}
+.studio-source-icon{flex-shrink:0;width:32px;height:32px;margin:-4px 0 0 -7px;color:#aaa}.studio-source-icon:hover:not(:disabled){color:#fff}.studio-source-icon svg{width:19px;height:19px}
 .studio-source-image{position:relative}.studio-source-image .studio-source-zone{position:absolute;inset:0;opacity:.6;object-fit:fill}
 .studio-zone{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 /* Painting the zone to retouch: the image, the strokes over it, at the image's proportions. */
