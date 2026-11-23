@@ -12,7 +12,7 @@ import {LibraryView} from './components/LibraryView';
 import {NewsView} from './components/NewsView';
 import {ImageStudio} from './components/ImageStudio';
 import {hasUnreadNews, markNewsRead, newsFor} from './lib/news';
-import {MAX_IMAGES, isDocument} from './lib/images';
+import {MAX_IMAGES, formatBytes, isDocument} from './lib/images';
 import type {AttachmentRef} from './types';
 
 export default function App() {
@@ -44,6 +44,7 @@ export default function App() {
   const empty = library === 'closed' && !news && !studio && !chat.current?.messages.length;
   // The chosen image waits above the input: the user only has to type the question.
   const askAbout = () => document.getElementById('prompt')?.focus();
+  const page = studio ? 'Images' : library === 'pick' ? 'Choisir dans la bibliothèque' : library !== 'closed' ? 'Bibliothèque' : null;
   return <>
     <div className="app" id="chat-app">
       <Sidebar user={chat.auth.user} chats={chat.chats} activity={chat.activity} currentId={chat.current?.id} libraryOpen={library === 'browse'} imagesOpen={studio}
@@ -58,7 +59,10 @@ export default function App() {
       <button id="sidebar-backdrop" className="sidebar-backdrop" aria-label="Fermer les conversations" tabIndex={-1} onClick={() => setSidebarOpen(false)}/>
       <div className={`workspace${empty ? ' empty' : ''}`} id="workspace">
         <header className="topbar"><button id="menu" className="icon-button" aria-label="Ouvrir les conversations" title="Conversations" onClick={() => {if (innerWidth <= 760) setSidebarOpen(value => !value); else setSidebarCollapsed(value => !value);}}><Icon name="sidebar"/></button>
-          <span className="topbar-title">L’Observatoire</span>
+          {/* The open page names itself here, fixed above its content. */}
+          <span className={`topbar-title${page ? ' page' : ''}`} id="page-title">{page ?? 'L’Observatoire'}</span>
+          {library !== 'closed' && !studio && chat.library && <p className="library-usage topbar-usage">{formatBytes(chat.library.used_bytes)} sur {formatBytes(chat.library.quota_bytes)}
+            <span className="library-meter" aria-hidden="true"><span style={{width: `${Math.min(100, chat.library.used_bytes / chat.library.quota_bytes * 100)}%`}}/></span></p>}
           {!studio && library === 'closed' && <button id="ephemeral-toggle" type="button" className={`icon-button ephemeral-toggle${chat.ephemeral ? ' active' : ''}`} aria-pressed={chat.ephemeral}
             aria-label={chat.ephemeral ? 'Quitter le chat éphémère' : 'Ouvrir un chat éphémère, qui n’est pas enregistré'}
             title={chat.ephemeral ? 'Quitter le chat éphémère' : 'Chat éphémère : rien n’est enregistré'}

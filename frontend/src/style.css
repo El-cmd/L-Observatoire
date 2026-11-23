@@ -176,6 +176,8 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .library-header{display:flex;align-items:center;gap:18px;margin-bottom:22px}
 .library-header h2{font-size:20px;font-weight:500;margin:0;flex:1}
 .library-usage{display:flex;align-items:center;gap:10px;font-size:12px;color:#999;margin:0}
+.sidebar~.workspace .topbar-title.page{visibility:visible;font-size:20px;color:#eee;margin-left:6px}
+.topbar-usage{margin-left:auto}
 .library-meter{display:block;width:110px;height:5px;border-radius:3px;background:#2c2c2c;overflow:hidden}.library-meter span{display:block;height:100%;background:#cfcfcf}
 .library-empty{color:#888;font-size:13px;margin-top:40px;text-align:center}
 .library-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:16px;list-style:none;margin:0;padding:0}
@@ -207,6 +209,7 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
   .news{padding:4px 14px 24px}.news-item{padding:14px}
   .library{padding:4px 14px 20px}.library-grid{grid-template-columns:repeat(2,1fr);gap:10px}
   .library-header{flex-wrap:wrap;gap:8px 14px}.library-usage{order:3;width:100%}
+  .sidebar~.workspace .topbar-title.page{font-size:17px;margin-left:0}.topbar-usage{order:0;width:auto;font-size:11px}.topbar-usage .library-meter{display:none}
   .library-actions{opacity:1}.library-footer{margin:18px -14px -20px;padding:12px 14px}
 }
 /* Web search: button and menu of the composer, steps folded above the answer, clickable citations. */

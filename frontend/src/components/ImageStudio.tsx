@@ -182,7 +182,6 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   }
 
   if (!config || !settings) return <section className="studio" id="studio" aria-label="Images">
-    <header className="library-header"><h2>Images</h2></header>
     {error ? <p className="studio-error" role="alert">{error}</p> : <p className="library-empty" role="status">Chargement…</p>}
   </section>;
 
@@ -195,7 +194,6 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   const more = [6, 8, 10, 12].filter(value => value <= config.max_count);
   const disabled = !config.configured;
   return <section className="studio" id="studio" aria-label="Images">
-    <header className="library-header"><h2>Images</h2></header>
     <div className="studio-body">
       <div className="studio-settings" ref={menus}>
         <div className="studio-style">

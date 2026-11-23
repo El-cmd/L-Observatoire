@@ -33,13 +33,7 @@ export function LibraryView({library, picking, room, onLoad, onClose, onOpen, on
     try { const items = await findConversations(id); setLinks(value => value?.id === id ? {id, items} : value); }
     catch { setLinks(null); onError('Impossible de retrouver les conversations de cette image.'); }
   }
-  const used = library ? Math.min(100, library.used_bytes / library.quota_bytes * 100) : 0;
   return <section className={`library${picking ? ' picking' : ''}`} id="library" aria-label="Bibliothèque">
-    <header className="library-header">
-      <h2>{picking ? 'Choisir dans la bibliothèque' : 'Bibliothèque'}</h2>
-      {library && <p className="library-usage">{formatBytes(library.used_bytes)} sur {formatBytes(library.quota_bytes)}
-        <span className="library-meter" aria-hidden="true"><span style={{width:`${used}%`}}/></span></p>}
-    </header>
     {!library ? <p className="library-empty" role="status">Chargement…</p>
       : !library.items.length ? <p className="library-empty">Les images et documents que tu envoies apparaîtront ici.</p>
       : <ul className="library-grid">{library.items.map(item => {

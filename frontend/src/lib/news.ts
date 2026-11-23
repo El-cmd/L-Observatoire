@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-23-titre-en-haut', date: '2026-11-23', level: 'improvement', title: 'Le titre de la page reste en haut',
+    text: 'Dans l’onglet Images et la bibliothèque, le titre de la page est tout en haut et y reste quand vous faites défiler. Dans la bibliothèque, la place utilisée s’affiche à côté, à droite.'},
   {id: '2026-11-23-pages-epurees', date: '2026-11-23', level: 'improvement', title: 'Images et bibliothèque épurées',
     text: 'L’onglet Images et la bibliothèque n’ont plus de croix de fermeture ni de bouton de chat éphémère en haut à droite : pour revenir à une conversation, touchez Nouveau chat ou une conversation dans la barre de gauche.'},
   {id: '2026-11-23-pleine-largeur', date: '2026-11-23', level: 'improvement', title: 'Images et bibliothèque sur toute la largeur',
