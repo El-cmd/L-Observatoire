@@ -289,12 +289,14 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
           ? config.sizes.map(size => <button key={size} type="button" aria-pressed={size === settings.size} onClick={() => change({size})}>{times(size)}</button>)
           : <span className="studio-size">{times(settings.size)}</span>}</div>
 
+        {config.qualities.length > 1 && <>
         <h3>Qualité <span className="studio-help" tabIndex={0} title="HD et Très HD : l’image est créée, agrandie puis repassée pour ajouter des détails (peau, tissus, feuillages…). HD : 1,5 fois plus grande, environ 3 fois plus long. Très HD : jusqu’à 2 048 pixels de côté, environ 4 fois plus long. Une image de départ garde sa taille.">?</span></h3>
         <div className="studio-counts studio-qualities" role="group" aria-label="Qualité">
           {config.qualities.map(item => <button key={item.id} type="button" id={`studio-quality-${item.id}`} aria-pressed={settings.quality === item.id} disabled={source !== null}
             title={source ? 'Une image de départ garde sa taille' : times(finalSize(settings.size, item.id))} onClick={() => change({quality: item.id})}>{item.name}</button>)}
         </div>
         {!source && settings.quality !== config.default_quality && <span className="studio-size" id="studio-final-size">Image finale : {times(finalSize(settings.size, settings.quality))}</span>}
+        </>}
 
         <h3>Nombre d’images <span className="studio-help" tabIndex={0} title="Les images sont créées l’une après l’autre, chacune un peu différente.">?</span></h3>
         <div className="studio-counts">

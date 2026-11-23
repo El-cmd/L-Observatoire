@@ -27,6 +27,9 @@ const DEFAULT_STRENGTH: &str = "equilibre";
 /// (`quality` hd ×1.5, uhd ×2, at most 2 048 px on the longest side), sent back as JPEG to stay light.
 pub const QUALITIES: &[(&str, &str, Option<&str>)] = &[("standard", "Standard", None), ("hd", "HD", Some("hd")), ("tres-hd", "Très HD", Some("uhd"))];
 const DEFAULT_QUALITY: &str = "standard";
+/// HD and Très HD are hidden since 23/11/2026: the image service's second pass made images worse
+/// (crackled skin, shaky lines). Back once they are made directly at a larger size.
+const QUALITY_OFFERED: bool = false;
 
 fn quality(id: Option<&str>) -> Result<&'static (&'static str, &'static str, Option<&'static str>), Error> {
     let id = id.unwrap_or(DEFAULT_QUALITY);
@@ -141,7 +144,7 @@ pub async fn config(State(app): State<App>, headers: HeaderMap) -> Result<Json<V
         "max_prompt": MAX_PROMPT,
         "strengths": STRENGTHS.iter().map(|(id, name, value)| json!({"id": id, "name": name, "value": value})).collect::<Vec<_>>(),
         "default_strength": DEFAULT_STRENGTH,
-        "qualities": QUALITIES.iter().map(|(id, name, _)| json!({"id": id, "name": name})).collect::<Vec<_>>(),
+        "qualities": QUALITIES.iter().filter(|q| QUALITY_OFFERED || q.0 == DEFAULT_QUALITY).map(|(id, name, _)| json!({"id": id, "name": name})).collect::<Vec<_>>(),
         "default_quality": DEFAULT_QUALITY,
     })))
 }
@@ -303,7 +306,7 @@ pub async fn create(State(app): State<App>, headers: HeaderMap, Json(request): J
         Some(id) => Some((source(&app, user.user_id, id).await?, if retouch { None } else { Some(strength(request.strength.as_deref())?) })),
         None => None,
     };
-    let quality = if request.source.is_some() { quality(None)? } else { quality(request.quality.as_deref())? };
+    let quality = if request.source.is_some() || !QUALITY_OFFERED { quality(None)? } else { quality(request.quality.as_deref())? };
     // An image weighs up to ~3 Mo before image-guard re-encodes it.
     if attachments::used_bytes(&app, user.user_id).await? + 3 * 1024 * 1024 > attachments::QUOTA_BYTES {
         return Err(Error::bad(attachments::FULL));
