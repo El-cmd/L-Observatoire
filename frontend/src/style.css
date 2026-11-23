@@ -122,6 +122,24 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .image-viewer{max-width:calc(100vw - 32px);max-height:calc(100dvh - 32px);padding:0;border:1px solid #3a3a3a;border-radius:14px;background:#111;color:#eee;overflow:hidden}
 .image-viewer::backdrop{background:#000d}
 .image-viewer img{display:block;max-width:calc(100vw - 34px);max-height:calc(100dvh - 90px);margin:0 auto;object-fit:contain}
+/* Image on the left, its information on the right; below the image on a phone. */
+.image-viewer-layout{display:flex;max-height:calc(100dvh - 34px)}
+.image-viewer-main{display:flex;flex-direction:column;min-width:0}
+.image-viewer-layout .image-viewer-main img{max-width:calc(100vw - 34px - 360px);max-height:calc(100dvh - 90px)}
+.image-viewer-info{width:360px;flex:none;overflow-y:auto;padding:18px 18px 22px;border-left:1px solid #2c2c2c;background:#151515}
+.image-info-text{margin-bottom:16px}.image-info-text header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
+.image-info-text h3{margin:0;font-size:12px;font-weight:500;color:#aaa}
+.image-info-text .studio-link{display:inline-flex;align-items:center;gap:5px}.image-info-text .studio-link svg{width:14px;height:14px}
+.image-info-text p{margin:0;padding:10px 12px;background:#1c1c1c;border:1px solid #303030;border-radius:9px;font-size:13px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
+.image-info-none,.image-info-empty{color:#888;font-size:12.5px;font-style:italic;margin:0 0 14px}
+.image-info-text p.image-info-none{background:none;border:0;padding:0}
+.image-info-details{display:grid;gap:9px;margin:6px 0 0;padding-top:14px;border-top:1px solid #2a2a2a;font-size:12.5px}
+.image-info-details div{display:flex;justify-content:space-between;gap:12px}.image-info-details dt{color:#999}.image-info-details dd{margin:0;text-align:right;color:#ddd;overflow-wrap:anywhere}
+@media(max-width:760px){
+  .image-viewer-layout{flex-direction:column;overflow-y:auto}
+  .image-viewer-layout .image-viewer-main img{max-width:calc(100vw - 34px);max-height:62dvh}
+  .image-viewer-info{width:auto;border-left:0;border-top:1px solid #2c2c2c;overflow:visible}
+}
 .image-viewer-bar{display:flex;align-items:center;gap:6px;padding:8px 10px 8px 16px;border-top:1px solid #2c2c2c;font-size:13px;color:#bbb}
 .image-viewer-bar span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* Documents: a label with the file name and its state, instead of a picture. */
@@ -285,12 +303,6 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .studio-style-button .studio-noexample{width:40px;height:40px;flex:none;border-radius:8px}.studio-style-button .studio-noexample small{display:none}
 @keyframes studio-pulse{from{opacity:.45}to{opacity:1}}
 .style-dialog{width:min(520px,calc(100vw - 32px))}
-.prompts-dialog{width:min(640px,calc(100vw - 32px))}
-.prompts-row{margin:0 0 16px}.prompts-row header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
-.prompts-row h3{margin:0;font-size:12px;font-weight:500;color:#bbb}
-.prompts-row p{margin:0;padding:11px 13px;background:#181818;border:1px solid #333;border-radius:9px;font-size:13.5px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto}
-.prompts-row p.prompts-none{color:#888;font-style:italic}
-.prompts-row .studio-link{display:inline-flex;align-items:center;gap:5px}.prompts-row .studio-link svg{width:14px;height:14px}
 .style-dialog textarea{width:100%;background:#181818;border:1px solid #3c3c3c;border-radius:9px;color:#eee;padding:11px 13px;font:inherit;font-size:15px;line-height:1.5;resize:vertical}
 .style-dialog textarea:focus-visible{outline:2px solid #999;outline-offset:2px}
 .style-suggest{display:flex;flex-direction:column;gap:8px}.style-suggest .studio-secondary{align-self:flex-start}

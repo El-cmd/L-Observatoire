@@ -523,6 +523,7 @@ export function useObservatoire() {
     example: (id: string) => client.json<MyStyle>(`/api/creation/styles/${id}/example`, {method:'POST'}),
     suggest: (description: string) => client.json<{words: string}>('/api/creation/styles/suggest', {method:'POST', body:{description}}).then(value => value.words),
   };
+  const attachmentInfo = (id: string) => client.json<LibraryItem>(`/api/attachments/${id}/status`);
   const documentText = (id: string) => client.json<{content: string}>(`/api/attachments/${id}/text`).then(value => value.content);
 
   async function continueAnswer() {
@@ -560,7 +561,7 @@ export function useObservatoire() {
   return {auth, initializing, loginError, signingIn, login, logout, changePassword,
     chats, current:activeChat, activity, busy:currentActivity === 'generating', navigating,
     notice:(currentId && notices[currentId]) || notices[''] || null, notify,
-    prompt, setPrompt, pending, addImages, addFromLibrary, removePending, library, loadLibrary, deleteImage, imageConversations, documentText, removedImages, creationConfig, improvePrompt, createImage, styles,
+    prompt, setPrompt, pending, addImages, addFromLibrary, removePending, library, loadLibrary, deleteImage, imageConversations, documentText, attachmentInfo, removedImages, creationConfig, improvePrompt, createImage, styles,
     settings, setSettings, newChat, openChat, ephemeral:isEphemeral(activeChat), toggleEphemeral, deleteChat, renameChat, send, regenerate, continueAnswer,
     contextUsage:contextUsage && contextUsage.conversation_id === currentId && contextUsage.version === activeChat?.version ? contextUsage : null,
     compacting:currentActivity === 'compacting', compactContext, summaryFocus,

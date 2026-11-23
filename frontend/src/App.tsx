@@ -83,7 +83,7 @@ export default function App() {
       </div>
     </div>
     <PasswordDialog open={passwordOpen} onClose={() => setPasswordOpen(false)} onChange={chat.changePassword}/>
-    <ImageViewer image={viewer && !isDocument(viewer) ? viewer : null} onClose={() => setViewer(null)}/>
+    <ImageViewer image={viewer && !isDocument(viewer) ? viewer : null} loadInfo={chat.attachmentInfo} onClose={() => setViewer(null)}/>
     <DocumentViewer file={viewer && isDocument(viewer) ? viewer : null} load={chat.documentText} onClose={() => setViewer(null)} onError={chat.notify}/>
   </>;
 }
