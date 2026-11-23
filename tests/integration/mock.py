@@ -45,18 +45,20 @@ class Mock(BaseHTTPRequestHandler):
             self.send_error(401)
             return
         if self.path == '/v1/images/edits':
-            # "Image → image": the starting image and a strength, in a multipart form. The new image is green.
+            # "Transformer": the starting image and a strength, in a multipart form; the new image is green.
+            # "Retoucher": no strength, and never style words (they would restyle the image); the new image is blue.
             fields, files = form(self.headers['Content-Type'], raw)
             mime, image = files.get('image', ('', b''))
+            retouch = 'strength' not in fields
             ok = fields.get('model') == 'qwen-image-turbo' and fields.get('n') == '1' and fields.get('response_format') == 'b64_json' \
-                and fields.get('seed', '').isdigit() and fields.get('strength') in ('0.625', '0.75', '0.875') \
+                and fields.get('seed', '').isdigit() and (fields.get('strength') in ('0.625', '0.75', '0.875') or (retouch and 'Style:' not in fields.get('prompt', ''))) \
                 and ((mime, image[:4]) == ('image/png', b'\x89PNG') or (mime, image[:3]) == ('image/jpeg', b'\xff\xd8\xff'))
             if not ok or 'image-error' in fields.get('prompt', ''):
                 self.send_error(500, 'Private upstream detail: integration-test-key')
                 return
             width, height = (int(v) for v in fields['size'].split('x'))
-            self.send_json({'created': 1, 'data': [{'b64_json': base64.b64encode(png(width, height, b'\x10\xc0\x10')).decode()}],
-                            'strength': fields['strength']})
+            color = b'\x10\x10\xc0' if retouch else b'\x10\xc0\x10'
+            self.send_json({'created': 1, 'data': [{'b64_json': base64.b64encode(png(width, height, color)).decode()}]})
             return
         body = json.loads(raw)
         if self.path == '/v1/images/generations':
@@ -114,6 +116,10 @@ class Mock(BaseHTTPRequestHandler):
                     # "Image → image": Qwen sees the starting image (its JPEG thumbnail) to describe it.
                     assert len(images) == 1 and images[0].startswith('data:image/jpeg;base64,/9j/')
                     content = 'The same small brown square, as a watercolor painting.'
+                if 'edit instruction' in system:
+                    # "Retoucher": a short instruction written by Qwen looking at the image.
+                    assert len(images) == 1 and images[0].startswith('data:image/jpeg;base64,/9j/')
+                    content = '"Make the square blue. Keep everything else exactly the same: the size and the framing."'
             if 'style words' in system:
                 # Words of a user's style proposed by Qwen, with what the API must clean up.
                 assert body.get('reasoning_effort') == 'none'

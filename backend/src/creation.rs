@@ -165,6 +165,10 @@ pub struct Request {
     source: Option<Uuid>,
     #[serde(default)]
     strength: Option<String>,
+    /// "Retoucher": the image model changes only what the instruction asks and keeps the rest (no
+    /// strength, no style words).
+    #[serde(default)]
+    retouch: bool,
 }
 
 /// Image of the user's library used as a starting point.
@@ -211,16 +215,18 @@ fn image_name(prompt: &str, mime: &str) -> String {
 }
 
 /// One image from the image model (one at a time per API, see `App::images`): created from the
-/// prompt, or redrawn from a starting image with a strength ("Image → image").
-async fn generate(app: &App, prompt: &str, size: &str, seed: u32, start: Option<(&Source, f64)>) -> Result<Vec<u8>, Error> {
+/// prompt, redrawn from a starting image with a strength ("Transformer"), or edited by an
+/// instruction without strength ("Retoucher": the image service's reference mode).
+async fn generate(app: &App, prompt: &str, size: &str, seed: u32, start: Option<(&Source, Option<f64>)>) -> Result<Vec<u8>, Error> {
     let busy = || Error(StatusCode::SERVICE_UNAVAILABLE, "Le service d’images est occupé ou indisponible. Réessayez dans un instant.".into());
     let _turn = app.images.acquire().await.map_err(|_| busy())?;
     let request = match start {
         None => app.http.post(format!("{}/images/generations", app.config.api_url))
             .json(&json!({"model": app.config.image_model, "prompt": prompt, "n": 1, "size": size, "seed": seed, "response_format": "b64_json"})),
         Some((source, strength)) => {
-            let fields = [("model", app.config.image_model.clone()), ("prompt", prompt.to_string()), ("n", "1".into()), ("size", size.to_string()),
-                          ("seed", seed.to_string()), ("strength", strength.to_string()), ("response_format", "b64_json".into())];
+            let mut fields = vec![("model", app.config.image_model.clone()), ("prompt", prompt.to_string()), ("n", "1".into()), ("size", size.to_string()),
+                                  ("seed", seed.to_string()), ("response_format", "b64_json".into())];
+            if let Some(strength) = strength { fields.push(("strength", strength.to_string())); }
             let (content_type, body) = multipart(&fields, &source.data, &source.mime);
             app.http.post(format!("{}/images/edits", app.config.api_url)).header("Content-Type", content_type).body(body)
         }
@@ -245,10 +251,12 @@ pub async fn create(State(app): State<App>, headers: HeaderMap, Json(request): J
     check_prompt(&request.prompt)?;
     let improved = request.improved.as_deref().map(str::trim).filter(|s| !s.is_empty());
     if let Some(text) = improved { check_prompt(text)?; }
-    let style = chosen(&app, user.user_id, request.style.as_deref().unwrap_or(DEFAULT_STYLE)).await?;
+    let retouch = request.retouch && request.source.is_some();
+    // A retouch keeps the look of the image: no style words, which would restyle it.
+    let style = if retouch { chosen(&app, user.user_id, "aucun").await? } else { chosen(&app, user.user_id, request.style.as_deref().unwrap_or(DEFAULT_STYLE)).await? };
     if !sizes(&app).contains(&request.size) { return Err(Error::bad("Taille d’image non prise en charge.")); }
     let start = match request.source {
-        Some(id) => Some((source(&app, user.user_id, id).await?, strength(request.strength.as_deref())?)),
+        Some(id) => Some((source(&app, user.user_id, id).await?, if retouch { None } else { Some(strength(request.strength.as_deref())?) })),
         None => None,
     };
     // An image weighs up to ~3 Mo before image-guard re-encodes it.
@@ -258,15 +266,19 @@ pub async fn create(State(app): State<App>, headers: HeaderMap, Json(request): J
     let sent = compose(improved.unwrap_or(&request.prompt), &style.words);
     let seed: u32 = rand::thread_rng().gen_range(0..i32::MAX as u32);
     let started = Instant::now();
-    let data = generate(&app, &sent, &request.size, seed, start.as_ref().map(|(source, strength)| (source, strength.2))).await?;
+    let data = generate(&app, &sent, &request.size, seed, start.as_ref().map(|(source, strength)| (source, strength.map(|s| s.2)))).await?;
     let clean = attachments::sanitize(&app, Bytes::from(data)).await?;
     // prompt: the user's idea; improved: Qwen's rewriting, if any; sent: what the image model received.
-    // source, strength: the starting image of "Image → image" (it may be deleted later) and how much was redrawn.
+    // source: the starting image (it may be deleted later); strength: how much was redrawn ("Transformer"),
+    // or retouch: edited by an instruction ("Retoucher").
     let mut generation = json!({"prompt": request.prompt.trim(), "improved": improved, "sent": sent, "style": style.id, "style_name": style.name, "size": request.size, "seed": seed,
                                 "seconds": (started.elapsed().as_secs_f64() * 10.0).round() / 10.0});
-    if let Some((source, (id, name, value))) = &start {
+    if let Some((source, strength)) = &start {
         generation["source"] = json!(source.id);
-        generation["strength"] = json!({"id": id, "name": name, "value": value});
+        match strength {
+            Some((id, name, value)) => generation["strength"] = json!({"id": id, "name": name, "value": value}),
+            None => generation["retouch"] = json!(true),
+        }
     }
     let id = attachments::store_image(&app, user.user_id, &clean, &image_name(&request.prompt, &clean.mime), Some(generation)).await?;
     Ok((StatusCode::CREATED, Json(attachments::item(&app, user.user_id, id).await?)))
@@ -298,6 +310,18 @@ Rules:
 - Do not invent text, logos or signatures to display in the image.
 - Write in English, as a single paragraph of 50 to 110 words.
 - Answer with the prompt only: no introduction, no title, no list, no quotes around the whole prompt.";
+
+/// "Retoucher": the image model edits the image by an instruction and keeps the rest; Qwen turns the
+/// user's request (often in French) into a short, precise instruction in English.
+const EDIT_INSTRUCTION: &str = "You write one edit instruction for the Qwen-Image model, which edits the attached image: it changes only what the instruction asks and keeps everything else. The user says, in any language, what to change.
+
+Rules:
+- Write the change as one or two short imperative sentences in English, precise about what changes and where, for example \"Remove his straw hat and show his messy black hair.\" or \"Make the car bright red.\"
+- Do everything the user asks, and nothing more.
+- Then add one sentence that starts with \"Keep everything else exactly the same:\" followed by the main things that must not change, as seen in the attached image (for example the face, the pose, the clothes, the background, the colors and the drawing style).
+- Any text that must be written in the image stays exactly as the user wrote it, between double quotes.
+- At most 80 words.
+- Answer with the instruction only: no introduction, no title, no list, no quotes around the whole instruction.";
 
 pub fn improve_instructions(name: &str, words: &str) -> String {
     with_style(IMPROVE, name, words)
@@ -336,9 +360,12 @@ pub struct ImproveRequest {
     prompt: String,
     #[serde(default)]
     style: Option<String>,
-    /// "Image → image": Qwen looks at the starting image (its thumbnail) to describe it.
+    /// "Image → image": Qwen looks at the starting image (its thumbnail) to describe it, or to write
+    /// the instruction of a retouch.
     #[serde(default)]
     source: Option<Uuid>,
+    #[serde(default)]
+    retouch: bool,
 }
 
 pub async fn improve(State(app): State<App>, headers: HeaderMap, Json(request): Json<ImproveRequest>) -> Result<Json<Value>, Error> {
@@ -351,7 +378,8 @@ pub async fn improve(State(app): State<App>, headers: HeaderMap, Json(request): 
         Some(id) => {
             let image = format!("data:image/jpeg;base64,{}", STANDARD.encode(source(&app, user.user_id, id).await?.thumbnail));
             let content = json!([{"type": "text", "text": request.prompt.trim()}, {"type": "image_url", "image_url": {"url": image}}]);
-            ask_qwen(&app, &with_style(IMPROVE_FROM_IMAGE, &style.name, &style.words), content, 0.7, 400).await
+            let system = if request.retouch { EDIT_INSTRUCTION.to_string() } else { with_style(IMPROVE_FROM_IMAGE, &style.name, &style.words) };
+            ask_qwen(&app, &system, content, if request.retouch { 0.3 } else { 0.7 }, 400).await
         }
         None => ask_qwen(&app, &improve_instructions(&style.name, &style.words), json!(request.prompt.trim()), 0.7, 400).await,
     };

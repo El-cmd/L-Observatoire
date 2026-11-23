@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-23-retoucher', date: '2026-11-23', level: 'major', title: 'Retoucher une image : seul ce que vous demandez change',
+    text: 'Dans l’onglet Images, partez d’une image puis choisissez « Retoucher » (choisi d’office) : écrivez simplement le changement, par exemple « retire-lui son chapeau » ou « mets sa voiture en rouge », et touchez Retoucher. Le reste de l’image (visage, pose, vêtements, décor) est gardé tel quel. « Transformer » redessine toute l’image, pour changer de style par exemple, avec Fidèle, Équilibré ou Libre.'},
   {id: '2026-11-23-image-vers-image-auto', date: '2026-11-23', level: 'improvement', title: 'Image à partir d’une autre : plus besoin d’améliorer',
     text: 'Quand vous partez d’une image, écrivez simplement ce qui doit changer (par exemple « retire-lui son chapeau ») et touchez Transformer : L’Observatoire regarde l’image et écrit tout seul la description complète. Il reconnaît aussi les personnages connus (de dessin animé, de manga, de jeu vidéo…) et les nomme, pour qu’ils restent fidèles. Pour retirer un objet, choisissez plutôt Équilibré ou Libre : Fidèle change très peu l’image.'},
   {id: '2026-11-23-image-vers-image', date: '2026-11-23', level: 'major', title: 'Créer une image à partir d’une autre',

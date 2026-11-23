@@ -44,7 +44,8 @@ export function ImageViewer({image, loadInfo, onClose}: {image: AttachmentRef | 
   ] : [];
   const details: [string, string][] = info ? [
     ...(generation ? [['Style', generation.style_name ?? generation.style],
-      ...(generation.strength ? [['Liberté prise', `${generation.strength.name} (${generation.strength.value.toLocaleString('fr-FR')})`]] : []),
+      ...(generation.strength ? [['Image de départ', `Transformée · ${generation.strength.name} (${generation.strength.value.toLocaleString('fr-FR')})`]] : []),
+      ...(generation.retouch ? [['Image de départ', 'Retouchée : seul le changement demandé']] : []),
       ['Graine', String(generation.seed)], ['Durée de création', `${generation.seconds} s`]] as [string, string][] : []),
     ['Dimensions', `${info.width} × ${info.height} px`],
     ['Format', info.mime === 'image/png' ? 'PNG' : 'JPEG'],

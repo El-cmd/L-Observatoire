@@ -58,6 +58,8 @@ flowchart TB
         I1 --> I4
         I6([Image de départ]) -->|Améliorer| I7[IMPROVE_FROM_IMAGE<br/>+ image + règle du style]:::sys
         I6 -->|Transformer + force| I4
+        I6 -->|Retoucher| I8[EDIT_INSTRUCTION<br/>+ image]:::sys
+        I8 -->|sans force ni style| I4
         I7 --> I4
     end
 
@@ -365,6 +367,21 @@ Rules:
 - Do not invent text, logos or signatures to display in the image.
 - Write in English, as a single paragraph of 50 to 110 words.
 - Answer with the prompt only: no introduction, no title, no list, no quotes around the whole prompt.
+```
+### Consigne d’une retouche (`EDIT_INSTRUCTION`) — Système
+
+Mode « Retoucher » : Qwen reçoit la demande de l’utilisateur et la miniature de l’image, et écrit une consigne courte. Le modèle d’images la reçoit sans mots de style ni force (modification par référence : seul le changement demandé est fait).
+
+```text
+You write one edit instruction for the Qwen-Image model, which edits the attached image: it changes only what the instruction asks and keeps everything else. The user says, in any language, what to change.
+
+Rules:
+- Write the change as one or two short imperative sentences in English, precise about what changes and where, for example "Remove his straw hat and show his messy black hair." or "Make the car bright red."
+- Do everything the user asks, and nothing more.
+- Then add one sentence that starts with "Keep everything else exactly the same:" followed by the main things that must not change, as seen in the attached image (for example the face, the pose, the clothes, the background, the colors and the drawing style).
+- Any text that must be written in the image stays exactly as the user wrote it, between double quotes.
+- At most 80 words.
+- Answer with the instruction only: no introduction, no title, no list, no quotes around the whole instruction.
 ```
 ### Proposer les mots d’un style (`SUGGEST`) — Système
 

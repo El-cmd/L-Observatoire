@@ -426,6 +426,19 @@ class Integration(unittest.TestCase):
         self.assertEqual(code, 201, plain)
         read = lambda i: self.alice.opener.open(ORIGIN + '/api/attachments/' + i, timeout=20).read()
         self.assertNotEqual(read(item['id']), read(plain['id']))
+        # "Retoucher": an instruction written by Qwen, no strength, no style words even with a style chosen (blue in the mock).
+        code, instruction, _ = self.alice.call('/api/creation/improve', 'POST', {'prompt': 'mets le carré en bleu', 'style': 'aquarelle', 'source': start['id'], 'retouch': True})
+        self.assertEqual((code, instruction), (200, {'prompt': 'Make the square blue. Keep everything else exactly the same: the size and the framing.'}))
+        code, retouched, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'mets le carré en bleu', 'style': 'aquarelle', 'size': '1152x896', 'improved': instruction['prompt'],
+                                                                      'source': start['id'], 'strength': 'libre', 'retouch': True})
+        self.assertEqual(code, 201, retouched)
+        generation = retouched['generation']
+        self.assertEqual((generation['source'], generation['retouch'], generation['style'], generation['sent']), (start['id'], True, 'aucun', instruction['prompt']))
+        self.assertNotIn('strength', generation)
+        self.assertNotIn(read(retouched['id']), (read(item['id']), read(plain['id'])))
+        # Without a starting image, "retouch" means nothing: an ordinary image.
+        code, alone, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'une pomme', 'style': 'aucun', 'size': '768x768', 'retouch': True})
+        self.assertEqual((code, 'retouch' in alone['generation'], 'source' in alone['generation']), (201, False, False))
         # Someone else's image, a document, an unknown strength: refused before any call to the image model.
         _, bob_image = upload(self.bob, png(8, 8))
         for body in ({'source': bob_image['id']}, {'source': start['id'], 'strength': '0.9'}, {'source': 'pas-un-id'}):

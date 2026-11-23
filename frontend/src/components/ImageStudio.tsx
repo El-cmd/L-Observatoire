@@ -7,7 +7,8 @@ import {StyleDialog, type StyleApi} from './StyleDialog';
 import {SourcePicker} from './SourcePicker';
 
 /** Settings kept in the browser, per account. */
-interface Settings { style: string; format: string; size: string; count: number; improve: boolean; strength: string }
+/** `edit`: what to do with a starting image, "retouche" (only what is asked changes) or "transformer" (redrawn with `strength`). */
+interface Settings { style: string; format: string; size: string; count: number; improve: boolean; strength: string; edit: 'retouche' | 'transformer' }
 type Waiting = {key: string; size: string; label: string; error?: string};
 
 /** Example of a style: a file for the built-in ones, created by the image model for "Mes styles". */
@@ -28,7 +29,7 @@ function sizeFor(config: CreationConfig, width: number, height: number): string 
 
 function defaults(config: CreationConfig): Settings {
   const square = config.formats.find(format => format.name === '1:1');
-  return {style: config.default_style, format: square ? '1:1' : 'custom', size: square?.size ?? config.default_size, count: 1, improve: false, strength: config.default_strength};
+  return {style: config.default_style, format: square ? '1:1' : 'custom', size: square?.size ?? config.default_size, count: 1, improve: false, strength: config.default_strength, edit: 'retouche'};
 }
 
 function restore(config: CreationConfig, saved: Partial<Settings> | null): Settings {
@@ -40,13 +41,14 @@ function restore(config: CreationConfig, saved: Partial<Settings> | null): Setti
   value.count = Math.min(Math.max(1, Number(value.count) || 1), config.max_count);
   value.improve = value.improve === true;
   if (!config.strengths.some(strength => strength.id === value.strength)) value.strength = config.default_strength;
+  if (value.edit !== 'transformer') value.edit = 'retouche';
   return value;
 }
 
 /** Images tab: creates images into the library, with a style, a size and a number of images. */
 export function ImageStudio({userId, library, loadConfig, improvePrompt, createImage, uploadImage, styles, onLoad, onOpen, onDelete, onStartChat, removed}: {
   userId: string; library: Library | null; loadConfig: () => Promise<CreationConfig>;
-  improvePrompt: (prompt: string, style: string, signal?: AbortSignal, source?: string) => Promise<string>;
+  improvePrompt: (prompt: string, style: string, signal?: AbortSignal, source?: string, retouch?: boolean) => Promise<string>;
   createImage: (body: CreateBody, signal?: AbortSignal) => Promise<LibraryItem>;
   uploadImage: (file: File) => Promise<AttachmentRef>;
   styles: StyleApi;
@@ -69,7 +71,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   const [making, setMaking] = useState<ReadonlySet<string>>(new Set());
   // Phone: the settings fold under the description (always shown on a computer).
   const [advanced, setAdvanced] = useState(false);
-  // "Image → image": the starting image, redrawn from the description with a strength.
+  // "Image → image": the starting image, retouched by an instruction or redrawn with a strength.
   const [source, setSource] = useState<AttachmentRef | null>(null);
   const [picking, setPicking] = useState(false);
   const running = useRef<AbortController | null>(null);
@@ -129,6 +131,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   const images = [...created, ...(library?.items.filter(item => item.generation) ?? [])]
     .filter(item => !removed.has(item.id) && !seen.has(item.id) && seen.add(item.id));
   const busy = running.current !== null;
+  const retouch = source !== null && settings?.edit === 'retouche';
   // The starting image deleted from the library: back to creating from the description alone.
   useEffect(() => {if (source && removed.has(source.id)) setSource(null);}, [removed, source]);
 
@@ -145,7 +148,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     if (!settings || !prompt.trim() || busy || improving) return;
     setError(''); setImproving(true);
     try {
-      const text = await improvePrompt(prompt.trim(), settings.style, undefined, source?.id);
+      const text = await improvePrompt(prompt.trim(), settings.style, undefined, source?.id, retouch);
       // Improved twice: "Revenir à mon texte" still goes back to the user's own text.
       setBeforeImprove(value => value ?? prompt); setPrompt(text); setImproved(null);
     } catch (failure) { setError(errorMessage(failure)); }
@@ -164,7 +167,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     const controller = new AbortController(); running.current = controller;
     const batch = Date.now().toString(36);
     const count = settings.count, size = settings.size;
-    const start = source ? {source: source.id, strength: settings.strength} : {};
+    const start = source ? {source: source.id, ...(retouch ? {retouch: true} : {strength: settings.strength})} : {};
     setWaiting(Array.from({length: count}, (_, index) => ({key: `${batch}-${index}`, size, label: `Image ${index + 1} / ${count}`})));
     const label = (index: number, text: string) => setWaiting(list => list.map(item => item.key === `${batch}-${index}` ? {...item, label: text} : item));
     const started = performance.now();
@@ -177,7 +180,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
         // One rewriting for the whole series: the images share the same improved prompt.
         setWaiting(list => list.map(item => ({...item, label: 'Amélioration de la description…'})));
         setImproved(null);
-        rewritten = await improvePrompt(idea, settings.style, controller.signal, source?.id);
+        rewritten = await improvePrompt(idea, settings.style, controller.signal, source?.id, retouch);
         setImproved(rewritten);
       }
       for (let index = 0; index < count; index++) {
@@ -207,7 +210,8 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     const format = config.formats.find(value => value.size === item.generation!.size);
     change({style: allStyles(config).some(style => style.id === item.generation!.style) ? item.generation.style : config.default_style,
       ...(config.sizes.includes(item.generation.size) ? {size: item.generation.size, format: format ? format.name : 'custom'} : {}), count: 1,
-      ...(item.generation.strength && config.strengths.some(value => value.id === item.generation!.strength!.id) ? {strength: item.generation.strength.id} : {})});
+      ...(item.generation.strength && config.strengths.some(value => value.id === item.generation!.strength!.id) ? {strength: item.generation.strength.id, edit: 'transformer' as const} : {}),
+      ...(item.generation.retouch ? {edit: 'retouche' as const} : {})});
     // The same starting image, if it is still in the library.
     const start = item.generation.source ? library?.items.find(value => value.id === item.generation!.source && !removed.has(value.id)) : undefined;
     setSource(start ? toRef(start) : null);
@@ -291,17 +295,23 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
             <button type="button" className="studio-source-image" aria-label="Changer l’image de départ" title="Changer l’image de départ" onClick={() => setPicking(true)}>
               <img src={thumbnailURL(source.id)} alt=""/></button>
             <div className="studio-source-text">
-              <span>Image de départ <span className="studio-help" tabIndex={0} title="L’image est redessinée selon votre description. Écrivez simplement ce qui doit changer : Qwen regarde l’image de départ et écrit lui-même la description complète, en anglais, avant chaque transformation. « Améliorer » vous la montre d’abord, pour la retoucher.">?</span></span>
-              <div className="studio-strengths" role="group" aria-label="Liberté prise avec l’image de départ">
+              <span>Image de départ <span className="studio-help" tabIndex={0} title={retouch
+                ? 'Retoucher : seul ce que vous demandez change (retirer un objet, changer une couleur, ajouter un détail…), tout le reste de l’image est gardé. Écrivez simplement le changement : Qwen regarde l’image et en fait une consigne précise, en anglais. « Améliorer » vous la montre d’abord.'
+                : 'Transformer : toute l’image est redessinée selon votre description (pour changer de style, par exemple), plus ou moins librement. Qwen regarde l’image et écrit lui-même la description complète. « Améliorer » vous la montre d’abord.'}>?</span></span>
+              <div className="studio-strengths studio-modes" role="group" aria-label="Que faire de l’image de départ">
+                <button type="button" id="studio-mode-retouch" aria-pressed={retouch} title="Seul ce que vous demandez change" onClick={() => change({edit: 'retouche'})}>Retoucher</button>
+                <button type="button" id="studio-mode-transform" aria-pressed={!retouch} title="Toute l’image est redessinée" onClick={() => change({edit: 'transformer'})}>Transformer</button>
+              </div>
+              {!retouch && <div className="studio-strengths" role="group" aria-label="Liberté prise avec l’image de départ">
                 {config.strengths.map(item => <button key={item.id} type="button" aria-pressed={settings.strength === item.id}
                   title={{fidele: 'Retouche légère : l’image change peu', equilibre: 'L’image change nettement, sa composition reste', libre: 'Redessinée librement, en gardant la composition'}[item.id] ?? ''}
                   onClick={() => change({strength: item.id})}>{item.name}</button>)}
-              </div>
+              </div>}
             </div>
             <button type="button" className="icon-button" id="studio-source-remove" aria-label="Ne plus partir de cette image" title="Ne plus partir de cette image" onClick={() => setSource(null)}><Icon name="close"/></button>
           </div>}
           <textarea id="studio-prompt" rows={3} maxLength={config.max_prompt} value={prompt}
-            placeholder={source ? 'Dites ce qui doit changer, par exemple : retire-lui son chapeau, ou : en aquarelle…' : 'Décrivez l’image à créer…'} aria-label="Description de l’image"
+            placeholder={!source ? 'Décrivez l’image à créer…' : retouch ? 'Dites ce qui doit changer, par exemple : retire-lui son chapeau…' : 'Dites ce que devient l’image, par exemple : en aquarelle…'} aria-label="Description de l’image"
             onChange={event => {setPrompt(event.target.value); if (!event.target.value.trim()) setBeforeImprove(null);}}
             onKeyDown={event => {if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {event.preventDefault(); event.currentTarget.form?.requestSubmit();}}}/>
           <div className="studio-actions">
@@ -312,13 +322,13 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
             {!settings.improve && <button type="button" id="studio-improve-now" className="studio-secondary" disabled={disabled || busy || improving || !prompt.trim()} onClick={() => {void improveNow();}}>
               <Icon name="news"/>{improving ? 'Amélioration…' : 'Améliorer'}</button>}
             {busy && <button type="button" className="studio-secondary" onClick={() => running.current?.abort()}>Arrêter</button>}
-            <button type="submit" id="studio-create" className="auth-submit" disabled={disabled || busy || improving || !prompt.trim()} title="Ctrl / Cmd + Entrée">{source ? 'Transformer' : 'Créer'}</button>
+            <button type="submit" id="studio-create" className="auth-submit" disabled={disabled || busy || improving || !prompt.trim()} title="Ctrl / Cmd + Entrée">{!source ? 'Créer' : retouch ? 'Retoucher' : 'Transformer'}</button>
           </div>
         </form>
         {disabled && <p className="studio-error" role="alert">La création d’images n’est pas configurée sur ce site.</p>}
         {error && <p className="studio-error" role="alert">{error}</p>}
         {improved && <div className="studio-improved" id="studio-improved">
-          <span>Description améliorée par Qwen</span><p>{improved}</p>
+          <span>{retouch ? 'Consigne écrite par Qwen' : 'Description améliorée par Qwen'}</span><p>{improved}</p>
           <button type="button" className="studio-link" onClick={() => {setPrompt(improved); setImproved(null);}}>La reprendre pour la retoucher</button>
         </div>}
 

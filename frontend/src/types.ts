@@ -30,11 +30,12 @@ export interface LibraryItem {
  * `sent`: the prompt the image model received (improved, with the style). */
 export interface Generation {
   prompt: string; improved?: string | null; sent: string; style: string; style_name?: string; size: string; seed: number; seconds: number;
-  /** "Image → image": the starting image (perhaps deleted since) and how much of it was redrawn. */
-  source?: string; strength?: Strength;
+  /** "Image → image": the starting image (perhaps deleted since), and how much of it was redrawn
+   * ("Transformer") or `retouch` ("Retoucher": only what was asked changed). */
+  source?: string; strength?: Strength; retouch?: boolean;
 }
 /** Asks one image of the Images tab; `source` and `strength` for "Image → image". */
-export interface CreateBody { prompt: string; style: string; size: string; improved?: string | null; source?: string; strength?: string }
+export interface CreateBody { prompt: string; style: string; size: string; improved?: string | null; source?: string; strength?: string; retouch?: boolean }
 /** How much of the starting image is redrawn: Fidèle, Équilibré, Libre. */
 export interface Strength { id: string; name: string; value: number }
 export interface CreationStyle { id: string; name: string; words: string }
