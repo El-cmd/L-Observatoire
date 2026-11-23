@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-23-images-telephone', date: '2026-11-23', level: 'improvement', title: 'L’onglet Images plus simple sur téléphone',
+    text: 'Sur téléphone, la zone où décrire l’image est tout en haut. Le style, le format, le nombre d’images et l’amélioration de la description sont rangés juste en dessous, dans « Paramètres avancés » : touchez-le pour les ouvrir. Le résumé des réglages choisis reste visible sous ce titre.'},
   {id: '2026-11-23-titre-en-haut', date: '2026-11-23', level: 'improvement', title: 'Le titre de la page reste en haut',
     text: 'Dans l’onglet Images et la bibliothèque, le titre de la page est tout en haut et y reste quand vous faites défiler. Dans la bibliothèque, la place utilisée s’affiche à côté, à droite.'},
   {id: '2026-11-23-pages-epurees', date: '2026-11-23', level: 'improvement', title: 'Images et bibliothèque épurées',

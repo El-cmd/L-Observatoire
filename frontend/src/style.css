@@ -361,5 +361,17 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .studio-waiting .icon-button{position:absolute;top:6px;right:6px;width:26px;height:26px;padding:5px}
 @keyframes studio-wave{to{background-position:-150% 0}}
 @media(prefers-reduced-motion:reduce){.studio-waiting{animation:none}}
-@media(max-width:900px){.studio-body{flex-direction:column}.studio-settings{position:static;width:100%}}
+.studio-advanced{display:none}
+@media(max-width:900px){
+  .studio-body{flex-direction:column;gap:12px}.studio-settings{position:static;width:100%}
+  /* Phone and narrow windows: the description first, then the settings folded under "Paramètres avancés". */
+  .studio-main{display:contents}.studio-main>*{order:4;width:100%}.studio-main>.studio-prompt{order:1}
+  .studio-advanced{order:2;display:flex;align-items:center;gap:11px;width:100%;padding:11px 13px;background:#141414;border:1px solid #2e2e2e;border-radius:12px;text-align:left;font-size:14px;font-weight:600;color:#ddd}
+  .studio-advanced>svg{width:18px;height:18px;flex:none;color:#aaa}.studio-advanced>svg:last-child{transition:transform .15s}
+  .studio-advanced[aria-expanded=true]>svg:last-child{transform:rotate(180deg)}
+  .studio-advanced span{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+  .studio-advanced small{font-size:12px;font-weight:400;color:#999;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .studio-settings{order:3}.studio-settings:not(.open){display:none}
+  .studio-grid{margin-top:10px}
+}
 @media(max-width:760px){.studio{padding:4px 14px 20px}.studio-grid{grid-template-columns:repeat(2,1fr);gap:10px}.studio-item-actions{opacity:1}}

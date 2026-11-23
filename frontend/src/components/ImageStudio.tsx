@@ -56,6 +56,8 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   const [menu, setMenu] = useState<'style' | 'count' | null>(null);
   const [editing, setEditing] = useState<{style: MyStyle | null} | null>(null);
   const [making, setMaking] = useState<ReadonlySet<string>>(new Set());
+  // Phone: the settings fold under the description (always shown on a computer).
+  const [advanced, setAdvanced] = useState(false);
   const running = useRef<AbortController | null>(null);
   const menus = useRef<HTMLDivElement>(null);
 
@@ -195,7 +197,10 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   const disabled = !config.configured;
   return <section className="studio" id="studio" aria-label="Images">
     <div className="studio-body">
-      <div className="studio-settings" ref={menus}>
+      <button type="button" id="studio-advanced" className="studio-advanced" aria-expanded={advanced} aria-controls="studio-settings" onClick={() => setAdvanced(value => !value)}>
+        <Icon name="settings"/><span>Paramètres avancés<small>{style.name} · {settings.format === 'custom' ? times(settings.size) : settings.format} · {settings.count} image{settings.count > 1 ? 's' : ''}</small></span><Icon name="chevron"/>
+      </button>
+      <div className={`studio-settings${advanced ? ' open' : ''}`} id="studio-settings" ref={menus}>
         <div className="studio-style">
           <button type="button" id="studio-style" className="studio-style-button" aria-haspopup="listbox" aria-expanded={menu === 'style'} onClick={() => setMenu(value => value === 'style' ? null : 'style')}>
             {preview(style)}<span><small>Style</small>{style.name}</span><Icon name="chevron"/>
