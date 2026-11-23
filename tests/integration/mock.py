@@ -58,6 +58,12 @@ class Mock(BaseHTTPRequestHandler):
                 return
             width, height = (int(v) for v in fields['size'].split('x'))
             color = b'\x10\x10\xc0' if retouch else b'\x10\xc0\x10'
+            if 'mask' in files:
+                # A painted zone: a PNG mask, only with "Retoucher". The new image is purple.
+                if not retouch or files['mask'] != ('image/png', files['mask'][1]) or not files['mask'][1].startswith(b'\x89PNG'):
+                    self.send_error(500, 'Private upstream detail: integration-test-key')
+                    return
+                color = b'\x90\x10\xc0'
             self.send_json({'created': 1, 'data': [{'b64_json': base64.b64encode(png(width, height, color)).decode()}]})
             return
         body = json.loads(raw)

@@ -356,6 +356,19 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .studio-strengths button[aria-pressed=true]{border-color:#ddd;background:#2a2a2a;color:#fff}
 .studio-source>.icon-button{align-self:flex-start}
 .studio-source-pick{display:inline-flex;align-items:center;gap:6px;text-decoration:none}.studio-source-pick svg{width:15px;height:15px}
+.studio-source-image{position:relative}.studio-source-image .studio-source-zone{position:absolute;inset:0;opacity:.6;object-fit:fill}
+.studio-zone{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+/* Painting the zone to retouch: the image, the strokes over it, at the image's proportions. */
+.mask-painter{width:min(900px,calc(100vw - 24px));max-height:calc(100dvh - 24px);background:#202020;border:1px solid #414141;border-radius:16px;color:#eee;padding:20px;overflow:auto}
+.mask-painter::backdrop{background:#000c}
+.mask-painter-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.mask-painter-head h2{margin:0;font-size:19px}
+.mask-painter-tools{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:4px 0 12px}
+.mask-painter-tools .studio-strengths button{display:inline-flex;align-items:center;gap:6px}
+.mask-dot{display:inline-block;border-radius:50%;background:#ff6b6b}
+.mask-painter-stage{position:relative;margin:0 auto;border-radius:10px;overflow:hidden;background:#111}
+.mask-painter-stage img,.mask-painter-stage canvas{position:absolute;inset:0;width:100%;height:100%;user-select:none}
+.mask-painter-stage img{object-fit:fill;pointer-events:none}
+.mask-painter-stage canvas{opacity:.55;cursor:crosshair;touch-action:none}.mask-painter-stage canvas.erasing{cursor:cell}
 .source-picker{width:min(640px,calc(100vw - 32px))}
 .source-picker-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.source-picker-head h2{margin:0}
 .source-picker h3{margin:4px 0 10px;font-size:14px;font-weight:600;color:#ddd}

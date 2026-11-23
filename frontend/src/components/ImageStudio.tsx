@@ -5,6 +5,7 @@ import {errorMessage} from '../lib/api';
 import {Icon} from './Icon';
 import {StyleDialog, type StyleApi} from './StyleDialog';
 import {SourcePicker} from './SourcePicker';
+import {MaskPainter, type Zone} from './MaskPainter';
 
 /** Settings kept in the browser, per account. */
 /** `edit`: what to do with a starting image, "retouche" (only what is asked changes) or "transformer" (redrawn with `strength`). */
@@ -74,6 +75,9 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   // "Image → image": the starting image, retouched by an instruction or redrawn with a strength.
   const [source, setSource] = useState<AttachmentRef | null>(null);
   const [picking, setPicking] = useState(false);
+  // "Retoucher" a painted zone only (forgotten when the starting image changes).
+  const [zone, setZone] = useState<Zone | null>(null);
+  const [painting, setPainting] = useState(false);
   const running = useRef<AbortController | null>(null);
   const menus = useRef<HTMLDivElement>(null);
 
@@ -134,6 +138,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   const retouch = source !== null && settings?.edit === 'retouche';
   // The starting image deleted from the library: back to creating from the description alone.
   useEffect(() => {if (source && removed.has(source.id)) setSource(null);}, [removed, source]);
+  useEffect(() => setZone(null), [source?.id]);
 
   function startFrom(image: AttachmentRef) {
     setSource(image);
@@ -167,7 +172,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     const controller = new AbortController(); running.current = controller;
     const batch = Date.now().toString(36);
     const count = settings.count, size = settings.size;
-    const start = source ? {source: source.id, ...(retouch ? {retouch: true} : {strength: settings.strength})} : {};
+    const start = source ? {source: source.id, ...(retouch ? {retouch: true, ...(zone ? {mask: zone.mask} : {})} : {strength: settings.strength})} : {};
     setWaiting(Array.from({length: count}, (_, index) => ({key: `${batch}-${index}`, size, label: `Image ${index + 1} / ${count}`})));
     const label = (index: number, text: string) => setWaiting(list => list.map(item => item.key === `${batch}-${index}` ? {...item, label: text} : item));
     const started = performance.now();
@@ -293,7 +298,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
         <form className="studio-prompt" onSubmit={create}>
           {source && <div className="studio-source" id="studio-source">
             <button type="button" className="studio-source-image" aria-label="Changer l’image de départ" title="Changer l’image de départ" onClick={() => setPicking(true)}>
-              <img src={thumbnailURL(source.id)} alt=""/></button>
+              <img src={thumbnailURL(source.id)} alt=""/>{retouch && zone && <img className="studio-source-zone" src={zone.strokes} alt=""/>}</button>
             <div className="studio-source-text">
               <span>Image de départ <span className="studio-help" tabIndex={0} title={retouch
                 ? 'Retoucher : seul ce que vous demandez change (retirer un objet, changer une couleur, ajouter un détail…), tout le reste de l’image est gardé. Écrivez simplement le changement : Qwen regarde l’image et en fait une consigne précise, en anglais. « Améliorer » vous la montre d’abord.'
@@ -302,6 +307,11 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
                 <button type="button" id="studio-mode-retouch" aria-pressed={retouch} title="Seul ce que vous demandez change" onClick={() => change({edit: 'retouche'})}>Retoucher</button>
                 <button type="button" id="studio-mode-transform" aria-pressed={!retouch} title="Toute l’image est redessinée" onClick={() => change({edit: 'transformer'})}>Transformer</button>
               </div>
+              {retouch && <div className="studio-zone">
+                <button type="button" id="studio-paint" className="studio-link studio-source-pick" onClick={() => setPainting(true)}>
+                  <Icon name="edit"/>{zone ? 'Zone peinte : la modifier' : 'Peindre la zone à changer'}</button>
+                {zone && <button type="button" className="studio-link" id="studio-zone-remove" onClick={() => setZone(null)}>Toute l’image</button>}
+              </div>}
               {!retouch && <div className="studio-strengths" role="group" aria-label="Liberté prise avec l’image de départ">
                 {config.strengths.map(item => <button key={item.id} type="button" aria-pressed={settings.strength === item.id}
                   title={{fidele: 'Retouche légère : l’image change peu', equilibre: 'L’image change nettement, sa composition reste', libre: 'Redessinée librement, en gardant la composition'}[item.id] ?? ''}
@@ -357,6 +367,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     </div>
     <StyleDialog open={editing !== null} style={editing?.style ?? null} limits={{name: config.max_style_name, words: config.max_style_words}} api={styles}
       onSaved={saved} onDeleted={deleted} onClose={() => setEditing(null)}/>
+    <MaskPainter image={painting ? source : null} zone={zone} onDone={setZone} onClose={() => setPainting(false)}/>
     <SourcePicker open={picking} library={library} removed={removed} upload={async file => {const ref = await uploadImage(file); onLoad(); return ref;}}
       onChoose={startFrom} onClose={() => setPicking(false)}/>
   </section>;

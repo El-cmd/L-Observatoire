@@ -3,6 +3,7 @@
 Only this project's test volume is removed. No access to the application's .env.
 """
 from http.cookiejar import CookieJar
+import base64
 import json
 import os
 from pathlib import Path
@@ -436,6 +437,14 @@ class Integration(unittest.TestCase):
         self.assertEqual((generation['source'], generation['retouch'], generation['style'], generation['sent']), (start['id'], True, 'aucun', instruction['prompt']))
         self.assertNotIn('strength', generation)
         self.assertNotIn(read(retouched['id']), (read(item['id']), read(plain['id'])))
+        # "Retoucher" a painted zone: the mask goes with the image (purple in the mock); only with "Retoucher".
+        zone = 'data:image/png;base64,' + base64.b64encode(png(40, 30)).decode()
+        code, painted, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'en bleu', 'size': '1152x896', 'source': start['id'], 'retouch': True, 'mask': zone})
+        self.assertEqual(code, 201, painted)
+        self.assertEqual((painted['generation']['retouch'], painted['generation']['zone']), (True, True))
+        self.assertNotIn(read(painted['id']), (read(retouched['id']), read(item['id'])))
+        for body in ({'retouch': True, 'mask': 'pas une image'}, {'retouch': True, 'mask': base64.b64encode(b'GIF89a').decode()}, {'mask': zone}):
+            self.assertEqual(self.alice.call('/api/creation', 'POST', {'prompt': 'x', 'size': '1024x1024', 'source': start['id'], **body})[0], 400, body)
         # Without a starting image, "retouch" means nothing: an ordinary image.
         code, alone, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'une pomme', 'style': 'aucun', 'size': '768x768', 'retouch': True})
         self.assertEqual((code, 'retouch' in alone['generation'], 'source' in alone['generation']), (201, False, False))

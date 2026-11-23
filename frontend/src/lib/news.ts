@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-23-zone-peinte', date: '2026-11-23', level: 'major', title: 'Peindre la zone à retoucher',
+    text: 'En mode « Retoucher », touchez « Peindre la zone à changer » : peignez sur l’image, au doigt ou à la souris, ce qui doit changer (pinceau en trois tailles, gomme, défaire), puis validez. Seule cette zone est redessinée selon votre demande ; le reste de l’image ne bouge pas, au pixel près. Pratique pour changer un seul objet quand l’image en contient plusieurs semblables.'},
   {id: '2026-11-23-retoucher', date: '2026-11-23', level: 'major', title: 'Retoucher une image : seul ce que vous demandez change',
     text: 'Dans l’onglet Images, partez d’une image puis choisissez « Retoucher » (choisi d’office) : écrivez simplement le changement, par exemple « retire-lui son chapeau » ou « mets sa voiture en rouge », et touchez Retoucher. Le reste de l’image (visage, pose, vêtements, décor) est gardé tel quel. « Transformer » redessine toute l’image, pour changer de style par exemple, avec Fidèle, Équilibré ou Libre.'},
   {id: '2026-11-23-image-vers-image-auto', date: '2026-11-23', level: 'improvement', title: 'Image à partir d’une autre : plus besoin d’améliorer',

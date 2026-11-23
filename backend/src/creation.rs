@@ -169,6 +169,21 @@ pub struct Request {
     /// strength, no style words).
     #[serde(default)]
     retouch: bool,
+    /// "Retoucher" a painted zone only: PNG mask in base64, white where the image may change.
+    #[serde(default)]
+    mask: Option<String>,
+}
+
+/// Largest mask accepted (a black and white PNG of the image's size weighs a few dozen Ko).
+const MAX_MASK_BYTES: usize = 2 * 1024 * 1024;
+
+fn mask(text: &str) -> Result<Vec<u8>, Error> {
+    let bad = || Error::bad("La zone peinte est illisible : peignez-la à nouveau.");
+    let text = text.strip_prefix("data:image/png;base64,").unwrap_or(text);
+    if text.len() > MAX_MASK_BYTES * 4 / 3 + 4 { return Err(Error::bad("La zone peinte est trop lourde.")); }
+    let data = STANDARD.decode(text).map_err(|_| bad())?;
+    if !data.starts_with(b"\x89PNG\r\n\x1a\n") { return Err(bad()); }
+    Ok(data)
 }
 
 /// Image of the user's library used as a starting point.
@@ -192,18 +207,21 @@ fn strength(id: Option<&str>) -> Result<&'static (&'static str, &'static str, f6
     STRENGTHS.iter().find(|s| s.0 == id).ok_or_else(|| Error::bad("Force inconnue."))
 }
 
-/// Multipart form of `/images/edits` (an image and text fields), written by hand: reqwest is built
-/// without its multipart feature.
-fn multipart(fields: &[(&str, String)], image: &[u8], mime: &str) -> (String, Vec<u8>) {
+/// Multipart form of `/images/edits` (text fields, then files: the image and perhaps its mask),
+/// written by hand: reqwest is built without its multipart feature.
+fn multipart(fields: &[(&str, String)], files: &[(&str, &[u8], &str)]) -> (String, Vec<u8>) {
     let boundary = format!("observatoire-{}", Uuid::new_v4().simple());
-    let mut body = Vec::with_capacity(image.len() + 4096);
+    let mut body = Vec::with_capacity(files.iter().map(|f| f.1.len()).sum::<usize>() + 4096);
     for (name, value) in fields {
         body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n").as_bytes());
     }
-    let extension = if mime == "image/png" { "png" } else { "jpg" };
-    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"image.{extension}\"\r\nContent-Type: {mime}\r\n\r\n").as_bytes());
-    body.extend_from_slice(image);
-    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    for (name, data, mime) in files {
+        let extension = if *mime == "image/png" { "png" } else { "jpg" };
+        body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{name}.{extension}\"\r\nContent-Type: {mime}\r\n\r\n").as_bytes());
+        body.extend_from_slice(data);
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
     (format!("multipart/form-data; boundary={boundary}"), body)
 }
 
@@ -216,8 +234,9 @@ fn image_name(prompt: &str, mime: &str) -> String {
 
 /// One image from the image model (one at a time per API, see `App::images`): created from the
 /// prompt, redrawn from a starting image with a strength ("Transformer"), or edited by an
-/// instruction without strength ("Retoucher": the image service's reference mode).
-async fn generate(app: &App, prompt: &str, size: &str, seed: u32, start: Option<(&Source, Option<f64>)>) -> Result<Vec<u8>, Error> {
+/// instruction without strength ("Retoucher": the image service's reference mode), perhaps in a
+/// painted zone only (`mask`: the rest of the image is kept to the pixel).
+async fn generate(app: &App, prompt: &str, size: &str, seed: u32, start: Option<(&Source, Option<f64>)>, mask: Option<&[u8]>) -> Result<Vec<u8>, Error> {
     let busy = || Error(StatusCode::SERVICE_UNAVAILABLE, "Le service d’images est occupé ou indisponible. Réessayez dans un instant.".into());
     let _turn = app.images.acquire().await.map_err(|_| busy())?;
     let request = match start {
@@ -227,7 +246,9 @@ async fn generate(app: &App, prompt: &str, size: &str, seed: u32, start: Option<
             let mut fields = vec![("model", app.config.image_model.clone()), ("prompt", prompt.to_string()), ("n", "1".into()), ("size", size.to_string()),
                                   ("seed", seed.to_string()), ("response_format", "b64_json".into())];
             if let Some(strength) = strength { fields.push(("strength", strength.to_string())); }
-            let (content_type, body) = multipart(&fields, &source.data, &source.mime);
+            let mut files = vec![("image", source.data.as_slice(), source.mime.as_str())];
+            if let Some(mask) = mask { files.push(("mask", mask, "image/png")); }
+            let (content_type, body) = multipart(&fields, &files);
             app.http.post(format!("{}/images/edits", app.config.api_url)).header("Content-Type", content_type).body(body)
         }
     };
@@ -252,6 +273,11 @@ pub async fn create(State(app): State<App>, headers: HeaderMap, Json(request): J
     let improved = request.improved.as_deref().map(str::trim).filter(|s| !s.is_empty());
     if let Some(text) = improved { check_prompt(text)?; }
     let retouch = request.retouch && request.source.is_some();
+    let zone = match request.mask.as_deref() {
+        Some(text) if retouch => Some(mask(text)?),
+        Some(_) => return Err(Error::bad("La zone peinte ne sert qu’à « Retoucher ».")),
+        None => None,
+    };
     // A retouch keeps the look of the image: no style words, which would restyle it.
     let style = if retouch { chosen(&app, user.user_id, "aucun").await? } else { chosen(&app, user.user_id, request.style.as_deref().unwrap_or(DEFAULT_STYLE)).await? };
     if !sizes(&app).contains(&request.size) { return Err(Error::bad("Taille d’image non prise en charge.")); }
@@ -266,7 +292,7 @@ pub async fn create(State(app): State<App>, headers: HeaderMap, Json(request): J
     let sent = compose(improved.unwrap_or(&request.prompt), &style.words);
     let seed: u32 = rand::thread_rng().gen_range(0..i32::MAX as u32);
     let started = Instant::now();
-    let data = generate(&app, &sent, &request.size, seed, start.as_ref().map(|(source, strength)| (source, strength.map(|s| s.2)))).await?;
+    let data = generate(&app, &sent, &request.size, seed, start.as_ref().map(|(source, strength)| (source, strength.map(|s| s.2))), zone.as_deref()).await?;
     let clean = attachments::sanitize(&app, Bytes::from(data)).await?;
     // prompt: the user's idea; improved: Qwen's rewriting, if any; sent: what the image model received.
     // source: the starting image (it may be deleted later); strength: how much was redrawn ("Transformer"),
@@ -277,7 +303,7 @@ pub async fn create(State(app): State<App>, headers: HeaderMap, Json(request): J
         generation["source"] = json!(source.id);
         match strength {
             Some((id, name, value)) => generation["strength"] = json!({"id": id, "name": name, "value": value}),
-            None => generation["retouch"] = json!(true),
+            None => { generation["retouch"] = json!(true); if zone.is_some() { generation["zone"] = json!(true); } }
         }
     }
     let id = attachments::store_image(&app, user.user_id, &clean, &image_name(&request.prompt, &clean.mime), Some(generation)).await?;
@@ -500,7 +526,7 @@ pub async fn make_example(State(app): State<App>, headers: HeaderMap, Path(id): 
         Some(answer) => example_scene(&answer),
         None => None,
     };
-    let data = generate(&app, &compose(scene.as_deref().unwrap_or(EXAMPLE_SUBJECT), &words), &size, EXAMPLE_SEED, None).await?;
+    let data = generate(&app, &compose(scene.as_deref().unwrap_or(EXAMPLE_SUBJECT), &words), &size, EXAMPLE_SEED, None, None).await?;
     let clean = attachments::sanitize(&app, Bytes::from(data)).await?;
     let row: Option<StyleRow> = sqlx::query_as(&format!(
         "UPDATE image_styles SET example=$4,updated_at=now() WHERE id=$1 AND user_id=$2 AND words=$3 RETURNING {STYLE_COLUMNS}"))
@@ -579,12 +605,13 @@ mod tests {
     }
     #[test]
     fn edits_are_sent_as_a_multipart_form() {
-        let (content_type, body) = multipart(&[("prompt", "une pomme".into()), ("strength", 0.625.to_string())], b"\x89PNG", "image/png");
+        let (content_type, body) = multipart(&[("prompt", "une pomme".into()), ("strength", 0.625.to_string())], &[("image", b"\x89PNG", "image/png"), ("mask", b"\x89PNG", "image/png")]);
         let boundary = content_type.strip_prefix("multipart/form-data; boundary=").unwrap();
         let text = String::from_utf8_lossy(&body);
         assert!(text.starts_with(&format!("--{boundary}\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\nune pomme\r\n")));
         assert!(text.contains("name=\"strength\"\r\n\r\n0.625\r\n"));
         assert!(text.contains("name=\"image\"; filename=\"image.png\"\r\nContent-Type: image/png\r\n\r\n\u{fffd}PNG\r\n"));
+        assert!(text.contains("name=\"mask\"; filename=\"mask.png\"\r\nContent-Type: image/png\r\n\r\n\u{fffd}PNG\r\n"));
         assert!(text.ends_with(&format!("--{boundary}--\r\n")));
     }
     #[test]
