@@ -43,7 +43,7 @@ export function ImageViewer({image, loadInfo, onClose}: {image: AttachmentRef | 
     ['sent', 'Envoyée au modèle d’images', generation.sent],
   ] : [];
   const details: [string, string][] = info ? [
-    ...(generation ? [['Style', generation.style_name ?? generation.style],
+    ...(generation ? [['Style', generation.style_name ?? generation.style], ...(generation.quality ? [['Qualité', generation.quality.name]] : []),
       ...(generation.strength ? [['Image de départ', `Transformée · ${generation.strength.name} (${generation.strength.value.toLocaleString('fr-FR')})`]] : []),
       ...(generation.retouch ? [['Image de départ', generation.zone ? 'Retouchée dans la zone peinte' : 'Retouchée : seul le changement demandé']] : []),
       ['Graine', String(generation.seed)], ['Durée de création', `${generation.seconds} s`]] as [string, string][] : []),

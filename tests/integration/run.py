@@ -395,6 +395,13 @@ class Integration(unittest.TestCase):
         self.assertTrue(self.alice.opener.open(ORIGIN + '/api/attachments/' + item['id'] + '/thumbnail', timeout=20).read().startswith(b'\xff\xd8'))
         self.assertEqual(self.bob.call('/api/attachments/' + item['id'])[0], 404)
         self.assertNotIn(item['id'], [i['id'] for i in self.bob.call('/api/attachments')[1]['items']])
+        # Quality: HD ×1.5, Très HD up to 2048 px; a starting image keeps its size.
+        self.assertEqual(([q['id'] for q in config['qualities']], config['default_quality']), (['standard', 'hd', 'tres-hd'], 'standard'))
+        for quality, size, expected in (('hd', '1024x1024', (1536, 1536)), ('tres-hd', '1376x768', (2048, 1152))):
+            code, made, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'un phare ' + quality, 'style': 'aucun', 'size': size, 'quality': quality})
+            self.assertEqual(code, 201, made)
+            self.assertEqual(((made['width'], made['height']), made['generation']['quality']['id'], made['generation']['size']), (expected, quality, size))
+        self.assertEqual(self.alice.call('/api/creation', 'POST', {'prompt': 'x', 'size': '1024x1024', 'quality': 'uhd'})[0], 400)
         # Sent images have no generation; refusals come before any call to the image model.
         code, sent = upload(self.alice, png(41, 31))
         self.assertEqual(code, 201, sent)
@@ -431,11 +438,12 @@ class Integration(unittest.TestCase):
         code, instruction, _ = self.alice.call('/api/creation/improve', 'POST', {'prompt': 'mets le carré en bleu', 'style': 'aquarelle', 'source': start['id'], 'retouch': True})
         self.assertEqual((code, instruction), (200, {'prompt': 'Make the square blue. Keep everything else exactly the same: the size and the framing.'}))
         code, retouched, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'mets le carré en bleu', 'style': 'aquarelle', 'size': '1152x896', 'improved': instruction['prompt'],
-                                                                      'source': start['id'], 'strength': 'libre', 'retouch': True})
+                                                                      'source': start['id'], 'strength': 'libre', 'retouch': True, 'quality': 'tres-hd'})
         self.assertEqual(code, 201, retouched)
         generation = retouched['generation']
         self.assertEqual((generation['source'], generation['retouch'], generation['style'], generation['sent']), (start['id'], True, 'aucun', instruction['prompt']))
-        self.assertNotIn('strength', generation)
+        self.assertNotIn('strength', generation); self.assertNotIn('quality', generation)
+        self.assertEqual((retouched['width'], retouched['height']), (1152, 896))
         self.assertNotIn(read(retouched['id']), (read(item['id']), read(plain['id'])))
         # "Retoucher" a painted zone: the mask goes with the image (purple in the mock); only with "Retoucher".
         zone = 'data:image/png;base64,' + base64.b64encode(png(40, 30)).decode()

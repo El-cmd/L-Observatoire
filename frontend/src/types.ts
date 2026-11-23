@@ -33,9 +33,11 @@ export interface Generation {
   /** "Image → image": the starting image (perhaps deleted since), and how much of it was redrawn
    * ("Transformer") or `retouch` ("Retoucher": only what was asked changed). */
   source?: string; strength?: Strength; retouch?: boolean; zone?: boolean;
+  /** HD or Très HD (absent: Standard). */
+  quality?: {id: string; name: string};
 }
 /** Asks one image of the Images tab; `source` and `strength` for "Image → image". */
-export interface CreateBody { prompt: string; style: string; size: string; improved?: string | null; source?: string; strength?: string; retouch?: boolean; mask?: string }
+export interface CreateBody { prompt: string; style: string; size: string; improved?: string | null; source?: string; strength?: string; retouch?: boolean; mask?: string; quality?: string }
 /** How much of the starting image is redrawn: Fidèle, Équilibré, Libre. */
 export interface Strength { id: string; name: string; value: number }
 export interface CreationStyle { id: string; name: string; words: string }
@@ -46,6 +48,7 @@ export interface CreationConfig {
   sizes: string[]; default_size: string; max_count: number; max_prompt: number;
   my_styles: MyStyle[]; max_styles: number; max_style_name: number; max_style_words: number;
   strengths: Strength[]; default_strength: string;
+  qualities: {id: string; name: string}[]; default_quality: string;
 }
 export interface Library { items: LibraryItem[]; used_bytes: number; quota_bytes: number }
 /** A file chosen for the next message: uploading, being read (documents), ready (in the library) or refused. */

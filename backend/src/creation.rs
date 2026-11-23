@@ -22,6 +22,16 @@ pub const DEFAULT_SIZES: &str = "1024x1024,1152x896,896x1152,1344x768,768x1344,7
 /// strength acts by eighths: 0.625 retouches, 0.75 transforms, 0.875 redraws and keeps the layout.
 pub const STRENGTHS: &[(&str, &str, f64)] = &[("fidele", "Fidèle", 0.625), ("equilibre", "Équilibré", 0.75), ("libre", "Libre", 0.875)];
 const DEFAULT_STRENGTH: &str = "equilibre";
+
+/// Quality of a created image: HD and Très HD ask the image service for a second, high-definition pass
+/// (`quality` hd ×1.5, uhd ×2, at most 2 048 px on the longest side), sent back as JPEG to stay light.
+pub const QUALITIES: &[(&str, &str, Option<&str>)] = &[("standard", "Standard", None), ("hd", "HD", Some("hd")), ("tres-hd", "Très HD", Some("uhd"))];
+const DEFAULT_QUALITY: &str = "standard";
+
+fn quality(id: Option<&str>) -> Result<&'static (&'static str, &'static str, Option<&'static str>), Error> {
+    let id = id.unwrap_or(DEFAULT_QUALITY);
+    QUALITIES.iter().find(|q| q.0 == id).ok_or_else(|| Error::bad("Qualité inconnue."))
+}
 /// Largest starting image the image service takes.
 const MAX_SOURCE_BYTES: usize = 10 * 1024 * 1024;
 
@@ -131,6 +141,8 @@ pub async fn config(State(app): State<App>, headers: HeaderMap) -> Result<Json<V
         "max_prompt": MAX_PROMPT,
         "strengths": STRENGTHS.iter().map(|(id, name, value)| json!({"id": id, "name": name, "value": value})).collect::<Vec<_>>(),
         "default_strength": DEFAULT_STRENGTH,
+        "qualities": QUALITIES.iter().map(|(id, name, _)| json!({"id": id, "name": name})).collect::<Vec<_>>(),
+        "default_quality": DEFAULT_QUALITY,
     })))
 }
 
@@ -172,6 +184,9 @@ pub struct Request {
     /// "Retoucher" a painted zone only: PNG mask in base64, white where the image may change.
     #[serde(default)]
     mask: Option<String>,
+    /// Id of `QUALITIES`; a starting image keeps its size, so the quality applies to new images only.
+    #[serde(default)]
+    quality: Option<String>,
 }
 
 /// Largest mask accepted (a black and white PNG of the image's size weighs a few dozen Ko).
@@ -236,12 +251,15 @@ fn image_name(prompt: &str, mime: &str) -> String {
 /// prompt, redrawn from a starting image with a strength ("Transformer"), or edited by an
 /// instruction without strength ("Retoucher": the image service's reference mode), perhaps in a
 /// painted zone only (`mask`: the rest of the image is kept to the pixel).
-async fn generate(app: &App, prompt: &str, size: &str, seed: u32, start: Option<(&Source, Option<f64>)>, mask: Option<&[u8]>) -> Result<Vec<u8>, Error> {
+async fn generate(app: &App, prompt: &str, size: &str, seed: u32, start: Option<(&Source, Option<f64>)>, mask: Option<&[u8]>, hd: Option<&str>) -> Result<Vec<u8>, Error> {
     let busy = || Error(StatusCode::SERVICE_UNAVAILABLE, "Le service d’images est occupé ou indisponible. Réessayez dans un instant.".into());
     let _turn = app.images.acquire().await.map_err(|_| busy())?;
     let request = match start {
-        None => app.http.post(format!("{}/images/generations", app.config.api_url))
-            .json(&json!({"model": app.config.image_model, "prompt": prompt, "n": 1, "size": size, "seed": seed, "response_format": "b64_json"})),
+        None => {
+            let mut body = json!({"model": app.config.image_model, "prompt": prompt, "n": 1, "size": size, "seed": seed, "response_format": "b64_json"});
+            if let Some(hd) = hd { body["quality"] = json!(hd); body["output_format"] = json!("jpeg"); }
+            app.http.post(format!("{}/images/generations", app.config.api_url)).json(&body)
+        }
         Some((source, strength)) => {
             let mut fields = vec![("model", app.config.image_model.clone()), ("prompt", prompt.to_string()), ("n", "1".into()), ("size", size.to_string()),
                                   ("seed", seed.to_string()), ("response_format", "b64_json".into())];
@@ -285,6 +303,7 @@ pub async fn create(State(app): State<App>, headers: HeaderMap, Json(request): J
         Some(id) => Some((source(&app, user.user_id, id).await?, if retouch { None } else { Some(strength(request.strength.as_deref())?) })),
         None => None,
     };
+    let quality = if request.source.is_some() { quality(None)? } else { quality(request.quality.as_deref())? };
     // An image weighs up to ~3 Mo before image-guard re-encodes it.
     if attachments::used_bytes(&app, user.user_id).await? + 3 * 1024 * 1024 > attachments::QUOTA_BYTES {
         return Err(Error::bad(attachments::FULL));
@@ -292,13 +311,14 @@ pub async fn create(State(app): State<App>, headers: HeaderMap, Json(request): J
     let sent = compose(improved.unwrap_or(&request.prompt), &style.words);
     let seed: u32 = rand::thread_rng().gen_range(0..i32::MAX as u32);
     let started = Instant::now();
-    let data = generate(&app, &sent, &request.size, seed, start.as_ref().map(|(source, strength)| (source, strength.map(|s| s.2))), zone.as_deref()).await?;
+    let data = generate(&app, &sent, &request.size, seed, start.as_ref().map(|(source, strength)| (source, strength.map(|s| s.2))), zone.as_deref(), quality.2).await?;
     let clean = attachments::sanitize(&app, Bytes::from(data)).await?;
     // prompt: the user's idea; improved: Qwen's rewriting, if any; sent: what the image model received.
     // source: the starting image (it may be deleted later); strength: how much was redrawn ("Transformer"),
     // or retouch: edited by an instruction ("Retoucher").
     let mut generation = json!({"prompt": request.prompt.trim(), "improved": improved, "sent": sent, "style": style.id, "style_name": style.name, "size": request.size, "seed": seed,
                                 "seconds": (started.elapsed().as_secs_f64() * 10.0).round() / 10.0});
+    if quality.2.is_some() { generation["quality"] = json!({"id": quality.0, "name": quality.1}); }
     if let Some((source, strength)) = &start {
         generation["source"] = json!(source.id);
         match strength {
@@ -526,7 +546,7 @@ pub async fn make_example(State(app): State<App>, headers: HeaderMap, Path(id): 
         Some(answer) => example_scene(&answer),
         None => None,
     };
-    let data = generate(&app, &compose(scene.as_deref().unwrap_or(EXAMPLE_SUBJECT), &words), &size, EXAMPLE_SEED, None, None).await?;
+    let data = generate(&app, &compose(scene.as_deref().unwrap_or(EXAMPLE_SUBJECT), &words), &size, EXAMPLE_SEED, None, None, None).await?;
     let clean = attachments::sanitize(&app, Bytes::from(data)).await?;
     let row: Option<StyleRow> = sqlx::query_as(&format!(
         "UPDATE image_styles SET example=$4,updated_at=now() WHERE id=$1 AND user_id=$2 AND words=$3 RETURNING {STYLE_COLUMNS}"))
@@ -596,6 +616,13 @@ mod tests {
         let old = list("1024x1024,1152x896,896x1152,1344x768,768x1344,768x768,512x512");
         assert_eq!(closest(&old, 2.0 / 3.0).as_deref(), Some("896x1152"));
         assert_eq!(closest(&old, 16.0 / 9.0).as_deref(), Some("1344x768"));
+    }
+    #[test]
+    fn qualities_are_known_by_name() {
+        assert_eq!(quality(None).unwrap().2, None);
+        assert_eq!(quality(Some("hd")).unwrap().2, Some("hd"));
+        assert_eq!(quality(Some("tres-hd")).unwrap().2, Some("uhd"));
+        assert!(quality(Some("uhd")).is_err());
     }
     #[test]
     fn strengths_are_known_by_name() {

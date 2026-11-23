@@ -319,7 +319,7 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .studio-formats button[aria-pressed=true],.studio-counts button[aria-pressed=true],.studio-sizes button[aria-pressed=true]{border-color:#ddd;background:#262626;color:#fff}
 .studio-sizes{display:flex;flex-wrap:wrap;gap:6px}.studio-sizes button{padding:6px 9px;font-size:12px}
 .studio-size{padding:6px 9px;border:1px solid #444;border-radius:8px;font-size:12px;color:#ccc}
-.studio-counts{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}.studio-counts button{height:40px;font-size:15px}
+.studio-counts{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}.studio-qualities{grid-template-columns:repeat(3,1fr)}.studio-qualities button{font-size:13.5px;font-weight:600}.studio-qualities button:disabled{opacity:.45}.studio-counts button{height:40px;font-size:15px}
 .studio-more{position:relative}.studio-more>button{width:100%;display:flex;align-items:center;justify-content:center;gap:2px}
 .studio-more ul{position:absolute;z-index:20;right:0;top:calc(100% + 5px);width:120px;margin:0;padding:5px;list-style:none;background:#141414;border:1px solid #2e2e2e;border-radius:10px;box-shadow:0 12px 30px #000c}
 .studio-more li button{width:100%;padding:8px 10px;border:0;border-radius:7px;background:none;text-align:left;font-size:13px}.studio-more li button:hover{background:#262626}

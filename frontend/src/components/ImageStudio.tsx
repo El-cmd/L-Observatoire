@@ -9,7 +9,7 @@ import {MaskPainter, type Zone} from './MaskPainter';
 
 /** Settings kept in the browser, per account. */
 /** `edit`: what to do with a starting image, "retouche" (only what is asked changes) or "transformer" (redrawn with `strength`). */
-interface Settings { style: string; format: string; size: string; count: number; improve: boolean; strength: string; edit: 'retouche' | 'transformer' }
+interface Settings { style: string; format: string; size: string; count: number; improve: boolean; strength: string; edit: 'retouche' | 'transformer'; quality: string }
 type Waiting = {key: string; size: string; label: string; error?: string};
 
 /** Example of a style: a file for the built-in ones, created by the image model for "Mes styles". */
@@ -19,6 +19,16 @@ function example(style: CreationStyle | MyStyle): string | null {
 }
 const allStyles = (config: CreationConfig): (CreationStyle | MyStyle)[] => [...config.styles, ...config.my_styles];
 const times = (size: string) => size.replace('x', '×');
+
+/** Size of an image created in HD (×1.5) or Très HD (×2), at most 2 048 px on the longest side: the
+ * image service's own rule, to show it before creating. */
+function finalSize(size: string, quality: string): string {
+  const [width, height] = size.split('x').map(Number);
+  const scale = Math.min({hd: 1.5, 'tres-hd': 2}[quality] ?? 1, 2048 / Math.max(width, height));
+  if (scale <= 1) return size;
+  const w = Math.min(2048, Math.round(width * scale / 32) * 32);
+  return `${w}x${Math.min(2048, Math.round(w * height / width / 32) * 32)}`;
+}
 
 /** Allowed size closest to the proportions of an image (the largest on a tie): the starting image is
  * cropped as little as possible. */
@@ -30,7 +40,7 @@ function sizeFor(config: CreationConfig, width: number, height: number): string 
 
 function defaults(config: CreationConfig): Settings {
   const square = config.formats.find(format => format.name === '1:1');
-  return {style: config.default_style, format: square ? '1:1' : 'custom', size: square?.size ?? config.default_size, count: 1, improve: false, strength: config.default_strength, edit: 'retouche'};
+  return {style: config.default_style, format: square ? '1:1' : 'custom', size: square?.size ?? config.default_size, count: 1, improve: false, strength: config.default_strength, edit: 'retouche', quality: config.default_quality};
 }
 
 function restore(config: CreationConfig, saved: Partial<Settings> | null): Settings {
@@ -43,6 +53,7 @@ function restore(config: CreationConfig, saved: Partial<Settings> | null): Setti
   value.improve = value.improve === true;
   if (!config.strengths.some(strength => strength.id === value.strength)) value.strength = config.default_strength;
   if (value.edit !== 'transformer') value.edit = 'retouche';
+  if (!config.qualities.some(quality => quality.id === value.quality)) value.quality = config.default_quality;
   return value;
 }
 
@@ -172,8 +183,10 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     const controller = new AbortController(); running.current = controller;
     const batch = Date.now().toString(36);
     const count = settings.count, size = settings.size;
-    const start = source ? {source: source.id, ...(retouch ? {retouch: true, ...(zone ? {mask: zone.mask} : {})} : {strength: settings.strength})} : {};
-    setWaiting(Array.from({length: count}, (_, index) => ({key: `${batch}-${index}`, size, label: `Image ${index + 1} / ${count}`})));
+    const start = source ? {source: source.id, ...(retouch ? {retouch: true, ...(zone ? {mask: zone.mask} : {})} : {strength: settings.strength})} : {quality: settings.quality};
+    // The tiles that wait have the proportions of the image to come (HD changes the size, a starting image keeps its own).
+    const shown = source ? size : finalSize(size, settings.quality);
+    setWaiting(Array.from({length: count}, (_, index) => ({key: `${batch}-${index}`, size: shown, label: `Image ${index + 1} / ${count}`})));
     const label = (index: number, text: string) => setWaiting(list => list.map(item => item.key === `${batch}-${index}` ? {...item, label: text} : item));
     const started = performance.now();
     let done = 0;
@@ -216,7 +229,8 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     change({style: allStyles(config).some(style => style.id === item.generation!.style) ? item.generation.style : config.default_style,
       ...(config.sizes.includes(item.generation.size) ? {size: item.generation.size, format: format ? format.name : 'custom'} : {}), count: 1,
       ...(item.generation.strength && config.strengths.some(value => value.id === item.generation!.strength!.id) ? {strength: item.generation.strength.id, edit: 'transformer' as const} : {}),
-      ...(item.generation.retouch ? {edit: 'retouche' as const} : {})});
+      ...(item.generation.retouch ? {edit: 'retouche' as const} : {}),
+      ...(!item.generation.source ? {quality: item.generation.quality && config.qualities.some(value => value.id === item.generation!.quality!.id) ? item.generation.quality.id : config.default_quality} : {})});
     // The same starting image, if it is still in the library.
     const start = item.generation.source ? library?.items.find(value => value.id === item.generation!.source && !removed.has(value.id)) : undefined;
     setSource(start ? toRef(start) : null);
@@ -239,7 +253,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   return <section className="studio" id="studio" aria-label="Images">
     <div className="studio-body">
       <button type="button" id="studio-advanced" className="studio-advanced" aria-expanded={advanced} aria-controls="studio-settings" onClick={() => setAdvanced(value => !value)}>
-        <Icon name="settings"/><span>Paramètres avancés<small>{style.name} · {settings.format === 'custom' ? times(settings.size) : settings.format} · {settings.count} image{settings.count > 1 ? 's' : ''}</small></span><Icon name="chevron"/>
+        <Icon name="settings"/><span>Paramètres avancés<small>{style.name} · {settings.format === 'custom' ? times(settings.size) : settings.format}{!source && settings.quality !== config.default_quality ? ` · ${config.qualities.find(item => item.id === settings.quality)?.name}` : ''} · {settings.count} image{settings.count > 1 ? 's' : ''}</small></span><Icon name="chevron"/>
       </button>
       <div className={`studio-settings${advanced ? ' open' : ''}`} id="studio-settings" ref={menus}>
         <div className="studio-style">
@@ -274,6 +288,13 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
         <div className="studio-sizes">{settings.format === 'custom'
           ? config.sizes.map(size => <button key={size} type="button" aria-pressed={size === settings.size} onClick={() => change({size})}>{times(size)}</button>)
           : <span className="studio-size">{times(settings.size)}</span>}</div>
+
+        <h3>Qualité <span className="studio-help" tabIndex={0} title="HD et Très HD : l’image est créée, agrandie puis repassée pour ajouter des détails (peau, tissus, feuillages…). HD : 1,5 fois plus grande, environ 3 fois plus long. Très HD : jusqu’à 2 048 pixels de côté, environ 4 fois plus long. Une image de départ garde sa taille.">?</span></h3>
+        <div className="studio-counts studio-qualities" role="group" aria-label="Qualité">
+          {config.qualities.map(item => <button key={item.id} type="button" id={`studio-quality-${item.id}`} aria-pressed={settings.quality === item.id} disabled={source !== null}
+            title={source ? 'Une image de départ garde sa taille' : times(finalSize(settings.size, item.id))} onClick={() => change({quality: item.id})}>{item.name}</button>)}
+        </div>
+        {!source && settings.quality !== config.default_quality && <span className="studio-size" id="studio-final-size">Image finale : {times(finalSize(settings.size, settings.quality))}</span>}
 
         <h3>Nombre d’images <span className="studio-help" tabIndex={0} title="Les images sont créées l’une après l’autre, chacune un peu différente.">?</span></h3>
         <div className="studio-counts">

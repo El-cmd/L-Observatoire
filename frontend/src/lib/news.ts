@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-23-qualite-hd', date: '2026-11-23', level: 'major', title: 'Des images en HD et Très HD',
+    text: 'Dans l’onglet Images, le nouveau réglage « Qualité » propose HD et Très HD : l’image est créée, agrandie puis repassée pour ajouter des détails (peau, tissus, feuillages…). HD la rend 1,5 fois plus grande, Très HD jusqu’à 2 048 pixels de côté ; la taille finale s’affiche sous le réglage. Comptez environ 15 à 20 secondes par image au lieu de 5.'},
   {id: '2026-11-23-zone-peinte', date: '2026-11-23', level: 'major', title: 'Peindre la zone à retoucher',
     text: 'En mode « Retoucher », touchez « Peindre la zone à changer » : peignez sur l’image, au doigt ou à la souris, ce qui doit changer (pinceau en trois tailles, gomme, défaire), puis validez. Seule cette zone est redessinée selon votre demande ; le reste de l’image ne bouge pas, au pixel près. Pratique pour changer un seul objet quand l’image en contient plusieurs semblables.'},
   {id: '2026-11-23-retoucher', date: '2026-11-23', level: 'major', title: 'Retoucher une image : seul ce que vous demandez change',

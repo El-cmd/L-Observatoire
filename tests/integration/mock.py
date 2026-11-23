@@ -70,11 +70,17 @@ class Mock(BaseHTTPRequestHandler):
         if self.path == '/v1/images/generations':
             # Image model behind LiteLLM: one image per request, its seed chosen by the caller.
             ok = body.get('model') == 'qwen-image-turbo' and body.get('n') == 1 and body.get('response_format') == 'b64_json' \
-                and isinstance(body.get('seed'), int) and 'sd_cpp_extra_args' not in body.get('prompt', '')
+                and isinstance(body.get('seed'), int) and 'sd_cpp_extra_args' not in body.get('prompt', '') \
+                and (body.get('quality') is None or (body['quality'] in ('hd', 'uhd') and body.get('output_format') == 'jpeg'))
             if not ok or 'image-error' in body.get('prompt', ''):
                 self.send_error(500, 'Private upstream detail: integration-test-key')
                 return
             width, height = (int(v) for v in body['size'].split('x'))
+            if body.get('quality'):
+                # HD: ×1.5 or ×2, at most 2048 px on the longest side, like the image service.
+                scale = min({'hd': 1.5, 'uhd': 2.0}[body['quality']], 2048 / max(width, height))
+                width, height = min(2048, round(width * scale / 32) * 32), 0
+                height = min(2048, round(width * int(body['size'].split('x')[1]) / int(body['size'].split('x')[0]) / 32) * 32)
             # A style's example drawn with the style's own subject is red: the test sees which subject was used.
             color = b'\xc0\x10\x10' if body['prompt'].startswith('Spider-Man crouching on a rooftop at night\n\nStyle: Spider-Man') else b'\x80\x60\x40'
             payload = json.dumps({'created': 1, 'data': [{'b64_json': base64.b64encode(png(width, height, color)).decode()}]}).encode()
