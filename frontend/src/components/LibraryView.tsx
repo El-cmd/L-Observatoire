@@ -39,7 +39,6 @@ export function LibraryView({library, picking, room, onLoad, onClose, onOpen, on
       <h2>{picking ? 'Choisir dans la bibliothèque' : 'Bibliothèque'}</h2>
       {library && <p className="library-usage">{formatBytes(library.used_bytes)} sur {formatBytes(library.quota_bytes)}
         <span className="library-meter" aria-hidden="true"><span style={{width:`${used}%`}}/></span></p>}
-      <button type="button" className="icon-button" aria-label="Fermer la bibliothèque" title="Fermer" onClick={onClose}><Icon name="close"/></button>
     </header>
     {!library ? <p className="library-empty" role="status">Chargement…</p>
       : !library.items.length ? <p className="library-empty">Les images et documents que tu envoies apparaîtront ici.</p>

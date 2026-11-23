@@ -34,12 +34,12 @@ function restore(config: CreationConfig, saved: Partial<Settings> | null): Setti
 }
 
 /** Images tab: creates images into the library, with a style, a size and a number of images. */
-export function ImageStudio({userId, library, loadConfig, improvePrompt, createImage, styles, onLoad, onClose, onOpen, onDelete, onStartChat, removed}: {
+export function ImageStudio({userId, library, loadConfig, improvePrompt, createImage, styles, onLoad, onOpen, onDelete, onStartChat, removed}: {
   userId: string; library: Library | null; loadConfig: () => Promise<CreationConfig>;
   improvePrompt: (prompt: string, style: string, signal?: AbortSignal) => Promise<string>;
   createImage: (body: {prompt: string; style: string; size: string; improved?: string | null}, signal?: AbortSignal) => Promise<LibraryItem>;
   styles: StyleApi;
-  onLoad: () => void; onClose: () => void; onOpen: (image: AttachmentRef) => void; onDelete: (id: string) => void;
+  onLoad: () => void; onOpen: (image: AttachmentRef) => void; onDelete: (id: string) => void;
   onStartChat: (image: AttachmentRef) => void; removed: ReadonlySet<string>;
 }) {
   const storageKey = `observatoire-creation:${userId}`;
@@ -182,8 +182,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   }
 
   if (!config || !settings) return <section className="studio" id="studio" aria-label="Images">
-    <header className="library-header"><h2>Images</h2>
-      <button type="button" className="icon-button" aria-label="Fermer" title="Fermer" onClick={onClose}><Icon name="close"/></button></header>
+    <header className="library-header"><h2>Images</h2></header>
     {error ? <p className="studio-error" role="alert">{error}</p> : <p className="library-empty" role="status">Chargement…</p>}
   </section>;
 
@@ -196,8 +195,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   const more = [6, 8, 10, 12].filter(value => value <= config.max_count);
   const disabled = !config.configured;
   return <section className="studio" id="studio" aria-label="Images">
-    <header className="library-header"><h2>Images</h2>
-      <button type="button" className="icon-button" aria-label="Fermer" title="Fermer" onClick={onClose}><Icon name="close"/></button></header>
+    <header className="library-header"><h2>Images</h2></header>
     <div className="studio-body">
       <div className="studio-settings" ref={menus}>
         <div className="studio-style">

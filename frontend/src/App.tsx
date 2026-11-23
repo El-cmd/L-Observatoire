@@ -59,14 +59,14 @@ export default function App() {
       <div className={`workspace${empty ? ' empty' : ''}`} id="workspace">
         <header className="topbar"><button id="menu" className="icon-button" aria-label="Ouvrir les conversations" title="Conversations" onClick={() => {if (innerWidth <= 760) setSidebarOpen(value => !value); else setSidebarCollapsed(value => !value);}}><Icon name="sidebar"/></button>
           <span className="topbar-title">L’Observatoire</span>
-          <button id="ephemeral-toggle" type="button" className={`icon-button ephemeral-toggle${chat.ephemeral ? ' active' : ''}`} aria-pressed={chat.ephemeral}
+          {!studio && library === 'closed' && <button id="ephemeral-toggle" type="button" className={`icon-button ephemeral-toggle${chat.ephemeral ? ' active' : ''}`} aria-pressed={chat.ephemeral}
             aria-label={chat.ephemeral ? 'Quitter le chat éphémère' : 'Ouvrir un chat éphémère, qui n’est pas enregistré'}
             title={chat.ephemeral ? 'Quitter le chat éphémère' : 'Chat éphémère : rien n’est enregistré'}
-            onClick={() => {setLibrary('closed'); setNews(false); setStudio(false); void chat.toggleEphemeral();}}><Icon name="ephemeral"/></button><span id="connection" className="sr-only" role="status">{chat.navigating ? 'Chargement…' : chat.auth.configured ? 'API configurée' : 'Configuration requise'}</span>
+            onClick={() => {setNews(false); void chat.toggleEphemeral();}}><Icon name="ephemeral"/></button>}<span id="connection" className="sr-only" role="status">{chat.navigating ? 'Chargement…' : chat.auth.configured ? 'API configurée' : 'Configuration requise'}</span>
         </header>
         {news ? <NewsView items={newsFor(chat.auth.user)} onClose={() => setNews(false)}/> : studio ? <ImageStudio userId={chat.auth.user.id} library={chat.library}
           loadConfig={chat.creationConfig} improvePrompt={chat.improvePrompt} createImage={chat.createImage} styles={chat.styles} onLoad={() => {void chat.loadLibrary();}}
-          onClose={() => setStudio(false)} onOpen={setViewer} onDelete={id => {void chat.deleteImage(id);}} removed={chat.removedImages}
+          onOpen={setViewer} onDelete={id => {void chat.deleteImage(id);}} removed={chat.removedImages}
           onStartChat={image => {setStudio(false); void chat.newChat().then(() => {chat.addFromLibrary([image]); askAbout();});}}/> : library !== 'closed' ? <LibraryView library={chat.library} picking={library === 'pick'} room={MAX_IMAGES - chat.pending.length}
           onLoad={() => {void chat.loadLibrary();}} onClose={() => setLibrary('closed')} onOpen={setViewer} onDelete={id => {void chat.deleteImage(id);}}
           onPick={images => {chat.addFromLibrary(images); setLibrary('closed');}}
