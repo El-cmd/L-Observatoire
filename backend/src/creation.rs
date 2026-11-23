@@ -14,8 +14,16 @@ use uuid::Uuid;
 pub const MAX_PROMPT: usize = 1800;
 /// Images asked in a row by the page (one request each: the service makes one image at a time).
 pub const MAX_COUNT: u32 = 8;
-/// Sizes accepted by the image service (IMAGE_GEN_SIZES on the AI server).
-pub const DEFAULT_SIZES: &str = "1024x1024,1152x896,896x1152,1344x768,768x1344,768x768,512x512";
+/// Sizes accepted by the image service (IMAGE_GEN_SIZES on the AI server): the 7 first ones, then
+/// those added on 23/11/2026 (true 2:3, 16:9, 4:5 and 21:9; sides multiple of 32).
+pub const DEFAULT_SIZES: &str = "1024x1024,1152x896,896x1152,1344x768,768x1344,768x768,512x512,832x1248,1248x832,1376x768,768x1376,896x1120,1568x672";
+
+/// "Image → image": how much of the starting image is redrawn. The Turbo model takes 8 steps, so the
+/// strength acts by eighths: 0.625 retouches, 0.75 transforms, 0.875 redraws and keeps the layout.
+pub const STRENGTHS: &[(&str, &str, f64)] = &[("fidele", "Fidèle", 0.625), ("equilibre", "Équilibré", 0.75), ("libre", "Libre", 0.875)];
+const DEFAULT_STRENGTH: &str = "equilibre";
+/// Largest starting image the image service takes.
+const MAX_SOURCE_BYTES: usize = 10 * 1024 * 1024;
 
 /// Styles: words added after the prompt. Qwen-Image Turbo runs at CFG 1.0, so a negative prompt
 /// would do nothing. Same list as the image lab (~/labo-images), whose examples are in
@@ -121,6 +129,8 @@ pub async fn config(State(app): State<App>, headers: HeaderMap) -> Result<Json<V
         "default_size": default_size,
         "max_count": MAX_COUNT,
         "max_prompt": MAX_PROMPT,
+        "strengths": STRENGTHS.iter().map(|(id, name, value)| json!({"id": id, "name": name, "value": value})).collect::<Vec<_>>(),
+        "default_strength": DEFAULT_STRENGTH,
     })))
 }
 
@@ -150,6 +160,47 @@ pub struct Request {
     /// Rewritten by "Améliorer le prompt" (automatic mode); `prompt` keeps the user's idea.
     #[serde(default)]
     improved: Option<String>,
+    /// "Image → image": an image of the user's library, redrawn with this strength (id of `STRENGTHS`).
+    #[serde(default)]
+    source: Option<Uuid>,
+    #[serde(default)]
+    strength: Option<String>,
+}
+
+/// Image of the user's library used as a starting point.
+struct Source {
+    id: Uuid,
+    mime: String,
+    data: Vec<u8>,
+    thumbnail: Vec<u8>,
+}
+
+async fn source(app: &App, user: Uuid, id: Uuid) -> Result<Source, Error> {
+    let row: Option<(String, Vec<u8>, Vec<u8>)> = sqlx::query_as("SELECT mime,data,thumbnail FROM attachments WHERE id=$1 AND user_id=$2 AND kind='image' AND status='ready'")
+        .bind(id).bind(user).fetch_optional(&app.db).await?;
+    let (mime, data, thumbnail) = row.ok_or_else(|| Error::bad("L’image de départ n’est plus dans votre bibliothèque."))?;
+    if data.len() > MAX_SOURCE_BYTES { return Err(Error::bad("L’image de départ est trop lourde (10 Mo au maximum).")); }
+    Ok(Source { id, mime, data, thumbnail })
+}
+
+fn strength(id: Option<&str>) -> Result<&'static (&'static str, &'static str, f64), Error> {
+    let id = id.unwrap_or(DEFAULT_STRENGTH);
+    STRENGTHS.iter().find(|s| s.0 == id).ok_or_else(|| Error::bad("Force inconnue."))
+}
+
+/// Multipart form of `/images/edits` (an image and text fields), written by hand: reqwest is built
+/// without its multipart feature.
+fn multipart(fields: &[(&str, String)], image: &[u8], mime: &str) -> (String, Vec<u8>) {
+    let boundary = format!("observatoire-{}", Uuid::new_v4().simple());
+    let mut body = Vec::with_capacity(image.len() + 4096);
+    for (name, value) in fields {
+        body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n").as_bytes());
+    }
+    let extension = if mime == "image/png" { "png" } else { "jpg" };
+    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"image.{extension}\"\r\nContent-Type: {mime}\r\n\r\n").as_bytes());
+    body.extend_from_slice(image);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    (format!("multipart/form-data; boundary={boundary}"), body)
 }
 
 /// File name from the idea: its first words.
@@ -159,14 +210,22 @@ fn image_name(prompt: &str, mime: &str) -> String {
     attachments::clean_name(Some(&format!("{}.{extension}", words.trim_end_matches(['.', ' ']))), &format!("image.{extension}"))
 }
 
-/// One image from the image model (one at a time per API, see `App::images`).
-async fn generate(app: &App, prompt: &str, size: &str, seed: u32) -> Result<Vec<u8>, Error> {
+/// One image from the image model (one at a time per API, see `App::images`): created from the
+/// prompt, or redrawn from a starting image with a strength ("Image → image").
+async fn generate(app: &App, prompt: &str, size: &str, seed: u32, start: Option<(&Source, f64)>) -> Result<Vec<u8>, Error> {
     let busy = || Error(StatusCode::SERVICE_UNAVAILABLE, "Le service d’images est occupé ou indisponible. Réessayez dans un instant.".into());
     let _turn = app.images.acquire().await.map_err(|_| busy())?;
-    let response = app.http.post(format!("{}/images/generations", app.config.api_url)).bearer_auth(&app.config.api_key)
-        .timeout(Duration::from_secs(150))
-        .json(&json!({"model": app.config.image_model, "prompt": prompt, "n": 1, "size": size, "seed": seed, "response_format": "b64_json"}))
-        .send().await.map_err(|_| busy())?;
+    let request = match start {
+        None => app.http.post(format!("{}/images/generations", app.config.api_url))
+            .json(&json!({"model": app.config.image_model, "prompt": prompt, "n": 1, "size": size, "seed": seed, "response_format": "b64_json"})),
+        Some((source, strength)) => {
+            let fields = [("model", app.config.image_model.clone()), ("prompt", prompt.to_string()), ("n", "1".into()), ("size", size.to_string()),
+                          ("seed", seed.to_string()), ("strength", strength.to_string()), ("response_format", "b64_json".into())];
+            let (content_type, body) = multipart(&fields, &source.data, &source.mime);
+            app.http.post(format!("{}/images/edits", app.config.api_url)).header("Content-Type", content_type).body(body)
+        }
+    };
+    let response = request.bearer_auth(&app.config.api_key).timeout(Duration::from_secs(150)).send().await.map_err(|_| busy())?;
     let status = response.status();
     if !status.is_success() {
         tracing::warn!(status = status.as_u16(), "image generation failed");
@@ -188,6 +247,10 @@ pub async fn create(State(app): State<App>, headers: HeaderMap, Json(request): J
     if let Some(text) = improved { check_prompt(text)?; }
     let style = chosen(&app, user.user_id, request.style.as_deref().unwrap_or(DEFAULT_STYLE)).await?;
     if !sizes(&app).contains(&request.size) { return Err(Error::bad("Taille d’image non prise en charge.")); }
+    let start = match request.source {
+        Some(id) => Some((source(&app, user.user_id, id).await?, strength(request.strength.as_deref())?)),
+        None => None,
+    };
     // An image weighs up to ~3 Mo before image-guard re-encodes it.
     if attachments::used_bytes(&app, user.user_id).await? + 3 * 1024 * 1024 > attachments::QUOTA_BYTES {
         return Err(Error::bad(attachments::FULL));
@@ -195,11 +258,16 @@ pub async fn create(State(app): State<App>, headers: HeaderMap, Json(request): J
     let sent = compose(improved.unwrap_or(&request.prompt), &style.words);
     let seed: u32 = rand::thread_rng().gen_range(0..i32::MAX as u32);
     let started = Instant::now();
-    let data = generate(&app, &sent, &request.size, seed).await?;
+    let data = generate(&app, &sent, &request.size, seed, start.as_ref().map(|(source, strength)| (source, strength.2))).await?;
     let clean = attachments::sanitize(&app, Bytes::from(data)).await?;
     // prompt: the user's idea; improved: Qwen's rewriting, if any; sent: what the image model received.
-    let generation = json!({"prompt": request.prompt.trim(), "improved": improved, "sent": sent, "style": style.id, "style_name": style.name, "size": request.size, "seed": seed,
-                            "seconds": (started.elapsed().as_secs_f64() * 10.0).round() / 10.0});
+    // source, strength: the starting image of "Image → image" (it may be deleted later) and how much was redrawn.
+    let mut generation = json!({"prompt": request.prompt.trim(), "improved": improved, "sent": sent, "style": style.id, "style_name": style.name, "size": request.size, "seed": seed,
+                                "seconds": (started.elapsed().as_secs_f64() * 10.0).round() / 10.0});
+    if let Some((source, (id, name, value))) = &start {
+        generation["source"] = json!(source.id);
+        generation["strength"] = json!({"id": id, "name": name, "value": value});
+    }
     let id = attachments::store_image(&app, user.user_id, &clean, &image_name(&request.prompt, &clean.mime), Some(generation)).await?;
     Ok((StatusCode::CREATED, Json(attachments::item(&app, user.user_id, id).await?)))
 }
@@ -215,13 +283,31 @@ Rules:
 - Write in English, as a single paragraph of 50 to 110 words.
 - Answer with the prompt only: no introduction, no title, no list, no quotes around the whole prompt.";
 
+/// "Image → image": the image model redraws the starting image from the prompt alone, so the prompt
+/// must describe the whole image, not only the change (otherwise the subject changes too).
+const IMPROVE_FROM_IMAGE: &str = "You write one prompt for the Qwen-Image model, which redraws the attached image from its own pixels (image-to-image). The user says what the new image should be or what should change.
+
+Rules:
+- Describe the whole final image, not only the change: the subject and how many there are, their appearance and pose, the composition and framing, the setting and the colors seen in the attached image, with the user's change applied.
+- Everything the user does not ask to change stays as in the attached image. If they only name a style or a medium, keep the subject and the composition and change the rendering.
+- Apply every change the user asked for, and keep every explicit detail they gave.
+- Any text that must be written in the image stays exactly as the user wrote it, between double quotes.
+- {style}
+- Do not invent text, logos or signatures to display in the image.
+- Write in English, as a single paragraph of 50 to 110 words.
+- Answer with the prompt only: no introduction, no title, no list, no quotes around the whole prompt.";
+
 pub fn improve_instructions(name: &str, words: &str) -> String {
+    with_style(IMPROVE, name, words)
+}
+
+fn with_style(template: &str, name: &str, words: &str) -> String {
     let rule = match words.trim() {
         "" => "You may suggest an appropriate visual style or medium if the idea calls for one.".to_string(),
         words => format!(
             "The style \"{name}\" ({words}) is added separately after your prompt: describe the scene so it fits this style, but do not name another style or medium."),
     };
-    IMPROVE.replace("{style}", &rule)
+    template.replace("{style}", &rule)
 }
 
 /// Removes a possible <think> block, a "Prompt:" lead and quotes around the whole text.
@@ -248,6 +334,9 @@ pub struct ImproveRequest {
     prompt: String,
     #[serde(default)]
     style: Option<String>,
+    /// "Image → image": Qwen looks at the starting image (its thumbnail) to describe it.
+    #[serde(default)]
+    source: Option<Uuid>,
 }
 
 pub async fn improve(State(app): State<App>, headers: HeaderMap, Json(request): Json<ImproveRequest>) -> Result<Json<Value>, Error> {
@@ -256,13 +345,21 @@ pub async fn improve(State(app): State<App>, headers: HeaderMap, Json(request): 
     check_prompt(&request.prompt)?;
     let style = chosen(&app, user.user_id, request.style.as_deref().unwrap_or(DEFAULT_STYLE)).await?;
     let failed = || Error(StatusCode::SERVICE_UNAVAILABLE, "Qwen n’a pas pu améliorer la description. Réessayez dans un instant.".into());
-    let text = clean_improved(&ask_qwen(&app, &improve_instructions(&style.name, &style.words), request.prompt.trim(), 0.7, 400).await.ok_or_else(failed)?);
+    let answer = match request.source {
+        Some(id) => {
+            let image = format!("data:image/jpeg;base64,{}", STANDARD.encode(source(&app, user.user_id, id).await?.thumbnail));
+            let content = json!([{"type": "text", "text": request.prompt.trim()}, {"type": "image_url", "image_url": {"url": image}}]);
+            ask_qwen(&app, &with_style(IMPROVE_FROM_IMAGE, &style.name, &style.words), content, 0.7, 400).await
+        }
+        None => ask_qwen(&app, &improve_instructions(&style.name, &style.words), json!(request.prompt.trim()), 0.7, 400).await,
+    };
+    let text = clean_improved(&answer.ok_or_else(failed)?);
     if text.is_empty() || reserved(&text) { return Err(failed()); }
     Ok(Json(json!({"prompt": text})))
 }
 
 /// One short answer from Qwen, without reasoning; None when it cannot answer.
-async fn ask_qwen(app: &App, system: &str, user: &str, temperature: f64, max_tokens: u32) -> Option<String> {
+async fn ask_qwen(app: &App, system: &str, user: Value, temperature: f64, max_tokens: u32) -> Option<String> {
     let body = json!({"model": app.config.model, "reasoning_effort": "none", "temperature": temperature, "max_tokens": max_tokens, "stream": false,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]});
     let response = app.http.post(format!("{}/chat/completions", app.config.api_url)).bearer_auth(&app.config.api_key)
@@ -369,11 +466,11 @@ pub async fn make_example(State(app): State<App>, headers: HeaderMap, Path(id): 
     let sizes = sizes(&app);
     let size = ["768x768", "1024x1024"].into_iter().find(|s| sizes.iter().any(|v| v == s)).map(String::from)
         .or_else(|| closest(&sizes, 1.0)).ok_or_else(not_configured)?;
-    let scene = match ask_qwen(&app, EXAMPLE_SCENE, &words, 0.3, 80).await {
+    let scene = match ask_qwen(&app, EXAMPLE_SCENE, json!(words), 0.3, 80).await {
         Some(answer) => example_scene(&answer),
         None => None,
     };
-    let data = generate(&app, &compose(scene.as_deref().unwrap_or(EXAMPLE_SUBJECT), &words), &size, EXAMPLE_SEED).await?;
+    let data = generate(&app, &compose(scene.as_deref().unwrap_or(EXAMPLE_SUBJECT), &words), &size, EXAMPLE_SEED, None).await?;
     let clean = attachments::sanitize(&app, Bytes::from(data)).await?;
     let row: Option<StyleRow> = sqlx::query_as(&format!(
         "UPDATE image_styles SET example=$4,updated_at=now() WHERE id=$1 AND user_id=$2 AND words=$3 RETURNING {STYLE_COLUMNS}"))
@@ -423,7 +520,7 @@ pub async fn suggest_style(State(app): State<App>, headers: HeaderMap, Json(requ
     if description.is_empty() { return Err(Error::bad("Décrivez le style voulu.")); }
     if description.chars().count() > MAX_STYLE_DESCRIPTION { return Err(Error::bad("Description trop longue (600 caractères au maximum).")); }
     let failed = || Error(StatusCode::SERVICE_UNAVAILABLE, "Qwen n’a pas pu proposer de mots. Réessayez dans un instant.".into());
-    let words = clean_words(&ask_qwen(&app, SUGGEST, description, 0.5, 200).await.ok_or_else(failed)?);
+    let words = clean_words(&ask_qwen(&app, SUGGEST, json!(description), 0.5, 200).await.ok_or_else(failed)?);
     if words.is_empty() || reserved(&words) { return Err(failed()); }
     Ok(Json(json!({"words": words})))
 }
@@ -436,11 +533,29 @@ mod tests {
     #[test]
     fn formats_take_the_closest_allowed_size() {
         let sizes = list(DEFAULT_SIZES);
-        assert_eq!(closest(&sizes, 2.0 / 3.0).as_deref(), Some("896x1152"));
+        assert_eq!(closest(&sizes, 2.0 / 3.0).as_deref(), Some("832x1248"));
         assert_eq!(closest(&sizes, 1.0).as_deref(), Some("1024x1024"));
-        assert_eq!(closest(&sizes, 16.0 / 9.0).as_deref(), Some("1344x768"));
-        // With a true 2:3 size on the server, it is chosen.
-        assert_eq!(closest(&list("1024x1024,832x1248,896x1152"), 2.0 / 3.0).as_deref(), Some("832x1248"));
+        assert_eq!(closest(&sizes, 16.0 / 9.0).as_deref(), Some("1376x768"));
+        // A server still on the 7 first sizes: the closest of them.
+        let old = list("1024x1024,1152x896,896x1152,1344x768,768x1344,768x768,512x512");
+        assert_eq!(closest(&old, 2.0 / 3.0).as_deref(), Some("896x1152"));
+        assert_eq!(closest(&old, 16.0 / 9.0).as_deref(), Some("1344x768"));
+    }
+    #[test]
+    fn strengths_are_known_by_name() {
+        assert_eq!(strength(None).unwrap().2, 0.75);
+        assert_eq!(strength(Some("libre")).unwrap().2, 0.875);
+        assert!(strength(Some("0.9")).is_err());
+    }
+    #[test]
+    fn edits_are_sent_as_a_multipart_form() {
+        let (content_type, body) = multipart(&[("prompt", "une pomme".into()), ("strength", 0.625.to_string())], b"\x89PNG", "image/png");
+        let boundary = content_type.strip_prefix("multipart/form-data; boundary=").unwrap();
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.starts_with(&format!("--{boundary}\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\nune pomme\r\n")));
+        assert!(text.contains("name=\"strength\"\r\n\r\n0.625\r\n"));
+        assert!(text.contains("name=\"image\"; filename=\"image.png\"\r\nContent-Type: image/png\r\n\r\n\u{fffd}PNG\r\n"));
+        assert!(text.ends_with(&format!("--{boundary}--\r\n")));
     }
     #[test]
     fn styles_are_added_after_the_prompt() {

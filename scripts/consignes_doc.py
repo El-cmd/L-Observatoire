@@ -87,6 +87,9 @@ flowchart TB
         I5 --> I4
         I0 -->|Créer| I4[(qwen-image-turbo<br/>description + Style: mots)]
         I1 --> I4
+        I6([Image de départ]) -->|Améliorer| I7[IMPROVE_FROM_IMAGE<br/>+ image + règle du style]:::sys
+        I6 -->|Transformer + force| I4
+        I7 --> I4
     end
 
     subgraph EVAL["Évaluation du labo (make evaluer)"]
@@ -153,8 +156,9 @@ w("## 5. Onglet Images\n\n`backend/src/creation.rs`.\n\n")
 w("### Améliorer la description (`IMPROVE`) — Système\n\n`{style}` devient l’une des deux règles ci-dessous.\n\n" + bloc(imp))
 w("Avec un style qui a des mots :\n\n" + bloc('The style "{name}" ({words}) is added separately after your prompt: describe the scene so it fits this style, but do not name another style or medium.'))
 w("Avec le style « Aucun » :\n\n" + bloc('You may suggest an appropriate visual style or medium if the idea calls for one.'))
+w("### Améliorer la description d’une image → image (`IMPROVE_FROM_IMAGE`) — Système\n\nAvec une image de départ, Qwen reçoit la description de l’utilisateur et la miniature de l’image (640 px, JPEG). `{style}` devient les mêmes règles que ci-dessus.\n\n" + bloc(rust_const('backend/src/creation.rs', 'IMPROVE_FROM_IMAGE')))
 w("### Proposer les mots d’un style (`SUGGEST`) — Système\n\nBouton « Proposer les mots » de la fenêtre « Créer un style ».\n\n" + bloc(rust_const('backend/src/creation.rs', 'SUGGEST')))
-w("### Ce que reçoit le modèle d’images\n\nPas de consigne système : la description (ou sa version améliorée), puis les mots du style :\n\n" + bloc("<description>\n\nStyle: <mots du style>."))
+w("### Ce que reçoit le modèle d’images\n\nPas de consigne système : la description (ou sa version améliorée), puis les mots du style. En image → image, la même chose, avec l’image de départ et la force (Fidèle 0,625, Équilibré 0,75, Libre 0,875) :\n\n" + bloc("<description>\n\nStyle: <mots du style>."))
 w("### Sujet de l’image d’exemple d’un style (`EXAMPLE_SCENE`) — Système\n\nÀ l’enregistrement d’un style de « Mes styles », Qwen reçoit ses mots. S’ils nomment un personnage ou un univers, il propose une scène qui le montre ; sinon l’exemple garde le sujet habituel.\n\n" + bloc(rust_const('backend/src/creation.rs', 'EXAMPLE_SCENE')))
 w("Sujet habituel, avec la graine 42, pour comparer les styles entre eux (`EXAMPLE_SUBJECT`) :\n\n" + bloc(rust_const('backend/src/creation.rs', 'EXAMPLE_SUBJECT')))
 w("Les mots des 15 styles fournis sont dans `STYLES`, au début de `backend/src/creation.rs`.\n")

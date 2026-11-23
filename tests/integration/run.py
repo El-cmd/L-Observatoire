@@ -368,7 +368,8 @@ class Integration(unittest.TestCase):
         code, config, _ = self.alice.call('/api/creation')
         self.assertEqual(code, 200, config)
         self.assertTrue(config['configured']); self.assertEqual(len(config['styles']), 15)
-        self.assertEqual({f['name']: f['size'] for f in config['formats']}, {'2:3': '896x1152', '1:1': '1024x1024', '16:9': '1344x768'})
+        self.assertEqual({f['name']: f['size'] for f in config['formats']}, {'2:3': '832x1248', '1:1': '1024x1024', '16:9': '1376x768'})
+        self.assertEqual(([s['id'] for s in config['strengths']], config['default_strength']), (['fidele', 'equilibre', 'libre'], 'equilibre'))
         self.assertEqual(self.bob.call('/api/creation')[0], 200)
         anonymous = Client()
         self.assertEqual(anonymous.call('/api/creation')[0], 401)
@@ -381,6 +382,7 @@ class Integration(unittest.TestCase):
         code, item, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'une pomme rouge', 'style': 'aquarelle', 'size': '896x1152', 'improved': improved['prompt']})
         self.assertEqual(code, 201, item)
         self.assertEqual((item['kind'], item['width'], item['height']), ('image', 896, 1152))
+        self.assertNotIn('source', item['generation'])
         self.assertTrue(item['name'].startswith('une pomme rouge.'))
         generation = item['generation']
         self.assertEqual((generation['prompt'], generation['style'], generation['size']), ('une pomme rouge', 'aquarelle', '896x1152'))
@@ -403,6 +405,33 @@ class Integration(unittest.TestCase):
         self.assertEqual(self.alice.call('/api/creation/improve', 'POST', {'prompt': 'x', 'style': 'inconnu'})[0], 400)
         # The image model failing: a plain message, never its details.
         code, failed, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'image-error', 'size': '1024x1024'})
+        self.assertEqual(code, 503); self.assertNotIn('integration-test-key', json.dumps(failed))
+
+    def test_05k_images_are_redrawn_from_a_starting_image(self):
+        # "Image → image": an image of the library, redrawn with a strength (green images in the mock).
+        _, start = upload(self.alice, png(40, 30), 'départ.png')
+        code, improved, _ = self.alice.call('/api/creation/improve', 'POST', {'prompt': 'en aquarelle', 'style': 'aucun', 'source': start['id']})
+        self.assertEqual((code, improved), (200, {'prompt': 'The same small brown square, as a watercolor painting.'}))
+        code, item, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'en aquarelle', 'style': 'aucun', 'size': '1152x896', 'improved': improved['prompt'],
+                                                                 'source': start['id'], 'strength': 'libre'})
+        self.assertEqual(code, 201, item)
+        self.assertEqual((item['width'], item['height']), (1152, 896))
+        generation = item['generation']
+        self.assertEqual((generation['source'], generation['strength']), (start['id'], {'id': 'libre', 'name': 'Libre', 'value': 0.875}))
+        self.assertEqual(generation['sent'], 'The same small brown square, as a watercolor painting.')
+        # Without a strength: "Équilibré". A created image can be the starting point of another one.
+        code, again, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'en aquarelle', 'style': 'aucun', 'size': '1024x1024', 'source': item['id']})
+        self.assertEqual((code, again['generation']['strength']['value']), (201, 0.75), again)
+        code, plain, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'en aquarelle', 'style': 'aucun', 'size': '1152x896'})
+        self.assertEqual(code, 201, plain)
+        read = lambda i: self.alice.opener.open(ORIGIN + '/api/attachments/' + i, timeout=20).read()
+        self.assertNotEqual(read(item['id']), read(plain['id']))
+        # Someone else's image, a document, an unknown strength: refused before any call to the image model.
+        _, bob_image = upload(self.bob, png(8, 8))
+        for body in ({'source': bob_image['id']}, {'source': start['id'], 'strength': '0.9'}, {'source': 'pas-un-id'}):
+            self.assertIn(self.alice.call('/api/creation', 'POST', {'prompt': 'x', 'size': '1024x1024', **body})[0], (400, 422), body)
+        self.assertEqual(self.alice.call('/api/creation/improve', 'POST', {'prompt': 'x', 'source': bob_image['id']})[0], 400)
+        code, failed, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'image-error', 'size': '1024x1024', 'source': start['id']})
         self.assertEqual(code, 503); self.assertNotIn('integration-test-key', json.dumps(failed))
 
     def test_05j_users_write_their_own_styles(self):

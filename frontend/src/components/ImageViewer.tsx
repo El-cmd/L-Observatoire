@@ -1,6 +1,6 @@
 import {useEffect, useRef, useState} from 'react';
 import type {AttachmentRef, Generation, LibraryItem} from '../types';
-import {formatBytes, imageURL} from '../lib/images';
+import {formatBytes, imageURL, thumbnailURL} from '../lib/images';
 import {Icon} from './Icon';
 
 /** Qwen's rewriting: stored since 22/11, found in the prompt sent before (minus the style words). */
@@ -19,13 +19,14 @@ export function ImageViewer({image, loadInfo, onClose}: {image: AttachmentRef | 
   const [info, setInfo] = useState<LibraryItem | null>(null);
   const [failed, setFailed] = useState(false);
   const [copied, setCopied] = useState('');
+  const [sourceGone, setSourceGone] = useState(false);
   useEffect(() => {
     const element = dialog.current; if (!element) return;
     if (image && !element.open) element.showModal();
     if (!image && element.open) element.close();
   }, [image]);
   useEffect(() => {
-    setInfo(null); setFailed(false); setCopied('');
+    setInfo(null); setFailed(false); setCopied(''); setSourceGone(false);
     if (!image) return;
     let current = true;
     loadInfo(image.id).then(value => {if (current) setInfo(value);}, () => {if (current) setFailed(true);});
@@ -42,7 +43,9 @@ export function ImageViewer({image, loadInfo, onClose}: {image: AttachmentRef | 
     ['sent', 'Envoyée au modèle d’images', generation.sent],
   ] : [];
   const details: [string, string][] = info ? [
-    ...(generation ? [['Style', generation.style_name ?? generation.style], ['Graine', String(generation.seed)], ['Durée de création', `${generation.seconds} s`]] as [string, string][] : []),
+    ...(generation ? [['Style', generation.style_name ?? generation.style],
+      ...(generation.strength ? [['Liberté prise', `${generation.strength.name} (${generation.strength.value.toLocaleString('fr-FR')})`]] : []),
+      ['Graine', String(generation.seed)], ['Durée de création', `${generation.seconds} s`]] as [string, string][] : []),
     ['Dimensions', `${info.width} × ${info.height} px`],
     ['Format', info.mime === 'image/png' ? 'PNG' : 'JPEG'],
     ['Poids', formatBytes(info.size)],
@@ -68,6 +71,11 @@ export function ImageViewer({image, loadInfo, onClose}: {image: AttachmentRef | 
             {text ? <p id={`image-info-${key}`}>{text}</p> : <p className="image-info-none">Pas d’amélioration pour cette image.</p>}
           </section>)}
           {!generation && <p className="image-info-none">Image envoyée, pas créée ici : pas de description.</p>}
+          {generation?.source && <section className="image-info-source" id="image-info-source">
+            <h3>Image de départ</h3>
+            {sourceGone ? <p className="image-info-none">Supprimée de votre bibliothèque.</p>
+              : <img src={thumbnailURL(generation.source)} alt="Image de départ" onError={() => setSourceGone(true)}/>}
+          </section>}
           <dl className="image-info-details">{details.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
         </>}
       </aside>

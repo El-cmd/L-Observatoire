@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-23-image-vers-image', date: '2026-11-23', level: 'major', title: 'Créer une image à partir d’une autre',
+    text: 'Dans l’onglet Images, touchez « Partir d’une image » sous la description, puis choisissez une image de votre bibliothèque ou de votre appareil (ou touchez l’icône image sous une image déjà créée). Elle est redessinée selon votre description : décrivez toute l’image voulue, par exemple « le même chat, en aquarelle », ou touchez Améliorer, qui regarde l’image pour vous. Choisissez ensuite combien elle peut changer : Fidèle, Équilibré ou Libre. Les formats 2:3 et 16:9 ont aussi maintenant leurs vraies proportions.'},
   {id: '2026-11-23-images-telephone', date: '2026-11-23', level: 'improvement', title: 'L’onglet Images plus simple sur téléphone',
     text: 'Sur téléphone, la zone où décrire l’image est tout en haut. Le style, le format, le nombre d’images et l’amélioration de la description sont rangés juste en dessous, dans « Paramètres avancés » : touchez-le pour les ouvrir. Le résumé des réglages choisis reste visible sous ce titre.'},
   {id: '2026-11-23-titre-en-haut', date: '2026-11-23', level: 'improvement', title: 'Le titre de la page reste en haut',

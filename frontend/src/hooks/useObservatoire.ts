@@ -2,7 +2,7 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import {APIClient, APIError, errorMessage} from '../lib/api';
 import {consumeCompletion} from '../lib/stream';
 import {MAX_IMAGES, documentSize, isDocument, isImage, prepareImage, thumbnailURL, toRef} from '../lib/images';
-import type {Activity, AttachmentRef, Auth, Conversation, ConversationSummary, CreationConfig, Legacy, Library, LibraryItem, Message, MyStyle, Notice, PendingImage, Settings, ContextUsage, WebMode} from '../types';
+import type {Activity, AttachmentRef, Auth, Conversation, ConversationSummary, CreationConfig, Legacy, Library, LibraryItem, Message, MyStyle, Notice, PendingImage, Settings, ContextUsage, WebMode, CreateBody} from '../types';
 
 function readLegacy(): Legacy | null {
   try { return JSON.parse(localStorage.getItem('observatoir-chat-v1') || localStorage.getItem('qwen-chat-v1') || 'null') as Legacy | null; }
@@ -512,10 +512,17 @@ export function useObservatoire() {
   const imageConversations = (id: string) => client.json<{id: string; title: string}[]>(`/api/attachments/${id}/conversations`);
   // Images tab: settings of the image model, prompt rewritten by Qwen, one image created into the library.
   const creationConfig = () => client.json<CreationConfig>('/api/creation');
-  const improvePrompt = (prompt: string, style: string, signal?: AbortSignal) =>
-    client.json<{prompt: string}>('/api/creation/improve', {method:'POST', body:{prompt, style}, signal}).then(value => value.prompt);
-  const createImage = (body: {prompt: string; style: string; size: string; improved?: string | null}, signal?: AbortSignal) =>
+  // source: "Image → image", Qwen then looks at the starting image to describe the whole result.
+  const improvePrompt = (prompt: string, style: string, signal?: AbortSignal, source?: string) =>
+    client.json<{prompt: string}>('/api/creation/improve', {method:'POST', body:{prompt, style, source}, signal}).then(value => value.prompt);
+  const createImage = (body: CreateBody, signal?: AbortSignal) =>
     client.json<LibraryItem>('/api/creation', {method:'POST', body, signal});
+  /** An image of the device sent to the library, to start an image from it. */
+  async function uploadImage(file: File) {
+    const ref = await client.json<AttachmentRef>(`/api/attachments?name=${encodeURIComponent(file.name || 'image')}`, {method:'POST', body:await prepareImage(file)});
+    setLibrary(null);
+    return ref;
+  }
   const styles = {
     add: (body: {name: string; words: string}) => client.json<MyStyle>('/api/creation/styles', {method:'POST', body}),
     edit: (id: string, body: {name: string; words: string}) => client.json<MyStyle>(`/api/creation/styles/${id}`, {method:'PUT', body}),
@@ -561,7 +568,7 @@ export function useObservatoire() {
   return {auth, initializing, loginError, signingIn, login, logout, changePassword,
     chats, current:activeChat, activity, busy:currentActivity === 'generating', navigating,
     notice:(currentId && notices[currentId]) || notices[''] || null, notify,
-    prompt, setPrompt, pending, addImages, addFromLibrary, removePending, library, loadLibrary, deleteImage, imageConversations, documentText, attachmentInfo, removedImages, creationConfig, improvePrompt, createImage, styles,
+    prompt, setPrompt, pending, addImages, addFromLibrary, removePending, library, loadLibrary, deleteImage, imageConversations, documentText, attachmentInfo, removedImages, creationConfig, improvePrompt, createImage, uploadImage, styles,
     settings, setSettings, newChat, openChat, ephemeral:isEphemeral(activeChat), toggleEphemeral, deleteChat, renameChat, send, regenerate, continueAnswer,
     contextUsage:contextUsage && contextUsage.conversation_id === currentId && contextUsage.version === activeChat?.version ? contextUsage : null,
     compacting:currentActivity === 'compacting', compactContext, summaryFocus,

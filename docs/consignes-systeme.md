@@ -56,6 +56,9 @@ flowchart TB
         I5 --> I4
         I0 -->|Créer| I4[(qwen-image-turbo<br/>description + Style: mots)]
         I1 --> I4
+        I6([Image de départ]) -->|Améliorer| I7[IMPROVE_FROM_IMAGE<br/>+ image + règle du style]:::sys
+        I6 -->|Transformer + force| I4
+        I7 --> I4
     end
 
     subgraph EVAL["Évaluation du labo (make evaluer)"]
@@ -344,6 +347,23 @@ Avec le style « Aucun » :
 ```text
 You may suggest an appropriate visual style or medium if the idea calls for one.
 ```
+### Améliorer la description d’une image → image (`IMPROVE_FROM_IMAGE`) — Système
+
+Avec une image de départ, Qwen reçoit la description de l’utilisateur et la miniature de l’image (640 px, JPEG). `{style}` devient les mêmes règles que ci-dessus.
+
+```text
+You write one prompt for the Qwen-Image model, which redraws the attached image from its own pixels (image-to-image). The user says what the new image should be or what should change.
+
+Rules:
+- Describe the whole final image, not only the change: the subject and how many there are, their appearance and pose, the composition and framing, the setting and the colors seen in the attached image, with the user's change applied.
+- Everything the user does not ask to change stays as in the attached image. If they only name a style or a medium, keep the subject and the composition and change the rendering.
+- Apply every change the user asked for, and keep every explicit detail they gave.
+- Any text that must be written in the image stays exactly as the user wrote it, between double quotes.
+- {style}
+- Do not invent text, logos or signatures to display in the image.
+- Write in English, as a single paragraph of 50 to 110 words.
+- Answer with the prompt only: no introduction, no title, no list, no quotes around the whole prompt.
+```
 ### Proposer les mots d’un style (`SUGGEST`) — Système
 
 Bouton « Proposer les mots » de la fenêtre « Créer un style ».
@@ -362,7 +382,7 @@ Rules:
 ```
 ### Ce que reçoit le modèle d’images
 
-Pas de consigne système : la description (ou sa version améliorée), puis les mots du style :
+Pas de consigne système : la description (ou sa version améliorée), puis les mots du style. En image → image, la même chose, avec l’image de départ et la force (Fidèle 0,625, Équilibré 0,75, Libre 0,875) :
 
 ```text
 <description>

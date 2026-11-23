@@ -1,12 +1,13 @@
 import {useEffect, useRef, useState} from 'react';
-import type {AttachmentRef, CreationConfig, CreationStyle, Library, LibraryItem, MyStyle} from '../types';
+import type {AttachmentRef, CreateBody, CreationConfig, CreationStyle, Library, LibraryItem, MyStyle} from '../types';
 import {imageURL, thumbnailURL, toRef} from '../lib/images';
 import {errorMessage} from '../lib/api';
 import {Icon} from './Icon';
 import {StyleDialog, type StyleApi} from './StyleDialog';
+import {SourcePicker} from './SourcePicker';
 
 /** Settings kept in the browser, per account. */
-interface Settings { style: string; format: string; size: string; count: number; improve: boolean }
+interface Settings { style: string; format: string; size: string; count: number; improve: boolean; strength: string }
 type Waiting = {key: string; size: string; label: string; error?: string};
 
 /** Example of a style: a file for the built-in ones, created by the image model for "Mes styles". */
@@ -17,9 +18,17 @@ function example(style: CreationStyle | MyStyle): string | null {
 const allStyles = (config: CreationConfig): (CreationStyle | MyStyle)[] => [...config.styles, ...config.my_styles];
 const times = (size: string) => size.replace('x', '×');
 
+/** Allowed size closest to the proportions of an image (the largest on a tie): the starting image is
+ * cropped as little as possible. */
+function sizeFor(config: CreationConfig, width: number, height: number): string {
+  const gap = (size: string) => {const [w, h] = size.split('x').map(Number); return Math.abs(Math.log(w / h) - Math.log(width / height));};
+  const area = (size: string) => size.split('x').map(Number).reduce((a, b) => a * b, 1);
+  return [...config.sizes].sort((a, b) => gap(a) - gap(b) || area(b) - area(a))[0] ?? config.default_size;
+}
+
 function defaults(config: CreationConfig): Settings {
   const square = config.formats.find(format => format.name === '1:1');
-  return {style: config.default_style, format: square ? '1:1' : 'custom', size: square?.size ?? config.default_size, count: 1, improve: false};
+  return {style: config.default_style, format: square ? '1:1' : 'custom', size: square?.size ?? config.default_size, count: 1, improve: false, strength: config.default_strength};
 }
 
 function restore(config: CreationConfig, saved: Partial<Settings> | null): Settings {
@@ -30,14 +39,16 @@ function restore(config: CreationConfig, saved: Partial<Settings> | null): Setti
   else if (value.format !== 'custom' || !config.sizes.includes(value.size)) Object.assign(value, {format: defaults(config).format, size: defaults(config).size});
   value.count = Math.min(Math.max(1, Number(value.count) || 1), config.max_count);
   value.improve = value.improve === true;
+  if (!config.strengths.some(strength => strength.id === value.strength)) value.strength = config.default_strength;
   return value;
 }
 
 /** Images tab: creates images into the library, with a style, a size and a number of images. */
-export function ImageStudio({userId, library, loadConfig, improvePrompt, createImage, styles, onLoad, onOpen, onDelete, onStartChat, removed}: {
+export function ImageStudio({userId, library, loadConfig, improvePrompt, createImage, uploadImage, styles, onLoad, onOpen, onDelete, onStartChat, removed}: {
   userId: string; library: Library | null; loadConfig: () => Promise<CreationConfig>;
-  improvePrompt: (prompt: string, style: string, signal?: AbortSignal) => Promise<string>;
-  createImage: (body: {prompt: string; style: string; size: string; improved?: string | null}, signal?: AbortSignal) => Promise<LibraryItem>;
+  improvePrompt: (prompt: string, style: string, signal?: AbortSignal, source?: string) => Promise<string>;
+  createImage: (body: CreateBody, signal?: AbortSignal) => Promise<LibraryItem>;
+  uploadImage: (file: File) => Promise<AttachmentRef>;
   styles: StyleApi;
   onLoad: () => void; onOpen: (image: AttachmentRef) => void; onDelete: (id: string) => void;
   onStartChat: (image: AttachmentRef) => void; removed: ReadonlySet<string>;
@@ -58,6 +69,9 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   const [making, setMaking] = useState<ReadonlySet<string>>(new Set());
   // Phone: the settings fold under the description (always shown on a computer).
   const [advanced, setAdvanced] = useState(false);
+  // "Image → image": the starting image, redrawn from the description with a strength.
+  const [source, setSource] = useState<AttachmentRef | null>(null);
+  const [picking, setPicking] = useState(false);
   const running = useRef<AbortController | null>(null);
   const menus = useRef<HTMLDivElement>(null);
 
@@ -115,12 +129,23 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   const images = [...created, ...(library?.items.filter(item => item.generation) ?? [])]
     .filter(item => !removed.has(item.id) && !seen.has(item.id) && seen.add(item.id));
   const busy = running.current !== null;
+  // The starting image deleted from the library: back to creating from the description alone.
+  useEffect(() => {if (source && removed.has(source.id)) setSource(null);}, [removed, source]);
+
+  function startFrom(image: AttachmentRef) {
+    setSource(image);
+    if (config) {
+      const size = sizeFor(config, image.width, image.height);
+      change({size, format: config.formats.find(format => format.size === size)?.name ?? 'custom'});
+    }
+    document.getElementById('studio-prompt')?.focus();
+  }
 
   async function improveNow() {
     if (!settings || !prompt.trim() || busy || improving) return;
     setError(''); setImproving(true);
     try {
-      const text = await improvePrompt(prompt.trim(), settings.style);
+      const text = await improvePrompt(prompt.trim(), settings.style, undefined, source?.id);
       // Improved twice: "Revenir à mon texte" still goes back to the user's own text.
       setBeforeImprove(value => value ?? prompt); setPrompt(text); setImproved(null);
     } catch (failure) { setError(errorMessage(failure)); }
@@ -139,6 +164,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     const controller = new AbortController(); running.current = controller;
     const batch = Date.now().toString(36);
     const count = settings.count, size = settings.size;
+    const start = source ? {source: source.id, strength: settings.strength} : {};
     setWaiting(Array.from({length: count}, (_, index) => ({key: `${batch}-${index}`, size, label: `Image ${index + 1} / ${count}`})));
     const label = (index: number, text: string) => setWaiting(list => list.map(item => item.key === `${batch}-${index}` ? {...item, label: text} : item));
     const started = performance.now();
@@ -149,13 +175,13 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
         // One rewriting for the whole series: the images share the same improved prompt.
         setWaiting(list => list.map(item => ({...item, label: 'Amélioration de la description…'})));
         setImproved(null);
-        rewritten = await improvePrompt(idea, settings.style, controller.signal);
+        rewritten = await improvePrompt(idea, settings.style, controller.signal, source?.id);
         setImproved(rewritten);
       }
       for (let index = 0; index < count; index++) {
         label(index, `Création ${index + 1} / ${count}…`);
         try {
-          const item = await createImage({prompt: original ?? idea, style: settings.style, size, improved: rewritten}, controller.signal);
+          const item = await createImage({prompt: original ?? idea, style: settings.style, size, improved: rewritten, ...start}, controller.signal);
           done++;
           setCreated(list => [item, ...list.filter(other => other.id !== item.id)]);
           setWaiting(list => list.filter(other => other.key !== `${batch}-${index}`));
@@ -178,7 +204,11 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     if (!config || !item.generation) return;
     const format = config.formats.find(value => value.size === item.generation!.size);
     change({style: allStyles(config).some(style => style.id === item.generation!.style) ? item.generation.style : config.default_style,
-      ...(config.sizes.includes(item.generation.size) ? {size: item.generation.size, format: format ? format.name : 'custom'} : {}), count: 1});
+      ...(config.sizes.includes(item.generation.size) ? {size: item.generation.size, format: format ? format.name : 'custom'} : {}), count: 1,
+      ...(item.generation.strength && config.strengths.some(value => value.id === item.generation!.strength!.id) ? {strength: item.generation.strength.id} : {})});
+    // The same starting image, if it is still in the library.
+    const start = item.generation.source ? library?.items.find(value => value.id === item.generation!.source && !removed.has(value.id)) : undefined;
+    setSource(start ? toRef(start) : null);
     setPrompt(item.generation.prompt); setBeforeImprove(null);
     document.getElementById('studio-prompt')?.focus();
   }
@@ -255,16 +285,32 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
 
       <div className="studio-main">
         <form className="studio-prompt" onSubmit={create}>
-          <textarea id="studio-prompt" rows={3} maxLength={config.max_prompt} value={prompt} placeholder="Décrivez l’image à créer…" aria-label="Description de l’image"
+          {source && <div className="studio-source" id="studio-source">
+            <button type="button" className="studio-source-image" aria-label="Changer l’image de départ" title="Changer l’image de départ" onClick={() => setPicking(true)}>
+              <img src={thumbnailURL(source.id)} alt=""/></button>
+            <div className="studio-source-text">
+              <span>Image de départ <span className="studio-help" tabIndex={0} title="L’image est redessinée selon votre description. Décrivez toute l’image voulue (le sujet et ce qui change), pas seulement le changement, ou utilisez « Améliorer » : Qwen regarde alors l’image de départ.">?</span></span>
+              <div className="studio-strengths" role="group" aria-label="Liberté prise avec l’image de départ">
+                {config.strengths.map(item => <button key={item.id} type="button" aria-pressed={settings.strength === item.id}
+                  title={{fidele: 'Retouche légère : l’image change peu', equilibre: 'L’image change nettement, sa composition reste', libre: 'Redessinée librement, en gardant la composition'}[item.id] ?? ''}
+                  onClick={() => change({strength: item.id})}>{item.name}</button>)}
+              </div>
+            </div>
+            <button type="button" className="icon-button" id="studio-source-remove" aria-label="Ne plus partir de cette image" title="Ne plus partir de cette image" onClick={() => setSource(null)}><Icon name="close"/></button>
+          </div>}
+          <textarea id="studio-prompt" rows={3} maxLength={config.max_prompt} value={prompt}
+            placeholder={source ? 'Décrivez l’image voulue, par exemple : la même scène en aquarelle…' : 'Décrivez l’image à créer…'} aria-label="Description de l’image"
             onChange={event => {setPrompt(event.target.value); if (!event.target.value.trim()) setBeforeImprove(null);}}
             onKeyDown={event => {if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {event.preventDefault(); event.currentTarget.form?.requestSubmit();}}}/>
           <div className="studio-actions">
+            {!source && <button type="button" id="studio-source-pick" className="studio-link studio-source-pick" disabled={busy} onClick={() => setPicking(true)}>
+              <Icon name="image"/>Partir d’une image</button>}
             <span className="studio-progress" role="status">{progress}</span>
             {beforeImprove !== null && <button type="button" className="studio-link" onClick={() => {setPrompt(beforeImprove); setBeforeImprove(null);}}>Revenir à mon texte</button>}
             {!settings.improve && <button type="button" id="studio-improve-now" className="studio-secondary" disabled={disabled || busy || improving || !prompt.trim()} onClick={() => {void improveNow();}}>
               <Icon name="news"/>{improving ? 'Amélioration…' : 'Améliorer'}</button>}
             {busy && <button type="button" className="studio-secondary" onClick={() => running.current?.abort()}>Arrêter</button>}
-            <button type="submit" id="studio-create" className="auth-submit" disabled={disabled || busy || improving || !prompt.trim()} title="Ctrl / Cmd + Entrée">Créer</button>
+            <button type="submit" id="studio-create" className="auth-submit" disabled={disabled || busy || improving || !prompt.trim()} title="Ctrl / Cmd + Entrée">{source ? 'Transformer' : 'Créer'}</button>
           </div>
         </form>
         {disabled && <p className="studio-error" role="alert">La création d’images n’est pas configurée sur ce site.</p>}
@@ -288,6 +334,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
               </button>
               <div className="studio-item-actions">
                 <button type="button" className="icon-button" aria-label={`Nouvelle conversation avec ${item.name}`} title="Nouvelle conversation avec cette image" onClick={() => onStartChat(toRef(item))}><Icon name="ask"/></button>
+                <button type="button" className="icon-button" aria-label={`Partir de ${item.name}`} title="Partir de cette image pour en créer une autre" onClick={() => startFrom(toRef(item))}><Icon name="image"/></button>
                 <button type="button" className="icon-button" aria-label={`Reprendre les réglages de ${item.name}`} title="Reprendre la description et les réglages" onClick={() => reuse(item)}><Icon name="retry"/></button>
                 <a className="icon-button" href={`${imageURL(item.id)}?download=1`} download={item.name} aria-label={`Télécharger ${item.name}`} title="Télécharger"><Icon name="download"/></a>
                 <button type="button" className="icon-button library-delete" aria-label={`Supprimer ${item.name}`} title="Supprimer" onClick={() => onDelete(item.id)}><Icon name="trash"/></button>
@@ -298,5 +345,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     </div>
     <StyleDialog open={editing !== null} style={editing?.style ?? null} limits={{name: config.max_style_name, words: config.max_style_words}} api={styles}
       onSaved={saved} onDeleted={deleted} onClose={() => setEditing(null)}/>
+    <SourcePicker open={picking} library={library} removed={removed} upload={async file => {const ref = await uploadImage(file); onLoad(); return ref;}}
+      onChoose={startFrom} onClose={() => setPicking(false)}/>
   </section>;
 }

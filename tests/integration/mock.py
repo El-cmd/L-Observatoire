@@ -1,5 +1,7 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import base64
+from email.parser import BytesParser
+from email.policy import HTTP
 import json
 import struct
 import time
@@ -15,12 +17,48 @@ def png(width, height, color=b'\x80\x60\x40'):
             + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b''))
 
 
+def form(content_type, raw):
+    """Fields and files of a multipart form, like the image service reads them."""
+    message = BytesParser(policy=HTTP).parsebytes(b'Content-Type: ' + content_type.encode() + b'\r\n\r\n' + raw)
+    fields, files = {}, {}
+    for part in message.iter_parts():
+        name = part.get_param('name', header='content-disposition')
+        if part.get_filename():
+            files[name] = (part.get_content_type(), part.get_payload(decode=True))
+        else:
+            fields[name] = part.get_payload(decode=True).decode()
+    return fields, files
+
+
 class Mock(BaseHTTPRequestHandler):
+    def send_json(self, value):
+        payload = json.dumps(value).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     def do_POST(self):
-        body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        raw = self.rfile.read(int(self.headers['Content-Length']))
         if self.headers.get('Authorization') != 'Bearer integration-test-key':
             self.send_error(401)
             return
+        if self.path == '/v1/images/edits':
+            # "Image → image": the starting image and a strength, in a multipart form. The new image is green.
+            fields, files = form(self.headers['Content-Type'], raw)
+            mime, image = files.get('image', ('', b''))
+            ok = fields.get('model') == 'qwen-image-turbo' and fields.get('n') == '1' and fields.get('response_format') == 'b64_json' \
+                and fields.get('seed', '').isdigit() and fields.get('strength') in ('0.625', '0.75', '0.875') \
+                and ((mime, image[:4]) == ('image/png', b'\x89PNG') or (mime, image[:3]) == ('image/jpeg', b'\xff\xd8\xff'))
+            if not ok or 'image-error' in fields.get('prompt', ''):
+                self.send_error(500, 'Private upstream detail: integration-test-key')
+                return
+            width, height = (int(v) for v in fields['size'].split('x'))
+            self.send_json({'created': 1, 'data': [{'b64_json': base64.b64encode(png(width, height, b'\x10\xc0\x10')).decode()}],
+                            'strength': fields['strength']})
+            return
+        body = json.loads(raw)
         if self.path == '/v1/images/generations':
             # Image model behind LiteLLM: one image per request, its seed chosen by the caller.
             ok = body.get('model') == 'qwen-image-turbo' and body.get('n') == 1 and body.get('response_format') == 'b64_json' \
@@ -72,6 +110,10 @@ class Mock(BaseHTTPRequestHandler):
                 # Description of an image rewritten by Qwen, with what the API must clean up.
                 assert body.get('reasoning_effort') == 'none'
                 content = '<think>Idée</think>\nPrompt: "A detailed red apple on a wooden table."'
+                if 'redraws the attached image' in system:
+                    # "Image → image": Qwen sees the starting image (its JPEG thumbnail) to describe it.
+                    assert len(images) == 1 and images[0].startswith('data:image/jpeg;base64,/9j/')
+                    content = 'The same small brown square, as a watercolor painting.'
             if 'style words' in system:
                 # Words of a user's style proposed by Qwen, with what the API must clean up.
                 assert body.get('reasoning_effort') == 'none'
