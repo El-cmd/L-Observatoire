@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-23-image-vers-image-auto', date: '2026-11-23', level: 'improvement', title: 'Image à partir d’une autre : plus besoin d’améliorer',
+    text: 'Quand vous partez d’une image, écrivez simplement ce qui doit changer (par exemple « retire-lui son chapeau ») et touchez Transformer : L’Observatoire regarde l’image et écrit tout seul la description complète. Il reconnaît aussi les personnages connus (de dessin animé, de manga, de jeu vidéo…) et les nomme, pour qu’ils restent fidèles. Pour retirer un objet, choisissez plutôt Équilibré ou Libre : Fidèle change très peu l’image.'},
   {id: '2026-11-23-image-vers-image', date: '2026-11-23', level: 'major', title: 'Créer une image à partir d’une autre',
     text: 'Dans l’onglet Images, touchez « Partir d’une image » sous la description, puis choisissez une image de votre bibliothèque ou de votre appareil (ou touchez l’icône image sous une image déjà créée). Elle est redessinée selon votre description : décrivez toute l’image voulue, par exemple « le même chat, en aquarelle », ou touchez Améliorer, qui regarde l’image pour vous. Choisissez ensuite combien elle peut changer : Fidèle, Équilibré ou Libre. Les formats 2:3 et 16:9 ont aussi maintenant leurs vraies proportions.'},
   {id: '2026-11-23-images-telephone', date: '2026-11-23', level: 'improvement', title: 'L’onglet Images plus simple sur téléphone',

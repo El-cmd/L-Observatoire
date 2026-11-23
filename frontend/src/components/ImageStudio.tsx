@@ -171,7 +171,9 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     let done = 0;
     try {
       let rewritten: string | null = original ? idea : null;
-      if (settings.improve) {
+      // From a starting image, always: the image model redraws it from the text alone, so Qwen looks at the
+      // image and describes all of it (unless the text already comes from Améliorer).
+      if (settings.improve || (source && !original)) {
         // One rewriting for the whole series: the images share the same improved prompt.
         setWaiting(list => list.map(item => ({...item, label: 'Amélioration de la description…'})));
         setImproved(null);
@@ -289,7 +291,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
             <button type="button" className="studio-source-image" aria-label="Changer l’image de départ" title="Changer l’image de départ" onClick={() => setPicking(true)}>
               <img src={thumbnailURL(source.id)} alt=""/></button>
             <div className="studio-source-text">
-              <span>Image de départ <span className="studio-help" tabIndex={0} title="L’image est redessinée selon votre description. Décrivez toute l’image voulue (le sujet et ce qui change), pas seulement le changement, ou utilisez « Améliorer » : Qwen regarde alors l’image de départ.">?</span></span>
+              <span>Image de départ <span className="studio-help" tabIndex={0} title="L’image est redessinée selon votre description. Écrivez simplement ce qui doit changer : Qwen regarde l’image de départ et écrit lui-même la description complète, en anglais, avant chaque transformation. « Améliorer » vous la montre d’abord, pour la retoucher.">?</span></span>
               <div className="studio-strengths" role="group" aria-label="Liberté prise avec l’image de départ">
                 {config.strengths.map(item => <button key={item.id} type="button" aria-pressed={settings.strength === item.id}
                   title={{fidele: 'Retouche légère : l’image change peu', equilibre: 'L’image change nettement, sa composition reste', libre: 'Redessinée librement, en gardant la composition'}[item.id] ?? ''}
@@ -299,7 +301,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
             <button type="button" className="icon-button" id="studio-source-remove" aria-label="Ne plus partir de cette image" title="Ne plus partir de cette image" onClick={() => setSource(null)}><Icon name="close"/></button>
           </div>}
           <textarea id="studio-prompt" rows={3} maxLength={config.max_prompt} value={prompt}
-            placeholder={source ? 'Décrivez l’image voulue, par exemple : la même scène en aquarelle…' : 'Décrivez l’image à créer…'} aria-label="Description de l’image"
+            placeholder={source ? 'Dites ce qui doit changer, par exemple : retire-lui son chapeau, ou : en aquarelle…' : 'Décrivez l’image à créer…'} aria-label="Description de l’image"
             onChange={event => {setPrompt(event.target.value); if (!event.target.value.trim()) setBeforeImprove(null);}}
             onKeyDown={event => {if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {event.preventDefault(); event.currentTarget.form?.requestSubmit();}}}/>
           <div className="studio-actions">
