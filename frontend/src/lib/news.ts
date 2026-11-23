@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-23-pleine-largeur', date: '2026-11-23', level: 'improvement', title: 'Images et bibliothèque sur toute la largeur',
+    text: 'Sur un ordinateur, l’onglet Images et la bibliothèque occupent maintenant toute la largeur de la fenêtre : plus d’images tiennent sur une ligne.'},
   {id: '2026-11-23-infos-image', date: '2026-11-23', level: 'improvement', title: 'Toutes les informations d’une image, à côté d’elle',
     text: 'Touchez une image pour l’agrandir : à droite (en dessous sur un téléphone), vous voyez votre description, la version améliorée par L’Observatoire et le texte exact reçu par le modèle d’images, chacun avec un bouton Copier, puis le style, la graine, la durée de création, les dimensions, le poids et la date. Cela marche dans l’onglet Images, la bibliothèque et les conversations.'},
   {id: '2026-11-22-styles-personnage', date: '2026-11-22', level: 'improvement', title: 'Des styles avec un personnage',
