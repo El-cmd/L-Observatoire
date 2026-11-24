@@ -14,7 +14,7 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 
 export const NEWS: NewsItem[] = [
   {id: '2026-11-24-boutons-retouche', date: '2026-11-24', level: 'improvement', title: 'Retoucher : de vrais boutons',
-    text: 'Sous « Retoucher », « Peindre la zone à changer » et « Ajouter une image » sont maintenant de vrais boutons. L’image de départ a sa propre croix, même quand elle est seule : touchez-la pour la retirer.'},
+    text: 'En mode « Retoucher », « Peindre la zone à changer » est maintenant un vrai bouton, et le bouton d’image placé sous vos images en ajoute une autre. L’image de départ a sa propre croix, même quand elle est seule : touchez-la pour la retirer.'},
   {id: '2026-11-24-images-empilees', date: '2026-11-24', level: 'improvement', title: 'Plusieurs images : plus faciles à suivre',
     text: 'Quand vous retouchez avec plusieurs images, elles s’affichent l’une sous l’autre avec leur numéro (Image 1, Image 2, Image 3), et chacune a sa croix pour la retirer. Si vous retirez l’image 1, l’image 2 prend sa place.'},
   {id: '2026-11-24-plusieurs-images', date: '2026-11-24', level: 'major', title: 'Retoucher avec plusieurs images',

@@ -333,6 +333,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
         <form className="studio-prompt" onSubmit={create}>
           {source && <div className={`studio-source${several ? ' several' : ''}`} id="studio-source">
             {/* Several images: one under the other, "Image 1", "Image 2"…, each with its cross. */}
+            <div className="studio-images-column">
             <ol className={`studio-images${several ? ' several' : ''}`} id="studio-images">
               <li>
                 <div className="studio-thumbwrap">
@@ -353,6 +354,10 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
                 <span>Image {index + 2}</span>
               </li>)}
             </ol>
+            {/* Another image, under those already there. */}
+            {retouch && others.length < config.max_references && <button type="button" id="studio-add-image" className="icon-button studio-add-image" disabled={busy}
+              aria-label="Ajouter une image" title="Ajouter une image : prendre une personne, un objet ou un décor dans une autre image" onClick={() => setPicking('other')}><Icon name="image"/></button>}
+            </div>
             <div className="studio-source-text">
               <span>{several ? 'Images' : 'Image de départ'} <span className="studio-help" tabIndex={0} title={retouch
                 ? 'Retoucher : seul ce que vous demandez change (retirer un objet, changer une couleur, ajouter un détail…), tout le reste de l’image est gardé. Écrivez simplement le changement : Qwen regarde l’image et en fait une consigne précise, en anglais. « Améliorer » vous la montre d’abord. Avec « Ajouter une image », prenez une personne, un objet ou un décor dans une autre image : « mets la personne de l’image 1 dans le décor de l’image 2 ».'
@@ -366,9 +371,6 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
                 <button type="button" id="studio-paint" className="studio-secondary studio-tool" aria-pressed={zone !== null} onClick={() => setPainting(true)}
                   title={several ? 'Seule la zone peinte de l’image 1 change' : 'Seule la zone peinte change'}>
                   <Icon name="edit"/>{zone ? 'Modifier la zone peinte' : 'Peindre la zone à changer'}</button>
-                {others.length < config.max_references && <button type="button" id="studio-add-image" className="studio-secondary studio-tool" disabled={busy}
-                  title="Prendre une personne, un objet ou un décor dans une autre image" onClick={() => setPicking('other')}>
-                  <Icon name="image"/>{others.length ? 'Une autre image' : 'Ajouter une image'}</button>}
                 {zone && <button type="button" className="studio-link" id="studio-zone-remove" onClick={() => setZone(null)}>Toute l’image</button>}
               </div>}
               {!retouch && <div className="studio-strengths" role="group" aria-label="Liberté prise avec l’image de départ">
