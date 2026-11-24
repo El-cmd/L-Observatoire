@@ -142,6 +142,7 @@ pub async fn config(State(app): State<App>, headers: HeaderMap) -> Result<Json<V
         "default_size": default_size,
         "max_count": MAX_COUNT,
         "max_prompt": MAX_PROMPT,
+        "max_references": MAX_REFERENCES,
         "strengths": STRENGTHS.iter().map(|(id, name, value)| json!({"id": id, "name": name, "value": value})).collect::<Vec<_>>(),
         "default_strength": DEFAULT_STRENGTH,
         "qualities": QUALITIES.iter().filter(|q| QUALITY_OFFERED || q.0 == DEFAULT_QUALITY).map(|(id, name, _)| json!({"id": id, "name": name})).collect::<Vec<_>>(),
@@ -190,6 +191,28 @@ pub struct Request {
     /// Id of `QUALITIES`; a starting image keeps its size, so the quality applies to new images only.
     #[serde(default)]
     quality: Option<String>,
+    /// "Retoucher" with other images of the library (images 2 and 3), that the instruction names:
+    /// "the woman from image 1 in the street from image 2".
+    #[serde(default)]
+    references: Vec<Uuid>,
+}
+
+/// Other images at most, after the starting image: the image service takes 3 images.
+pub const MAX_REFERENCES: usize = 2;
+
+/// The other images of a retouch, in order, each once and never the starting image.
+async fn references(app: &App, user: Uuid, start: Option<Uuid>, ids: &[Uuid]) -> Result<Vec<Source>, Error> {
+    if ids.is_empty() { return Ok(Vec::new()); }
+    if ids.len() > MAX_REFERENCES { return Err(Error::bad("Deux autres images au plus.")); }
+    let Some(start) = start else { return Err(Error::bad("Les autres images vont avec une image de départ.")); };
+    let mut seen = vec![start];
+    let mut list = Vec::with_capacity(ids.len());
+    for id in ids {
+        if seen.contains(id) { return Err(Error::bad("Chaque image ne compte qu’une fois.")); }
+        seen.push(*id);
+        list.push(source(app, user, *id).await.map_err(|_| Error::bad("Une des autres images n’est plus dans votre bibliothèque."))?);
+    }
+    Ok(list)
 }
 
 /// Largest mask accepted (a black and white PNG of the image's size weighs a few dozen Ko).
@@ -225,7 +248,7 @@ fn strength(id: Option<&str>) -> Result<&'static (&'static str, &'static str, f6
     STRENGTHS.iter().find(|s| s.0 == id).ok_or_else(|| Error::bad("Force inconnue."))
 }
 
-/// Multipart form of `/images/edits` (text fields, then files: the image and perhaps its mask),
+/// Multipart form of `/images/edits` (text fields, then files: the images in order and perhaps the mask),
 /// written by hand: reqwest is built without its multipart feature.
 fn multipart(fields: &[(&str, String)], files: &[(&str, &[u8], &str)]) -> (String, Vec<u8>) {
     let boundary = format!("observatoire-{}", Uuid::new_v4().simple());
@@ -254,7 +277,7 @@ fn image_name(prompt: &str, mime: &str) -> String {
 /// prompt, redrawn from a starting image with a strength ("Transformer"), or edited by an
 /// instruction without strength ("Retoucher": the image service's reference mode), perhaps in a
 /// painted zone only (`mask`: the rest of the image is kept to the pixel).
-async fn generate(app: &App, prompt: &str, size: &str, seed: u32, start: Option<(&Source, Option<f64>)>, mask: Option<&[u8]>, hd: Option<&str>) -> Result<Vec<u8>, Error> {
+async fn generate(app: &App, prompt: &str, size: &str, seed: u32, start: Option<(&Source, Option<f64>)>, others: &[Source], mask: Option<&[u8]>, hd: Option<&str>) -> Result<Vec<u8>, Error> {
     let busy = || Error(StatusCode::SERVICE_UNAVAILABLE, "Le service d’images est occupé ou indisponible. Réessayez dans un instant.".into());
     let _turn = app.images.acquire().await.map_err(|_| busy())?;
     let request = match start {
@@ -268,6 +291,7 @@ async fn generate(app: &App, prompt: &str, size: &str, seed: u32, start: Option<
                                   ("seed", seed.to_string()), ("response_format", "b64_json".into())];
             if let Some(strength) = strength { fields.push(("strength", strength.to_string())); }
             let mut files = vec![("image", source.data.as_slice(), source.mime.as_str())];
+            files.extend(others.iter().map(|other| ("image", other.data.as_slice(), other.mime.as_str())));
             if let Some(mask) = mask { files.push(("mask", mask, "image/png")); }
             let (content_type, body) = multipart(&fields, &files);
             app.http.post(format!("{}/images/edits", app.config.api_url)).header("Content-Type", content_type).body(body)
@@ -299,6 +323,7 @@ pub async fn create(State(app): State<App>, headers: HeaderMap, Json(request): J
         Some(_) => return Err(Error::bad("La zone peinte ne sert qu’à « Retoucher ».")),
         None => None,
     };
+    if !request.references.is_empty() && !retouch { return Err(Error::bad("Les autres images ne servent qu’à « Retoucher ».")); }
     // A retouch keeps the look of the image: no style words, which would restyle it.
     let style = if retouch { chosen(&app, user.user_id, "aucun").await? } else { chosen(&app, user.user_id, request.style.as_deref().unwrap_or(DEFAULT_STYLE)).await? };
     if !sizes(&app).contains(&request.size) { return Err(Error::bad("Taille d’image non prise en charge.")); }
@@ -306,6 +331,7 @@ pub async fn create(State(app): State<App>, headers: HeaderMap, Json(request): J
         Some(id) => Some((source(&app, user.user_id, id).await?, if retouch { None } else { Some(strength(request.strength.as_deref())?) })),
         None => None,
     };
+    let others = references(&app, user.user_id, request.source, &request.references).await?;
     let quality = if request.source.is_some() || !QUALITY_OFFERED { quality(None)? } else { quality(request.quality.as_deref())? };
     // An image weighs up to ~3 Mo before image-guard re-encodes it.
     if attachments::used_bytes(&app, user.user_id).await? + 3 * 1024 * 1024 > attachments::QUOTA_BYTES {
@@ -314,7 +340,7 @@ pub async fn create(State(app): State<App>, headers: HeaderMap, Json(request): J
     let sent = compose(improved.unwrap_or(&request.prompt), &style.words);
     let seed: u32 = rand::thread_rng().gen_range(0..i32::MAX as u32);
     let started = Instant::now();
-    let data = generate(&app, &sent, &request.size, seed, start.as_ref().map(|(source, strength)| (source, strength.map(|s| s.2))), zone.as_deref(), quality.2).await?;
+    let data = generate(&app, &sent, &request.size, seed, start.as_ref().map(|(source, strength)| (source, strength.map(|s| s.2))), &others, zone.as_deref(), quality.2).await?;
     let clean = attachments::sanitize(&app, Bytes::from(data)).await?;
     // prompt: the user's idea; improved: Qwen's rewriting, if any; sent: what the image model received.
     // source: the starting image (it may be deleted later); strength: how much was redrawn ("Transformer"),
@@ -328,6 +354,7 @@ pub async fn create(State(app): State<App>, headers: HeaderMap, Json(request): J
             Some((id, name, value)) => generation["strength"] = json!({"id": id, "name": name, "value": value}),
             None => { generation["retouch"] = json!(true); if zone.is_some() { generation["zone"] = json!(true); } }
         }
+        if !others.is_empty() { generation["references"] = json!(others.iter().map(|other| other.id).collect::<Vec<_>>()); }
     }
     let id = attachments::store_image(&app, user.user_id, &clean, &image_name(&request.prompt, &clean.mime), Some(generation)).await?;
     Ok((StatusCode::CREATED, Json(attachments::item(&app, user.user_id, id).await?)))
@@ -370,6 +397,19 @@ Rules:
 - Then add one sentence that starts with \"Keep everything else exactly the same:\" followed by the main things that must not change, as seen in the attached image (for example the face, the pose, the clothes, the background, the colors and the drawing style).
 - Any text that must be written in the image stays exactly as the user wrote it, between double quotes.
 - At most 80 words.
+- Answer with the instruction only: no introduction, no title, no list, no quotes around the whole instruction.";
+
+/// "Retoucher" with several images: the image model sees them as "image 1", "image 2"…, and edits image 1.
+const EDIT_SEVERAL: &str = "You write one edit instruction for the Qwen-Image model. It receives several images, numbered in order: image 1, image 2 and perhaps image 3. It edits image 1 and uses the other images as references: a person, a character, an object, a piece of clothing, a setting or a style to take from them. The user says, in any language, what to do with them.
+
+Rules:
+- First look carefully at each image. If one shows a known fictional character (from an anime, a manga, a comic, a film, a series, a video game, a mascot…), name them and their work, for example \"Pikachu from Pokémon\".
+- Write the change as one to three short imperative sentences in English that name the images by their number and say precisely what to take from each one, for example \"Place the woman from image 1 in the street from image 2, walking towards the camera.\" or \"Put the hat from image 2 on the man in image 1.\"
+- Describe briefly what you take from the other images (for example \"the orange tabby cat from image 2\"), so that it is recognised.
+- Do everything the user asks, and nothing more.
+- Then add one sentence that starts with \"Keep\" and lists what must not change, as seen in the images (for example the face, the hair and the clothes of the person in image 1).
+- Any text that must be written in the image stays exactly as the user wrote it, between double quotes.
+- At most 100 words.
 - Answer with the instruction only: no introduction, no title, no list, no quotes around the whole instruction.";
 
 pub fn improve_instructions(name: &str, words: &str) -> String {
@@ -415,6 +455,9 @@ pub struct ImproveRequest {
     source: Option<Uuid>,
     #[serde(default)]
     retouch: bool,
+    /// The other images of a retouch, that Qwen looks at too.
+    #[serde(default)]
+    references: Vec<Uuid>,
 }
 
 pub async fn improve(State(app): State<App>, headers: HeaderMap, Json(request): Json<ImproveRequest>) -> Result<Json<Value>, Error> {
@@ -425,9 +468,22 @@ pub async fn improve(State(app): State<App>, headers: HeaderMap, Json(request): 
     let failed = || Error(StatusCode::SERVICE_UNAVAILABLE, "Qwen n’a pas pu améliorer la description. Réessayez dans un instant.".into());
     let answer = match request.source {
         Some(id) => {
-            let image = format!("data:image/jpeg;base64,{}", STANDARD.encode(source(&app, user.user_id, id).await?.thumbnail));
-            let content = json!([{"type": "text", "text": request.prompt.trim()}, {"type": "image_url", "image_url": {"url": image}}]);
-            let system = if request.retouch { EDIT_INSTRUCTION.to_string() } else { with_style(IMPROVE_FROM_IMAGE, &style.name, &style.words) };
+            let others = if request.retouch { references(&app, user.user_id, Some(id), &request.references).await? } else { Vec::new() };
+            let image = |thumbnail: &[u8]| json!({"type": "image_url", "image_url": {"url": format!("data:image/jpeg;base64,{}", STANDARD.encode(thumbnail))}});
+            let mut content = vec![json!({"type": "text", "text": request.prompt.trim()})];
+            if others.is_empty() {
+                content.push(image(&source(&app, user.user_id, id).await?.thumbnail));
+            } else {
+                // Each image after its number, as the image model will see them.
+                content.push(json!({"type": "text", "text": "Image 1:"}));
+                content.push(image(&source(&app, user.user_id, id).await?.thumbnail));
+                for (index, other) in others.iter().enumerate() {
+                    content.push(json!({"type": "text", "text": format!("Image {}:", index + 2)}));
+                    content.push(image(&other.thumbnail));
+                }
+            }
+            let content = Value::Array(content);
+            let system = if !others.is_empty() { EDIT_SEVERAL.to_string() } else if request.retouch { EDIT_INSTRUCTION.to_string() } else { with_style(IMPROVE_FROM_IMAGE, &style.name, &style.words) };
             ask_qwen(&app, &system, content, if request.retouch { 0.3 } else { 0.7 }, 400).await
         }
         None => ask_qwen(&app, &improve_instructions(&style.name, &style.words), json!(request.prompt.trim()), 0.7, 400).await,
@@ -549,7 +605,7 @@ pub async fn make_example(State(app): State<App>, headers: HeaderMap, Path(id): 
         Some(answer) => example_scene(&answer),
         None => None,
     };
-    let data = generate(&app, &compose(scene.as_deref().unwrap_or(EXAMPLE_SUBJECT), &words), &size, EXAMPLE_SEED, None, None, None).await?;
+    let data = generate(&app, &compose(scene.as_deref().unwrap_or(EXAMPLE_SUBJECT), &words), &size, EXAMPLE_SEED, None, &[], None, None).await?;
     let clean = attachments::sanitize(&app, Bytes::from(data)).await?;
     let row: Option<StyleRow> = sqlx::query_as(&format!(
         "UPDATE image_styles SET example=$4,updated_at=now() WHERE id=$1 AND user_id=$2 AND words=$3 RETURNING {STYLE_COLUMNS}"))

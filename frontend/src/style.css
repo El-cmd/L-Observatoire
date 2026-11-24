@@ -354,12 +354,20 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .studio-strengths{display:flex;gap:6px;flex-wrap:wrap}
 .studio-strengths button{padding:6px 12px;border:1px solid transparent;border-radius:8px;background:#1f1f1f;color:#ddd;font-size:12.5px}
 .studio-strengths button[aria-pressed=true]{border-color:#ddd;background:#2a2a2a;color:#fff}
+.studio-strengths button:disabled{opacity:.4;cursor:not-allowed}
 .studio-source>.icon-button{align-self:flex-start}
 .studio-source-pick{display:inline-flex;align-items:center;gap:6px;text-decoration:none}.studio-source-pick svg{width:15px;height:15px}
 .studio-input{display:flex;align-items:flex-start;gap:6px}.studio-input textarea{flex:1;min-width:0}
 .studio-source-icon{flex-shrink:0;width:32px;height:32px;margin:-4px 0 0 -7px;color:#aaa}.studio-source-icon:hover:not(:disabled){color:#fff}.studio-source-icon svg{width:19px;height:19px}
 .studio-source-image{position:relative}.studio-source-image .studio-source-zone{position:absolute;inset:0;opacity:.6;object-fit:fill}
 .studio-zone{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+/* "Retoucher" with other images: their thumbnails numbered as the instruction names them. */
+.studio-others{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.studio-other{position:relative;width:44px;height:44px;border:1px solid #333;border-radius:8px;overflow:visible;background:#1b1b1b}
+.studio-other img{display:block;width:100%;height:100%;object-fit:cover;border-radius:7px}
+.studio-other .icon-button{position:absolute;top:-8px;right:-8px;width:20px;height:20px;padding:0;border-radius:50%;background:#2a2a2a;border:1px solid #444}
+.studio-other .icon-button svg{width:11px;height:11px}
+.studio-number{position:absolute;left:3px;bottom:3px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#000b;color:#fff;font-size:11px;line-height:16px;text-align:center}
 /* Painting the zone to retouch: the image, the strokes over it, at the image's proportions. */
 .mask-painter{width:min(900px,calc(100vw - 24px));max-height:calc(100dvh - 24px);background:#202020;border:1px solid #414141;border-radius:16px;color:#eee;padding:20px;overflow:auto}
 .mask-painter::backdrop{background:#000c}
@@ -380,6 +388,8 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .source-grid button:hover,.source-grid button:focus-visible{border-color:#ddd}.source-grid img{display:block;width:100%;height:100%;object-fit:cover}
 .image-info-source{margin-bottom:16px}.image-info-source h3{margin:0 0 6px;font-size:12px;font-weight:500;color:#aaa}
 .image-info-source img{display:block;max-width:160px;max-height:160px;border-radius:9px;border:1px solid #303030}
+.image-info-images{display:flex;gap:10px;flex-wrap:wrap;list-style:none;margin:0;padding:0}.image-info-images li{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:#999}
+.image-info-images img{width:88px;height:88px;object-fit:cover;max-width:none}
 .studio-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;align-items:start;list-style:none;margin:22px 0 0;padding:0}
 .studio-item{position:relative;border-radius:12px;overflow:hidden;background:#141414;border:1px solid #2a2a2a}
 .studio-thumb{position:relative;display:block;width:100%;padding:0;border:0;background:#1b1b1b;cursor:zoom-in}

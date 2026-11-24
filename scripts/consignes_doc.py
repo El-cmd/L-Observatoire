@@ -91,6 +91,8 @@ flowchart TB
         I6 -->|Transformer + force| I4
         I6 -->|Retoucher| I8[EDIT_INSTRUCTION<br/>+ image]:::sys
         I8 -->|sans force ni style| I4
+        I6 -->|Retoucher + autres images| I9[EDIT_SEVERAL<br/>+ images 1, 2, 3]:::sys
+        I9 -->|images dans l’ordre| I4
         I7 --> I4
     end
 
@@ -160,6 +162,7 @@ w("Avec un style qui a des mots :\n\n" + bloc('The style "{name}" ({words}) is a
 w("Avec le style « Aucun » :\n\n" + bloc('You may suggest an appropriate visual style or medium if the idea calls for one.'))
 w("### Améliorer la description d’une image → image (`IMPROVE_FROM_IMAGE`) — Système\n\nAvec une image de départ, Qwen reçoit la description de l’utilisateur et la miniature de l’image (640 px, JPEG). `{style}` devient les mêmes règles que ci-dessus.\n\n" + bloc(rust_const('backend/src/creation.rs', 'IMPROVE_FROM_IMAGE')))
 w("### Consigne d’une retouche (`EDIT_INSTRUCTION`) — Système\n\nMode « Retoucher » : Qwen reçoit la demande de l’utilisateur et la miniature de l’image, et écrit une consigne courte. Le modèle d’images la reçoit sans mots de style ni force (modification par référence : seul le changement demandé est fait).\n\n" + bloc(rust_const('backend/src/creation.rs', 'EDIT_INSTRUCTION')))
+w("### Consigne d’une retouche avec plusieurs images (`EDIT_SEVERAL`) — Système\n\nMode « Retoucher » avec une ou deux autres images : Qwen reçoit la demande puis chaque miniature précédée de « Image 1: », « Image 2: »…, et écrit une consigne qui désigne les images par leur numéro. Le modèle d’images reçoit les images dans le même ordre et les nomme de la même façon.\n\n" + bloc(rust_const('backend/src/creation.rs', 'EDIT_SEVERAL')))
 w("### Proposer les mots d’un style (`SUGGEST`) — Système\n\nBouton « Proposer les mots » de la fenêtre « Créer un style ».\n\n" + bloc(rust_const('backend/src/creation.rs', 'SUGGEST')))
 w("### Ce que reçoit le modèle d’images\n\nPas de consigne système : la description (ou sa version améliorée), puis les mots du style. En image → image, la même chose, avec l’image de départ et la force (Fidèle 0,625, Équilibré 0,75, Libre 0,875) :\n\n" + bloc("<description>\n\nStyle: <mots du style>."))
 w("### Sujet de l’image d’exemple d’un style (`EXAMPLE_SCENE`) — Système\n\nÀ l’enregistrement d’un style de « Mes styles », Qwen reçoit ses mots. S’ils nomment un personnage ou un univers, il propose une scène qui le montre ; sinon l’exemple garde le sujet habituel.\n\n" + bloc(rust_const('backend/src/creation.rs', 'EXAMPLE_SCENE')))

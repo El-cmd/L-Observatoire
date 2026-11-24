@@ -60,6 +60,8 @@ flowchart TB
         I6 -->|Transformer + force| I4
         I6 -->|Retoucher| I8[EDIT_INSTRUCTION<br/>+ image]:::sys
         I8 -->|sans force ni style| I4
+        I6 -->|Retoucher + autres images| I9[EDIT_SEVERAL<br/>+ images 1, 2, 3]:::sys
+        I9 -->|images dans l’ordre| I4
         I7 --> I4
     end
 
@@ -381,6 +383,23 @@ Rules:
 - Then add one sentence that starts with "Keep everything else exactly the same:" followed by the main things that must not change, as seen in the attached image (for example the face, the pose, the clothes, the background, the colors and the drawing style).
 - Any text that must be written in the image stays exactly as the user wrote it, between double quotes.
 - At most 80 words.
+- Answer with the instruction only: no introduction, no title, no list, no quotes around the whole instruction.
+```
+### Consigne d’une retouche avec plusieurs images (`EDIT_SEVERAL`) — Système
+
+Mode « Retoucher » avec une ou deux autres images : Qwen reçoit la demande puis chaque miniature précédée de « Image 1: », « Image 2: »…, et écrit une consigne qui désigne les images par leur numéro. Le modèle d’images reçoit les images dans le même ordre et les nomme de la même façon.
+
+```text
+You write one edit instruction for the Qwen-Image model. It receives several images, numbered in order: image 1, image 2 and perhaps image 3. It edits image 1 and uses the other images as references: a person, a character, an object, a piece of clothing, a setting or a style to take from them. The user says, in any language, what to do with them.
+
+Rules:
+- First look carefully at each image. If one shows a known fictional character (from an anime, a manga, a comic, a film, a series, a video game, a mascot…), name them and their work, for example "Pikachu from Pokémon".
+- Write the change as one to three short imperative sentences in English that name the images by their number and say precisely what to take from each one, for example "Place the woman from image 1 in the street from image 2, walking towards the camera." or "Put the hat from image 2 on the man in image 1."
+- Describe briefly what you take from the other images (for example "the orange tabby cat from image 2"), so that it is recognised.
+- Do everything the user asks, and nothing more.
+- Then add one sentence that starts with "Keep" and lists what must not change, as seen in the images (for example the face, the hair and the clothes of the person in image 1).
+- Any text that must be written in the image stays exactly as the user wrote it, between double quotes.
+- At most 100 words.
 - Answer with the instruction only: no introduction, no title, no list, no quotes around the whole instruction.
 ```
 ### Proposer les mots d’un style (`SUGGEST`) — Système

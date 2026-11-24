@@ -450,6 +450,29 @@ class Integration(unittest.TestCase):
         self.assertNotIn(read(painted['id']), (read(retouched['id']), read(item['id'])))
         for body in ({'retouch': True, 'mask': 'pas une image'}, {'retouch': True, 'mask': base64.b64encode(b'GIF89a').decode()}, {'mask': zone}):
             self.assertEqual(self.alice.call('/api/creation', 'POST', {'prompt': 'x', 'size': '1024x1024', 'source': start['id'], **body})[0], 400, body)
+        # "Retoucher" with other images (images 2 and 3), in order; Qwen sees each one after its number (orange in the mock).
+        _, second = upload(self.alice, png(41, 30), 'deux.png')
+        _, third = upload(self.alice, png(42, 30), 'trois.png')
+        code, several, _ = self.alice.call('/api/creation/improve', 'POST', {'prompt': 'les trois ensemble', 'source': start['id'], 'retouch': True,
+                                                                             'references': [second['id'], third['id']]})
+        self.assertEqual((code, several), (200, {'prompt': 'Put the square from image 1 next to the 2 square(s) of the other images. Keep the square of image 1.'}))
+        code, combined, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'les trois ensemble', 'size': '1152x896', 'improved': several['prompt'],
+                                                                      'source': start['id'], 'retouch': True, 'references': [second['id'], third['id']]})
+        self.assertEqual(code, 201, combined)
+        self.assertEqual((combined['generation']['source'], combined['generation']['references']), (start['id'], [second['id'], third['id']]))
+        self.assertNotIn(read(combined['id']), (read(retouched['id']), read(painted['id'])))
+        code, with_zone, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'le chat de l’image 2', 'size': '1152x896', 'source': start['id'], 'retouch': True,
+                                                                       'mask': zone, 'references': [second['id']]})
+        self.assertEqual((code, with_zone['generation'].get('zone'), with_zone['generation'].get('references')), (201, True, [second['id']]), with_zone)
+        # Refused: with "Transformer", without a starting image, three others, twice the same, the starting image again, someone else's.
+        for body in ({'source': start['id'], 'references': [second['id']]},
+                     {'retouch': True, 'references': [second['id']]},
+                     {'source': start['id'], 'retouch': True, 'references': [second['id'], third['id'], item['id']]},
+                     {'source': start['id'], 'retouch': True, 'references': [second['id'], second['id']]},
+                     {'source': start['id'], 'retouch': True, 'references': [start['id']]},
+                     {'source': start['id'], 'retouch': True, 'references': ['00000000-0000-4000-8000-000000000000']}):
+            self.assertEqual(self.alice.call('/api/creation', 'POST', {'prompt': 'x', 'size': '1024x1024', **body})[0], 400, body)
+        self.assertEqual(self.alice.call('/api/creation', 'GET')[1]['max_references'], 2)
         # Without a starting image, "retouch" means nothing: an ordinary image.
         code, alone, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'une pomme', 'style': 'aucun', 'size': '768x768', 'retouch': True})
         self.assertEqual((code, 'retouch' in alone['generation'], 'source' in alone['generation']), (201, False, False))

@@ -60,7 +60,7 @@ function restore(config: CreationConfig, saved: Partial<Settings> | null): Setti
 /** Images tab: creates images into the library, with a style, a size and a number of images. */
 export function ImageStudio({userId, library, loadConfig, improvePrompt, createImage, uploadImage, styles, onLoad, onOpen, onDelete, onStartChat, removed}: {
   userId: string; library: Library | null; loadConfig: () => Promise<CreationConfig>;
-  improvePrompt: (prompt: string, style: string, signal?: AbortSignal, source?: string, retouch?: boolean) => Promise<string>;
+  improvePrompt: (prompt: string, style: string, signal?: AbortSignal, source?: string, retouch?: boolean, references?: string[]) => Promise<string>;
   createImage: (body: CreateBody, signal?: AbortSignal) => Promise<LibraryItem>;
   uploadImage: (file: File) => Promise<AttachmentRef>;
   styles: StyleApi;
@@ -85,7 +85,9 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   const [advanced, setAdvanced] = useState(false);
   // "Image → image": the starting image, retouched by an instruction or redrawn with a strength.
   const [source, setSource] = useState<AttachmentRef | null>(null);
-  const [picking, setPicking] = useState(false);
+  // The library opened to choose the starting image, or another image of a retouch ("image 2", "image 3").
+  const [picking, setPicking] = useState<'source' | 'other' | null>(null);
+  const [others, setOthers] = useState<AttachmentRef[]>([]);
   // "Retoucher" a painted zone only (forgotten when the starting image changes).
   const [zone, setZone] = useState<Zone | null>(null);
   const [painting, setPainting] = useState(false);
@@ -149,6 +151,11 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   const retouch = source !== null && settings?.edit === 'retouche';
   // The starting image deleted from the library: back to creating from the description alone.
   useEffect(() => {if (source && removed.has(source.id)) setSource(null);}, [removed, source]);
+  useEffect(() => {if (others.some(other => removed.has(other.id))) setOthers(list => list.filter(other => !removed.has(other.id)));}, [removed, others]);
+  // The other images go with the starting image: forgotten without it, and never the starting image itself.
+  useEffect(() => {if (!source) setOthers([]); else setOthers(list => list.filter(other => other.id !== source.id));}, [source?.id]);
+  // Sent only to "Retoucher": "Transformer" redraws one image.
+  const references = retouch ? others.map(other => other.id) : [];
   useEffect(() => setZone(null), [source?.id]);
 
   function startFrom(image: AttachmentRef) {
@@ -164,7 +171,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     if (!settings || !prompt.trim() || busy || improving) return;
     setError(''); setImproving(true);
     try {
-      const text = await improvePrompt(prompt.trim(), settings.style, undefined, source?.id, retouch);
+      const text = await improvePrompt(prompt.trim(), settings.style, undefined, source?.id, retouch, references);
       // Improved twice: "Revenir à mon texte" still goes back to the user's own text.
       setBeforeImprove(value => value ?? prompt); setPrompt(text); setImproved(null);
     } catch (failure) { setError(errorMessage(failure)); }
@@ -183,7 +190,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     const controller = new AbortController(); running.current = controller;
     const batch = Date.now().toString(36);
     const count = settings.count, size = settings.size;
-    const start = source ? {source: source.id, ...(retouch ? {retouch: true, ...(zone ? {mask: zone.mask} : {})} : {strength: settings.strength})} : {quality: settings.quality};
+    const start = source ? {source: source.id, ...(retouch ? {retouch: true, ...(zone ? {mask: zone.mask} : {}), ...(references.length ? {references} : {})} : {strength: settings.strength})} : {quality: settings.quality};
     // The tiles that wait have the proportions of the image to come (HD changes the size, a starting image keeps its own).
     const shown = source ? size : finalSize(size, settings.quality);
     setWaiting(Array.from({length: count}, (_, index) => ({key: `${batch}-${index}`, size: shown, label: `Image ${index + 1} / ${count}`})));
@@ -198,7 +205,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
         // One rewriting for the whole series: the images share the same improved prompt.
         setWaiting(list => list.map(item => ({...item, label: 'Amélioration de la description…'})));
         setImproved(null);
-        rewritten = await improvePrompt(idea, settings.style, controller.signal, source?.id, retouch);
+        rewritten = await improvePrompt(idea, settings.style, controller.signal, source?.id, retouch, references);
         setImproved(rewritten);
       }
       for (let index = 0; index < count; index++) {
@@ -234,6 +241,10 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     // The same starting image, if it is still in the library.
     const start = item.generation.source ? library?.items.find(value => value.id === item.generation!.source && !removed.has(value.id)) : undefined;
     setSource(start ? toRef(start) : null);
+    // The same other images, those still in the library.
+    const kept = (item.generation.references ?? []).map(id => library?.items.find(value => value.id === id && !removed.has(value.id)))
+      .filter((value): value is LibraryItem => value !== undefined);
+    setOthers(start ? kept.map(toRef) : []);
     setPrompt(item.generation.prompt); setBeforeImprove(null);
     document.getElementById('studio-prompt')?.focus();
   }
@@ -320,20 +331,31 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
       <div className="studio-main">
         <form className="studio-prompt" onSubmit={create}>
           {source && <div className="studio-source" id="studio-source">
-            <button type="button" className="studio-source-image" aria-label="Changer l’image de départ" title="Changer l’image de départ" onClick={() => setPicking(true)}>
-              <img src={thumbnailURL(source.id)} alt=""/>{retouch && zone && <img className="studio-source-zone" src={zone.strokes} alt=""/>}</button>
+            <button type="button" className="studio-source-image" aria-label="Changer l’image de départ" title="Changer l’image de départ" onClick={() => setPicking('source')}>
+              <img src={thumbnailURL(source.id)} alt=""/>{retouch && zone && <img className="studio-source-zone" src={zone.strokes} alt=""/>}
+              {retouch && others.length > 0 && <b className="studio-number" aria-hidden="true">1</b>}</button>
             <div className="studio-source-text">
               <span>Image de départ <span className="studio-help" tabIndex={0} title={retouch
-                ? 'Retoucher : seul ce que vous demandez change (retirer un objet, changer une couleur, ajouter un détail…), tout le reste de l’image est gardé. Écrivez simplement le changement : Qwen regarde l’image et en fait une consigne précise, en anglais. « Améliorer » vous la montre d’abord.'
+                ? 'Retoucher : seul ce que vous demandez change (retirer un objet, changer une couleur, ajouter un détail…), tout le reste de l’image est gardé. Écrivez simplement le changement : Qwen regarde l’image et en fait une consigne précise, en anglais. « Améliorer » vous la montre d’abord. Avec « Ajouter une image », prenez une personne, un objet ou un décor dans une autre image : « mets la personne de l’image 1 dans le décor de l’image 2 ».'
                 : 'Transformer : toute l’image est redessinée selon votre description (pour changer de style, par exemple), plus ou moins librement. Qwen regarde l’image et écrit lui-même la description complète. « Améliorer » vous la montre d’abord.'}>?</span></span>
               <div className="studio-strengths studio-modes" role="group" aria-label="Que faire de l’image de départ">
                 <button type="button" id="studio-mode-retouch" aria-pressed={retouch} title="Seul ce que vous demandez change" onClick={() => change({edit: 'retouche'})}>Retoucher</button>
-                <button type="button" id="studio-mode-transform" aria-pressed={!retouch} title="Toute l’image est redessinée" onClick={() => change({edit: 'transformer'})}>Transformer</button>
+                <button type="button" id="studio-mode-transform" aria-pressed={!retouch} disabled={others.length > 0}
+                  title={others.length ? 'Transformer part d’une seule image : retirez d’abord les autres images' : 'Toute l’image est redessinée'} onClick={() => change({edit: 'transformer'})}>Transformer</button>
               </div>
               {retouch && <div className="studio-zone">
                 <button type="button" id="studio-paint" className="studio-link studio-source-pick" onClick={() => setPainting(true)}>
                   <Icon name="edit"/>{zone ? 'Zone peinte : la modifier' : 'Peindre la zone à changer'}</button>
                 {zone && <button type="button" className="studio-link" id="studio-zone-remove" onClick={() => setZone(null)}>Toute l’image</button>}
+              </div>}
+              {retouch && <div className="studio-others" id="studio-others">
+                {others.map((other, index) => <span key={other.id} className="studio-other">
+                  <img src={thumbnailURL(other.id)} alt={`Image ${index + 2}`}/><b className="studio-number" aria-hidden="true">{index + 2}</b>
+                  <button type="button" className="icon-button" aria-label={`Retirer l’image ${index + 2}`} title={`Retirer l’image ${index + 2}`}
+                    onClick={() => setOthers(list => list.filter(value => value.id !== other.id))}><Icon name="close"/></button></span>)}
+                {others.length < config.max_references && <button type="button" id="studio-add-image" className="studio-link studio-source-pick" disabled={busy}
+                  title="Prendre une personne, un objet ou un décor dans une autre image" onClick={() => setPicking('other')}>
+                  <Icon name="plus"/>{others.length ? 'Une autre image' : 'Ajouter une image'}</button>}
               </div>}
               {!retouch && <div className="studio-strengths" role="group" aria-label="Liberté prise avec l’image de départ">
                 {config.strengths.map(item => <button key={item.id} type="button" aria-pressed={settings.strength === item.id}
@@ -346,9 +368,9 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
           {/* Without a starting image: its icon in the top left corner, next to the description. */}
           <div className="studio-input">
           {!source && <button type="button" id="studio-source-pick" className="icon-button studio-source-icon" disabled={busy} aria-label="Partir d’une image" title="Partir d’une image"
-            onClick={() => setPicking(true)}><Icon name="image"/></button>}
+            onClick={() => setPicking('source')}><Icon name="image"/></button>}
           <textarea id="studio-prompt" rows={3} maxLength={config.max_prompt} value={prompt}
-            placeholder={!source ? 'Décrivez l’image à créer…' : retouch ? 'Dites ce qui doit changer, par exemple : retire-lui son chapeau…' : 'Dites ce que devient l’image, par exemple : en aquarelle…'} aria-label="Description de l’image"
+            placeholder={!source ? 'Décrivez l’image à créer…' : references.length ? `Dites quoi prendre dans chaque image, par exemple : mets la personne de l’image 1 dans le décor de l’image 2…` : retouch ? 'Dites ce qui doit changer, par exemple : retire-lui son chapeau…' : 'Dites ce que devient l’image, par exemple : en aquarelle…'} aria-label="Description de l’image"
             onChange={event => {setPrompt(event.target.value); if (!event.target.value.trim()) setBeforeImprove(null);}}
             onKeyDown={event => {if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {event.preventDefault(); event.currentTarget.form?.requestSubmit();}}}/>
           </div>
@@ -394,7 +416,11 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     <StyleDialog open={editing !== null} style={editing?.style ?? null} limits={{name: config.max_style_name, words: config.max_style_words}} api={styles}
       onSaved={saved} onDeleted={deleted} onClose={() => setEditing(null)}/>
     <MaskPainter image={painting ? source : null} zone={zone} onDone={setZone} onClose={() => setPainting(false)}/>
-    <SourcePicker open={picking} library={library} removed={removed} upload={async file => {const ref = await uploadImage(file); onLoad(); return ref;}}
-      onChoose={startFrom} onClose={() => setPicking(false)}/>
+    <SourcePicker open={picking !== null} other={picking === 'other'} library={library} upload={async file => {const ref = await uploadImage(file); onLoad(); return ref;}}
+      removed={picking === 'other' ? new Set([...removed, ...(source ? [source.id] : []), ...others.map(other => other.id)]) : removed}
+      onChoose={image => {
+        if (picking !== 'other') startFrom(image);
+        else if (image.id !== source?.id) setOthers(list => list.some(other => other.id === image.id) ? list : [...list, image].slice(0, config.max_references));
+      }} onClose={() => setPicking(null)}/>
   </section>;
 }

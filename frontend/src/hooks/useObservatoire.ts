@@ -514,8 +514,8 @@ export function useObservatoire() {
   const creationConfig = () => client.json<CreationConfig>('/api/creation');
   // source: "Image → image", Qwen then looks at the starting image to describe the whole result, or, with
   // retouch, to write a short edit instruction.
-  const improvePrompt = (prompt: string, style: string, signal?: AbortSignal, source?: string, retouch?: boolean) =>
-    client.json<{prompt: string}>('/api/creation/improve', {method:'POST', body:{prompt, style, source, retouch}, signal}).then(value => value.prompt);
+  const improvePrompt = (prompt: string, style: string, signal?: AbortSignal, source?: string, retouch?: boolean, references?: string[]) =>
+    client.json<{prompt: string}>('/api/creation/improve', {method:'POST', body:{prompt, style, source, retouch, references}, signal}).then(value => value.prompt);
   const createImage = (body: CreateBody, signal?: AbortSignal) =>
     client.json<LibraryItem>('/api/creation', {method:'POST', body, signal});
   /** An image of the device sent to the library, to start an image from it. */

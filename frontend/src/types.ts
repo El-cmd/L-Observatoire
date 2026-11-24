@@ -33,11 +33,13 @@ export interface Generation {
   /** "Image → image": the starting image (perhaps deleted since), and how much of it was redrawn
    * ("Transformer") or `retouch` ("Retoucher": only what was asked changed). */
   source?: string; strength?: Strength; retouch?: boolean; zone?: boolean;
+  /** Other images of a retouch ("image 2", "image 3"), in order. */
+  references?: string[];
   /** HD or Très HD (absent: Standard). */
   quality?: {id: string; name: string};
 }
 /** Asks one image of the Images tab; `source` and `strength` for "Image → image". */
-export interface CreateBody { prompt: string; style: string; size: string; improved?: string | null; source?: string; strength?: string; retouch?: boolean; mask?: string; quality?: string }
+export interface CreateBody { prompt: string; style: string; size: string; improved?: string | null; source?: string; strength?: string; retouch?: boolean; mask?: string; quality?: string; references?: string[] }
 /** How much of the starting image is redrawn: Fidèle, Équilibré, Libre. */
 export interface Strength { id: string; name: string; value: number }
 export interface CreationStyle { id: string; name: string; words: string }
@@ -45,7 +47,7 @@ export interface CreationStyle { id: string; name: string; words: string }
 export interface MyStyle extends CreationStyle { example: boolean; version: number }
 export interface CreationConfig {
   configured: boolean; styles: CreationStyle[]; default_style: string; formats: {name: string; size: string}[];
-  sizes: string[]; default_size: string; max_count: number; max_prompt: number;
+  sizes: string[]; default_size: string; max_count: number; max_prompt: number; max_references: number;
   my_styles: MyStyle[]; max_styles: number; max_style_name: number; max_style_words: number;
   strengths: Strength[]; default_strength: string;
   qualities: {id: string; name: string}[]; default_quality: string;

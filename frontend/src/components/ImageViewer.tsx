@@ -46,6 +46,7 @@ export function ImageViewer({image, loadInfo, onClose}: {image: AttachmentRef | 
     ...(generation ? [['Style', generation.style_name ?? generation.style], ...(generation.quality ? [['Qualité', generation.quality.name]] : []),
       ...(generation.strength ? [['Image de départ', `Transformée · ${generation.strength.name} (${generation.strength.value.toLocaleString('fr-FR')})`]] : []),
       ...(generation.retouch ? [['Image de départ', generation.zone ? 'Retouchée dans la zone peinte' : 'Retouchée : seul le changement demandé']] : []),
+      ...(generation.references?.length ? [['Autres images', `${generation.references.length} (prises en compte comme image${generation.references.length > 1 ? 's' : ''} ${generation.references.map((_, index) => index + 2).join(' et ')})`]] : []),
       ['Graine', String(generation.seed)], ['Durée de création', `${generation.seconds} s`]] as [string, string][] : []),
     ['Dimensions', `${info.width} × ${info.height} px`],
     ['Format', info.mime === 'image/png' ? 'PNG' : 'JPEG'],
@@ -72,11 +73,17 @@ export function ImageViewer({image, loadInfo, onClose}: {image: AttachmentRef | 
             {text ? <p id={`image-info-${key}`}>{text}</p> : <p className="image-info-none">Pas d’amélioration pour cette image.</p>}
           </section>)}
           {!generation && <p className="image-info-none">Image envoyée, pas créée ici : pas de description.</p>}
-          {generation?.source && <section className="image-info-source" id="image-info-source">
+          {generation?.source && !generation.references?.length && <section className="image-info-source" id="image-info-source">
             <h3>Image de départ</h3>
             {sourceGone ? <p className="image-info-none">Supprimée de votre bibliothèque.</p>
               : <img src={thumbnailURL(generation.source)} alt="Image de départ" onError={() => setSourceGone(true)}/>}
           </section>}
+          {generation?.source && generation.references?.length ? <section className="image-info-source" id="image-info-source">
+            <h3>Images utilisées</h3>
+            <ul className="image-info-images">{[generation.source, ...generation.references].map((id, index) => <li key={id}>
+              <img src={thumbnailURL(id)} alt={`Image ${index + 1}`} onError={event => {event.currentTarget.hidden = true;}}/>
+              <span>Image {index + 1}</span></li>)}</ul>
+          </section> : null}
           <dl className="image-info-details">{details.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
         </>}
       </aside>

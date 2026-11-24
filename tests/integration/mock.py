@@ -24,7 +24,10 @@ def form(content_type, raw):
     for part in message.iter_parts():
         name = part.get_param('name', header='content-disposition')
         if part.get_filename():
-            files[name] = (part.get_content_type(), part.get_payload(decode=True))
+            # The first file of a name; all of them, in order, under "name*" (several images).
+            entry = (part.get_content_type(), part.get_payload(decode=True))
+            files.setdefault(name, entry)
+            files.setdefault(name + '*', []).append(entry)
         else:
             fields[name] = part.get_payload(decode=True).decode()
     return fields, files
@@ -58,12 +61,19 @@ class Mock(BaseHTTPRequestHandler):
                 return
             width, height = (int(v) for v in fields['size'].split('x'))
             color = b'\x10\x10\xc0' if retouch else b'\x10\xc0\x10'
+            every = files.get('image*', [])
+            if len(every) > 1:
+                # Other images of a retouch ("image 2", "image 3"): never with a strength; the new image is orange.
+                if not retouch or len(every) > 3 or any(m not in ('image/png', 'image/jpeg') for m, _ in every):
+                    self.send_error(500, 'Private upstream detail: integration-test-key')
+                    return
+                color = b'\xc0\x80\x10'
             if 'mask' in files:
                 # A painted zone: a PNG mask, only with "Retoucher". The new image is purple.
                 if not retouch or files['mask'] != ('image/png', files['mask'][1]) or not files['mask'][1].startswith(b'\x89PNG'):
                     self.send_error(500, 'Private upstream detail: integration-test-key')
                     return
-                color = b'\x90\x10\xc0'
+                color = b'\x90\x10\xc0' if len(every) < 2 else b'\xc0\x10\x90'
             self.send_json({'created': 1, 'data': [{'b64_json': base64.b64encode(png(width, height, color)).decode()}]})
             return
         body = json.loads(raw)
@@ -128,7 +138,12 @@ class Mock(BaseHTTPRequestHandler):
                     # "Image → image": Qwen sees the starting image (its JPEG thumbnail) to describe it.
                     assert len(images) == 1 and images[0].startswith('data:image/jpeg;base64,/9j/')
                     content = 'The same small brown square, as a watercolor painting.'
-                if 'edit instruction' in system:
+                if 'several images' in system:
+                    # "Retoucher" with other images: each thumbnail after its number.
+                    assert len(images) in (2, 3) and all(i.startswith('data:image/jpeg;base64,/9j/') for i in images), images
+                    assert [line for line in last.split('\n') if line.startswith('Image ')] == [f'Image {n}:' for n in range(1, len(images) + 1)], last
+                    content = f'Put the square from image 1 next to the {len(images) - 1} square(s) of the other images. Keep the square of image 1.'
+                elif 'edit instruction' in system:
                     # "Retoucher": a short instruction written by Qwen looking at the image.
                     assert len(images) == 1 and images[0].startswith('data:image/jpeg;base64,/9j/')
                     content = '"Make the square blue. Keep everything else exactly the same: the size and the framing."'
