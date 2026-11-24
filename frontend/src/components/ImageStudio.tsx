@@ -91,6 +91,16 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   // "Retoucher" a painted zone only (forgotten when the starting image changes).
   const [zone, setZone] = useState<Zone | null>(null);
   const [painting, setPainting] = useState(false);
+  // The menu of "Retoucher": the whole image, or a painted zone only.
+  const [retouchOpen, setRetouchOpen] = useState(false);
+  const retouchMenu = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!retouchOpen) return;
+    function outside(event: MouseEvent) {if (!retouchMenu.current?.contains(event.target as Node)) setRetouchOpen(false);}
+    function escape(event: KeyboardEvent) {if (event.key === 'Escape') setRetouchOpen(false);}
+    document.addEventListener('mousedown', outside); document.addEventListener('keydown', escape);
+    return () => {document.removeEventListener('mousedown', outside); document.removeEventListener('keydown', escape);};
+  }, [retouchOpen]);
   const running = useRef<AbortController | null>(null);
   const menus = useRef<HTMLDivElement>(null);
 
@@ -363,18 +373,24 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
                 ? 'Retoucher : seul ce que vous demandez change (retirer un objet, changer une couleur, ajouter un détail…), tout le reste de l’image est gardé. Écrivez simplement le changement : Qwen regarde l’image et en fait une consigne précise, en anglais. « Améliorer » vous la montre d’abord. Avec « Ajouter une image », prenez une personne, un objet ou un décor dans une autre image : « mets la personne de l’image 1 dans le décor de l’image 2 ».'
                 : 'Transformer : toute l’image est redessinée selon votre description (pour changer de style, par exemple), plus ou moins librement. Qwen regarde l’image et écrit lui-même la description complète. « Améliorer » vous la montre d’abord.'}>?</span></span>
               <div className="studio-strengths studio-modes" role="group" aria-label="Que faire de l’image de départ">
-                <button type="button" id="studio-mode-retouch" aria-pressed={retouch} title="Seul ce que vous demandez change" onClick={() => change({edit: 'retouche'})}>Retoucher</button>
+                <div className={`studio-retouch${retouch ? ' on' : ''}`} ref={retouchMenu}>
+                  <button type="button" id="studio-mode-retouch" aria-pressed={retouch} title={zone ? 'Seule la zone peinte change' : 'Seul ce que vous demandez change'}
+                    onClick={() => change({edit: 'retouche'})}>{retouch && zone && <Icon name="brush"/>}Retoucher</button>
+                  <button type="button" id="studio-retouch-more" className="studio-retouch-more" aria-label="Choisir quoi retoucher" title="Toute l’image ou une zone peinte"
+                    aria-haspopup="menu" aria-expanded={retouchOpen} onClick={() => setRetouchOpen(value => !value)}><Icon name="chevron"/></button>
+                  {retouchOpen && <div className="studio-menu" role="menu" aria-label="Quoi retoucher">
+                    <button type="button" role="menuitemradio" id="studio-retouch-all" aria-checked={retouch && !zone}
+                      onClick={() => {change({edit: 'retouche'}); setZone(null); setRetouchOpen(false);}}><Icon name="image"/>
+                      <span><span className="web-menu-title">Toute l’image</span><span className="web-menu-hint">Seul le changement demandé est fait, le reste de l’image est gardé.</span></span></button>
+                    <button type="button" role="menuitemradio" id="studio-paint" aria-checked={retouch && zone !== null}
+                      onClick={() => {change({edit: 'retouche'}); setRetouchOpen(false); setPainting(true);}}><Icon name="brush"/>
+                      <span><span className="web-menu-title">{zone ? 'Modifier la zone peinte' : 'Peindre la zone à changer'}</span>
+                        <span className="web-menu-hint">Seule la zone peinte{several ? ' de l’image 1' : ''} est redessinée, le reste ne bouge pas au pixel près.</span></span></button>
+                  </div>}
+                </div>
                 <button type="button" id="studio-mode-transform" aria-pressed={!retouch} disabled={others.length > 0}
                   title={others.length ? 'Transformer part d’une seule image : retirez d’abord les autres images' : 'Toute l’image est redessinée'} onClick={() => change({edit: 'transformer'})}>Transformer</button>
               </div>
-              {retouch && <div className="studio-tools">
-                <button type="button" id="studio-paint" className="icon-button studio-add-image" aria-pressed={zone !== null} onClick={() => setPainting(true)}
-                  aria-label={zone ? 'Modifier la zone peinte' : 'Peindre la zone à changer'}
-                  title={zone ? 'Modifier la zone peinte : seule cette zone est redessinée, le reste de l’image ne bouge pas'
-                    : `Peindre la zone à changer${several ? ' dans l’image 1' : ''} : seule cette zone est redessinée, le reste de l’image ne bouge pas`}>
-                  <Icon name="brush"/></button>
-                {zone && <button type="button" className="studio-link" id="studio-zone-remove" onClick={() => setZone(null)}>Toute l’image</button>}
-              </div>}
               {!retouch && <div className="studio-strengths" role="group" aria-label="Liberté prise avec l’image de départ">
                 {config.strengths.map(item => <button key={item.id} type="button" aria-pressed={settings.strength === item.id}
                   title={{fidele: 'Retouche légère : l’image change peu', equilibre: 'L’image change nettement, sa composition reste', libre: 'Redessinée librement, en gardant la composition'}[item.id] ?? ''}

@@ -361,7 +361,16 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .studio-source-icon{flex-shrink:0;width:38px;height:38px;margin:-7px 0 0 -9px;color:#aaa}.studio-source-icon:hover:not(:disabled){color:#fff}.studio-source-icon svg{width:24px;height:24px}
 .studio-source-image{position:relative}.studio-source-image .studio-source-zone{position:absolute;inset:0;opacity:.6;object-fit:fill}
 /* "Retoucher" with other images: one under the other, "Image 1", "Image 2"…, a cross on each. */
-.studio-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+/* "Retoucher" and its menu: the whole image, or a painted zone only. */
+.studio-retouch{position:relative;display:inline-flex}
+.studio-retouch>button{display:inline-flex;align-items:center;gap:6px}.studio-retouch>button svg{width:14px;height:14px}
+.studio-retouch>button:first-child{border-top-right-radius:0;border-bottom-right-radius:0}
+.studio-strengths .studio-retouch-more{padding:6px 7px;border-top-left-radius:0;border-bottom-left-radius:0;margin-left:1px}
+.studio-strengths .studio-retouch.on .studio-retouch-more{border-color:#ddd;background:#2a2a2a;color:#fff}
+.studio-menu{position:absolute;left:0;top:calc(100% + 6px);z-index:14;width:min(290px,80vw);padding:6px;background:#242424;border:1px solid #424242;border-radius:13px;box-shadow:0 12px 35px #0008}
+.studio-strengths .studio-menu button{display:flex;align-items:flex-start;gap:10px;width:100%;padding:10px 12px;border:0;border-radius:8px;background:transparent;text-align:left;color:#ddd}
+.studio-strengths .studio-menu button:hover,.studio-strengths .studio-menu button:focus-visible{background:#333}.studio-strengths .studio-menu button[aria-checked=true]{background:#1d2a3a}
+.studio-menu svg{flex-shrink:0;width:18px;height:18px;margin-top:1px}.studio-menu button>span{display:flex;flex-direction:column;gap:2px}
 .studio-images{flex-shrink:0;align-self:flex-start;display:flex;flex-direction:column;gap:10px;list-style:none;margin:0;padding:0}
 .studio-images li{display:flex;flex-direction:column;align-items:center;gap:4px}
 .studio-images li>span{font-size:12px;color:#bbb}
