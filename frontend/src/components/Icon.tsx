@@ -1,4 +1,4 @@
-type Name = 'copy' | 'check' | 'retry' | 'sidebar' | 'new' | 'edit' | 'plus' | 'image' | 'download' | 'link' | 'ask' | 'trash' | 'user' | 'settings' | 'send' | 'stop' | 'close' | 'news' | 'document' | 'globe' | 'chevron' | 'ephemeral' | 'create';
+type Name = 'copy' | 'check' | 'retry' | 'sidebar' | 'new' | 'edit' | 'plus' | 'image' | 'download' | 'link' | 'ask' | 'trash' | 'user' | 'settings' | 'send' | 'stop' | 'close' | 'news' | 'document' | 'globe' | 'chevron' | 'ephemeral' | 'create' | 'imageAdd' | 'brush';
 export function Icon({name}: {name: Name}) {
   const paths = {
     copy: <><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></>,
@@ -9,6 +9,8 @@ export function Icon({name}: {name: Name}) {
     edit: <path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16zM13.5 6.5l4 4"/>,
     plus: <path d="M12 5v14M5 12h14"/>,
     image: <><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5-9 9"/></>,
+    imageAdd: <><path d="M13 4H5.5A2.5 2.5 0 0 0 3 6.5v11A2.5 2.5 0 0 0 5.5 20h13a2.5 2.5 0 0 0 2.5-2.5V12"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5-9 9M18 2v6M15 5h6"/></>,
+    brush: <><path d="m9.1 11.9 8-8a2.85 2.85 0 1 1 4 4l-8 8.1"/><path d="M7.1 14.9c-1.7 0-3 1.4-3 3 0 1.4-2.5 1.6-2 2.1 1.1 1.1 2.5 2 4 2 2.2 0 4-1.8 4-4a3 3 0 0 0-3-3.1z"/></>,
     download: <path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/>,
     link: <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>,
     ask: <><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 4v-4h0A1.5 1.5 0 0 1 4 14.5z"/><path d="M10 8.6a2 2 0 1 1 2.9 1.8c-.6.3-.9.8-.9 1.4M12 13.6h.01"/></>,

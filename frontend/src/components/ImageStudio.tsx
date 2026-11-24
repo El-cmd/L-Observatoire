@@ -356,7 +356,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
             </ol>
             {/* Another image, under those already there. */}
             {retouch && others.length < config.max_references && <button type="button" id="studio-add-image" className="icon-button studio-add-image" disabled={busy}
-              aria-label="Ajouter une image" title="Ajouter une image : prendre une personne, un objet ou un décor dans une autre image" onClick={() => setPicking('other')}><Icon name="image"/></button>}
+              aria-label="Ajouter une image" title="Ajouter une image : prendre une personne, un objet ou un décor dans une autre image" onClick={() => setPicking('other')}><Icon name="imageAdd"/></button>}
             </div>
             <div className="studio-source-text">
               <span>{several ? 'Images' : 'Image de départ'} <span className="studio-help" tabIndex={0} title={retouch
@@ -368,9 +368,11 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
                   title={others.length ? 'Transformer part d’une seule image : retirez d’abord les autres images' : 'Toute l’image est redessinée'} onClick={() => change({edit: 'transformer'})}>Transformer</button>
               </div>
               {retouch && <div className="studio-tools">
-                <button type="button" id="studio-paint" className="studio-secondary studio-tool" aria-pressed={zone !== null} onClick={() => setPainting(true)}
-                  title={several ? 'Seule la zone peinte de l’image 1 change' : 'Seule la zone peinte change'}>
-                  <Icon name="edit"/>{zone ? 'Modifier la zone peinte' : 'Peindre la zone à changer'}</button>
+                <button type="button" id="studio-paint" className="icon-button studio-add-image" aria-pressed={zone !== null} onClick={() => setPainting(true)}
+                  aria-label={zone ? 'Modifier la zone peinte' : 'Peindre la zone à changer'}
+                  title={zone ? 'Modifier la zone peinte : seule cette zone est redessinée, le reste de l’image ne bouge pas'
+                    : `Peindre la zone à changer${several ? ' dans l’image 1' : ''} : seule cette zone est redessinée, le reste de l’image ne bouge pas`}>
+                  <Icon name="brush"/></button>
                 {zone && <button type="button" className="studio-link" id="studio-zone-remove" onClick={() => setZone(null)}>Toute l’image</button>}
               </div>}
               {!retouch && <div className="studio-strengths" role="group" aria-label="Liberté prise avec l’image de départ">
@@ -383,7 +385,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
           {/* Without a starting image: its icon in the top left corner, next to the description. */}
           <div className="studio-input">
           {!source && <button type="button" id="studio-source-pick" className="icon-button studio-source-icon" disabled={busy} aria-label="Partir d’une image" title="Partir d’une image"
-            onClick={() => setPicking('source')}><Icon name="image"/></button>}
+            onClick={() => setPicking('source')}><Icon name="imageAdd"/></button>}
           <textarea id="studio-prompt" rows={3} maxLength={config.max_prompt} value={prompt}
             placeholder={!source ? 'Décrivez l’image à créer…' : references.length ? `Dites quoi prendre dans chaque image, par exemple : mets la personne de l’image 1 dans le décor de l’image 2…` : retouch ? 'Dites ce qui doit changer, par exemple : retire-lui son chapeau…' : 'Dites ce que devient l’image, par exemple : en aquarelle…'} aria-label="Description de l’image"
             onChange={event => {setPrompt(event.target.value); if (!event.target.value.trim()) setBeforeImprove(null);}}
