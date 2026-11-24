@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-24-images-empilees', date: '2026-11-24', level: 'improvement', title: 'Plusieurs images : plus faciles à suivre',
+    text: 'Quand vous retouchez avec plusieurs images, elles s’affichent l’une sous l’autre avec leur numéro (Image 1, Image 2, Image 3), et chacune a sa croix pour la retirer. Si vous retirez l’image 1, l’image 2 prend sa place.'},
   {id: '2026-11-24-plusieurs-images', date: '2026-11-24', level: 'major', title: 'Retoucher avec plusieurs images',
     text: 'Dans l’onglet Images, partez d’une image, choisissez « Retoucher » puis touchez « Ajouter une image » (deux de plus au maximum) : les images sont numérotées 1, 2 et 3. Écrivez ce que vous voulez en les désignant par leur numéro, par exemple « mets la personne de l’image 1 dans la rue de l’image 2 » ou « ajoute le chat de l’image 2 à ses pieds ». Le visage, les vêtements et le décor sont repris fidèlement. Cela marche aussi avec une zone peinte.'},
   {id: '2026-11-23-icone-image-depart', date: '2026-11-23', level: 'improvement', title: 'Partir d’une image : une simple icône',

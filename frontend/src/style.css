@@ -361,13 +361,16 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .studio-source-icon{flex-shrink:0;width:32px;height:32px;margin:-4px 0 0 -7px;color:#aaa}.studio-source-icon:hover:not(:disabled){color:#fff}.studio-source-icon svg{width:19px;height:19px}
 .studio-source-image{position:relative}.studio-source-image .studio-source-zone{position:absolute;inset:0;opacity:.6;object-fit:fill}
 .studio-zone{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-/* "Retoucher" with other images: their thumbnails numbered as the instruction names them. */
+/* "Retoucher" with other images: one under the other, "Image 1", "Image 2"…, a cross on each. */
 .studio-others{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.studio-other{position:relative;width:44px;height:44px;border:1px solid #333;border-radius:8px;overflow:visible;background:#1b1b1b}
-.studio-other img{display:block;width:100%;height:100%;object-fit:cover;border-radius:7px}
-.studio-other .icon-button{position:absolute;top:-8px;right:-8px;width:20px;height:20px;padding:0;border-radius:50%;background:#2a2a2a;border:1px solid #444}
-.studio-other .icon-button svg{width:11px;height:11px}
-.studio-number{position:absolute;left:3px;bottom:3px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#000b;color:#fff;font-size:11px;line-height:16px;text-align:center}
+.studio-images{flex-shrink:0;align-self:flex-start;display:flex;flex-direction:column;gap:10px;list-style:none;margin:0;padding:0}
+.studio-images li{display:flex;flex-direction:column;align-items:center;gap:4px}
+.studio-images li>span{font-size:12px;color:#bbb}
+.studio-thumbwrap{position:relative}
+.studio-source.several{align-items:flex-start}.studio-source.several .studio-source-text{padding-top:4px}
+.studio-other-image{display:block;width:64px;height:64px;object-fit:cover;border:1px solid #333;border-radius:9px;background:#1b1b1b}
+.studio-thumb-remove{position:absolute;top:4px;right:4px;display:grid;place-items:center;width:22px;height:22px;padding:0;border:0;border-radius:50%;background:#000c;color:#fff;cursor:pointer}
+.studio-thumb-remove:hover{background:#000}.studio-thumb-remove svg{width:12px;height:12px}
 /* Painting the zone to retouch: the image, the strokes over it, at the image's proportions. */
 .mask-painter{width:min(900px,calc(100vw - 24px));max-height:calc(100dvh - 24px);background:#202020;border:1px solid #414141;border-radius:16px;color:#eee;padding:20px;overflow:auto}
 .mask-painter::backdrop{background:#000c}
