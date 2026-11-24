@@ -341,38 +341,34 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
 
       <div className="studio-main">
         <form className="studio-prompt" onSubmit={create}>
-          {source && <div className={`studio-source${several ? ' several' : ''}`} id="studio-source">
-            {/* Several images: one under the other, "Image 1", "Image 2"…, each with its cross. */}
-            <div className="studio-images-column">
-            <ol className={`studio-images${several ? ' several' : ''}`} id="studio-images">
-              <li>
-                <div className="studio-thumbwrap">
-                  <button type="button" className="studio-source-image" aria-label="Changer l’image de départ" title="Changer l’image de départ" onClick={() => setPicking('source')}>
-                    <img src={thumbnailURL(source.id)} alt=""/>{retouch && zone && <img className="studio-source-zone" src={zone.strokes} alt=""/>}</button>
-                  <button type="button" className="studio-thumb-remove" id="studio-remove-1" aria-label={several ? 'Retirer l’image 1' : 'Retirer l’image de départ'}
-                    title={several ? 'Retirer l’image 1 (l’image 2 prend sa place)' : 'Retirer l’image de départ'}
-                    onClick={() => {if (!several) { setSource(null); return; } const [next, ...rest] = others; startFrom(next); setOthers(rest);}}><Icon name="close"/></button>
-                </div>
-                {several && <span>Image 1</span>}
-              </li>
-              {several && others.map((other, index) => <li key={other.id} className="studio-other">
-                <div className="studio-thumbwrap">
-                  <img className="studio-other-image" src={thumbnailURL(other.id)} alt=""/>
-                  <button type="button" className="studio-thumb-remove" id={`studio-remove-${index + 2}`} aria-label={`Retirer l’image ${index + 2}`} title={`Retirer l’image ${index + 2}`}
-                    onClick={() => setOthers(list => list.filter(value => value.id !== other.id))}><Icon name="close"/></button>
-                </div>
-                <span>Image {index + 2}</span>
-              </li>)}
-            </ol>
-            {/* Another image, under those already there. */}
-            {retouch && others.length < config.max_references && <button type="button" id="studio-add-image" className="icon-button studio-add-image" disabled={busy}
-              aria-label="Ajouter une image" title="Ajouter une image : prendre une personne, un objet ou un décor dans une autre image" onClick={() => setPicking('other')}><Icon name="imageAdd"/></button>}
-            </div>
-            <div className="studio-source-text">
-              <span>{several ? 'Images' : 'Image de départ'} <span className="studio-help" tabIndex={0} title={retouch
-                ? 'Retoucher : seul ce que vous demandez change (retirer un objet, changer une couleur, ajouter un détail…), tout le reste de l’image est gardé. Écrivez simplement le changement : Qwen regarde l’image et en fait une consigne précise, en anglais. « Améliorer » vous la montre d’abord. Avec « Ajouter une image », prenez une personne, un objet ou un décor dans une autre image : « mets la personne de l’image 1 dans le décor de l’image 2 ».'
-                : 'Transformer : toute l’image est redessinée selon votre description (pour changer de style, par exemple), plus ou moins librement. Qwen regarde l’image et écrit lui-même la description complète. « Améliorer » vous la montre d’abord.'}>?</span></span>
-              <div className="studio-strengths studio-modes" role="group" aria-label="Que faire de l’image de départ">
+          {/* The images, numbered, in a strip above the description: the instruction names them "image 1", "image 2"… */}
+          {source && <ol className="studio-strip" id="studio-images" aria-label={several ? 'Images' : 'Image de départ'}>
+            <li>
+              <button type="button" className="studio-source-image" aria-label="Changer l’image de départ" title="Changer l’image de départ" onClick={() => setPicking('source')}>
+                <img src={thumbnailURL(source.id)} alt=""/>{retouch && zone && <img className="studio-source-zone" src={zone.strokes} alt=""/>}
+                {several && <b className="studio-number" aria-hidden="true">1</b>}</button>
+              <button type="button" className="studio-thumb-remove" id="studio-remove-1" aria-label={several ? 'Retirer l’image 1' : 'Retirer l’image de départ'}
+                title={several ? 'Retirer l’image 1 (l’image 2 prend sa place)' : 'Retirer l’image de départ'}
+                onClick={() => {if (!several) { setSource(null); return; } const [next, ...rest] = others; startFrom(next); setOthers(rest);}}><Icon name="close"/></button>
+            </li>
+            {several && others.map((other, index) => <li key={other.id} className="studio-other">
+              <img src={thumbnailURL(other.id)} alt={`Image ${index + 2}`}/><b className="studio-number" aria-hidden="true">{index + 2}</b>
+              <button type="button" className="studio-thumb-remove" id={`studio-remove-${index + 2}`} aria-label={`Retirer l’image ${index + 2}`} title={`Retirer l’image ${index + 2}`}
+                onClick={() => setOthers(list => list.filter(value => value.id !== other.id))}><Icon name="close"/></button>
+            </li>)}
+          </ol>}
+          <textarea id="studio-prompt" rows={3} maxLength={config.max_prompt} value={prompt}
+            placeholder={!source ? 'Décrivez l’image à créer…' : references.length ? `Dites quoi prendre dans chaque image, par exemple : mets la personne de l’image 1 dans le décor de l’image 2…` : retouch ? 'Dites ce qui doit changer, par exemple : retire-lui son chapeau…' : 'Dites ce que devient l’image, par exemple : en aquarelle…'} aria-label="Description de l’image"
+            onChange={event => {setPrompt(event.target.value); if (!event.target.value.trim()) setBeforeImprove(null);}}
+            onKeyDown={event => {if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {event.preventDefault(); event.currentTarget.form?.requestSubmit();}}}/>
+          {/* Every option in one bar: an image to start from (or another one), what to do with it, then the actions. */}
+          <div className="studio-actions">
+            <div className="studio-options">
+              {!source && <button type="button" id="studio-source-pick" className="icon-button studio-add-image" disabled={busy} aria-label="Partir d’une image" title="Partir d’une image"
+                onClick={() => setPicking('source')}><Icon name="imageAdd"/></button>}
+              {retouch && others.length < config.max_references && <button type="button" id="studio-add-image" className="icon-button studio-add-image" disabled={busy}
+                aria-label="Ajouter une image" title="Ajouter une image : prendre une personne, un objet ou un décor dans une autre image" onClick={() => setPicking('other')}><Icon name="imageAdd"/></button>}
+              {source && <div className="studio-strengths studio-modes" role="group" aria-label="Que faire de l’image de départ">
                 <div className={`studio-retouch${retouch ? ' on' : ''}`} ref={retouchMenu}>
                   <button type="button" id="studio-mode-retouch" aria-pressed={retouch} title={zone ? 'Seule la zone peinte change' : 'Seul ce que vous demandez change'}
                     onClick={() => change({edit: 'retouche'})}>{retouch && zone && <Icon name="brush"/>}Retoucher</button>
@@ -390,24 +386,16 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
                 </div>
                 <button type="button" id="studio-mode-transform" aria-pressed={!retouch} disabled={others.length > 0}
                   title={others.length ? 'Transformer part d’une seule image : retirez d’abord les autres images' : 'Toute l’image est redessinée'} onClick={() => change({edit: 'transformer'})}>Transformer</button>
-              </div>
-              {!retouch && <div className="studio-strengths" role="group" aria-label="Liberté prise avec l’image de départ">
+              </div>}
+              {source && !retouch && <div className="studio-strengths" role="group" aria-label="Liberté prise avec l’image de départ">
                 {config.strengths.map(item => <button key={item.id} type="button" aria-pressed={settings.strength === item.id}
                   title={{fidele: 'Retouche légère : l’image change peu', equilibre: 'L’image change nettement, sa composition reste', libre: 'Redessinée librement, en gardant la composition'}[item.id] ?? ''}
                   onClick={() => change({strength: item.id})}>{item.name}</button>)}
               </div>}
+              {source && <span className="studio-help" tabIndex={0} title={retouch
+                ? 'Retoucher : seul ce que vous demandez change (retirer un objet, changer une couleur, ajouter un détail…), tout le reste de l’image est gardé. Écrivez simplement le changement : Qwen regarde l’image et en fait une consigne précise, en anglais. « Améliorer » vous la montre d’abord. Avec « Ajouter une image », prenez une personne, un objet ou un décor dans une autre image : « mets la personne de l’image 1 dans le décor de l’image 2 ».'
+                : 'Transformer : toute l’image est redessinée selon votre description (pour changer de style, par exemple), plus ou moins librement. Qwen regarde l’image et écrit lui-même la description complète. « Améliorer » vous la montre d’abord.'}>?</span>}
             </div>
-          </div>}
-          {/* Without a starting image: its icon in the top left corner, next to the description. */}
-          <div className="studio-input">
-          {!source && <button type="button" id="studio-source-pick" className="icon-button studio-source-icon" disabled={busy} aria-label="Partir d’une image" title="Partir d’une image"
-            onClick={() => setPicking('source')}><Icon name="imageAdd"/></button>}
-          <textarea id="studio-prompt" rows={3} maxLength={config.max_prompt} value={prompt}
-            placeholder={!source ? 'Décrivez l’image à créer…' : references.length ? `Dites quoi prendre dans chaque image, par exemple : mets la personne de l’image 1 dans le décor de l’image 2…` : retouch ? 'Dites ce qui doit changer, par exemple : retire-lui son chapeau…' : 'Dites ce que devient l’image, par exemple : en aquarelle…'} aria-label="Description de l’image"
-            onChange={event => {setPrompt(event.target.value); if (!event.target.value.trim()) setBeforeImprove(null);}}
-            onKeyDown={event => {if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {event.preventDefault(); event.currentTarget.form?.requestSubmit();}}}/>
-          </div>
-          <div className="studio-actions">
             <span className="studio-progress" role="status">{progress}</span>
             {beforeImprove !== null && <button type="button" className="studio-link" onClick={() => {setPrompt(beforeImprove); setBeforeImprove(null);}}>Revenir à mon texte</button>}
             {!settings.improve && <button type="button" id="studio-improve-now" className="studio-secondary" disabled={disabled || busy || improving || !prompt.trim()} onClick={() => {void improveNow();}}>

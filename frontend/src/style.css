@@ -338,7 +338,7 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .studio-prompt textarea{width:100%;min-height:60px;max-height:260px;resize:vertical;background:none;border:0;outline:none;color:#eee;font-size:15px;line-height:1.5}
 .studio-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
 .studio-actions .auth-submit{width:auto;padding:10px 22px}
-.studio-progress{margin-right:auto;font-size:12px;color:#888}
+.studio-progress{font-size:12px;color:#888}
 .studio-secondary{display:inline-flex;align-items:center;gap:6px;padding:9px 14px;border:1px solid #3a3a3a;border-radius:9px;background:none;color:#ddd;font-size:13px}
 .studio-secondary svg{width:15px;height:15px}.studio-secondary:hover:not(:disabled){background:#222}.studio-secondary:disabled{opacity:.45}
 .studio-link{border:0;background:none;padding:2px;color:#999;font-size:12.5px;text-decoration:underline}.studio-link:hover{color:#eee}
@@ -346,19 +346,12 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .studio-improved{margin-top:12px;padding:10px 14px;border:1px solid #2e2e2e;border-radius:12px;background:#141414}
 .studio-improved>span{font-size:12px;font-weight:600;color:#aaa}.studio-improved p{margin:6px 0 4px;font-size:13.5px;line-height:1.55;color:#ddd}
 /* "Image → image": the starting image above the description, with how much it may change. */
-.studio-source{display:flex;align-items:center;gap:12px;margin:0 0 10px;padding:0 0 10px;border-bottom:1px solid #262626}
 .studio-source-image{flex-shrink:0;width:64px;height:64px;padding:0;border:1px solid #333;border-radius:9px;overflow:hidden;background:#1b1b1b}
 .studio-source-image img{display:block;width:100%;height:100%;object-fit:cover}.studio-source-image:hover{border-color:#777}
-.studio-source-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:7px}
-.studio-source-text>span{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:#bbb}
 .studio-strengths{display:flex;gap:6px;flex-wrap:wrap}
 .studio-strengths button{padding:6px 12px;border:1px solid transparent;border-radius:8px;background:#1f1f1f;color:#ddd;font-size:12.5px}
 .studio-strengths button[aria-pressed=true]{border-color:#ddd;background:#2a2a2a;color:#fff}
 .studio-strengths button:disabled{opacity:.4;cursor:not-allowed}
-.studio-source>.icon-button{align-self:flex-start}
-.studio-source-pick{display:inline-flex;align-items:center;gap:6px;text-decoration:none}.studio-source-pick svg{width:15px;height:15px}
-.studio-input{display:flex;align-items:flex-start;gap:6px}.studio-input textarea{flex:1;min-width:0}
-.studio-source-icon{flex-shrink:0;width:38px;height:38px;margin:-7px 0 0 -9px;color:#aaa}.studio-source-icon:hover:not(:disabled){color:#fff}.studio-source-icon svg{width:24px;height:24px}
 .studio-source-image{position:relative}.studio-source-image .studio-source-zone{position:absolute;inset:0;opacity:.6;object-fit:fill}
 /* "Retoucher" with other images: one under the other, "Image 1", "Image 2"…, a cross on each. */
 /* "Retoucher" and its menu: the whole image, or a painted zone only. */
@@ -371,15 +364,15 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .studio-strengths .studio-menu button{display:flex;align-items:flex-start;gap:10px;width:100%;padding:10px 12px;border:0;border-radius:8px;background:transparent;text-align:left;color:#ddd}
 .studio-strengths .studio-menu button:hover,.studio-strengths .studio-menu button:focus-visible{background:#333}.studio-strengths .studio-menu button[aria-checked=true]{background:#1d2a3a}
 .studio-menu svg{flex-shrink:0;width:18px;height:18px;margin-top:1px}.studio-menu button>span{display:flex;flex-direction:column;gap:2px}
-.studio-images{flex-shrink:0;align-self:flex-start;display:flex;flex-direction:column;gap:10px;list-style:none;margin:0;padding:0}
-.studio-images li{display:flex;flex-direction:column;align-items:center;gap:4px}
-.studio-images li>span{font-size:12px;color:#bbb}
-.studio-thumbwrap{position:relative}
-.studio-images-column{flex-shrink:0;align-self:flex-start;display:flex;flex-direction:column;align-items:center;gap:8px}
-.studio-add-image{width:40px;height:40px;border:1px solid #3a3a3a;border-radius:9px;color:#bbb}.studio-add-image:hover:not(:disabled){color:#fff;background:#222}
+.studio-add-image{width:38px;height:38px;border:1px solid #3a3a3a;border-radius:9px;color:#bbb}.studio-add-image:hover:not(:disabled){color:#fff;background:#222}
 .studio-add-image svg{width:22px;height:22px}.studio-add-image[aria-pressed=true]{border-color:#bbb;color:#fff}
-.studio-source.several{align-items:flex-start}.studio-source.several .studio-source-text{padding-top:4px}
-.studio-other-image{display:block;width:64px;height:64px;object-fit:cover;border:1px solid #333;border-radius:9px;background:#1b1b1b}
+/* The images above the description, numbered, each with its cross. */
+.studio-strip{display:flex;gap:10px;flex-wrap:wrap;list-style:none;margin:2px 0 8px;padding:0}
+.studio-strip li{position:relative;width:60px;height:60px}
+.studio-strip li>img{display:block;width:100%;height:100%;object-fit:cover;border:1px solid #333;border-radius:9px;background:#1b1b1b}
+.studio-strip .studio-source-image{width:60px;height:60px}
+.studio-number{position:absolute;left:4px;bottom:4px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:#000c;color:#fff;font-size:11px;font-weight:600;line-height:17px;text-align:center}
+.studio-options{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-right:auto}
 .studio-thumb-remove{position:absolute;top:4px;right:4px;display:grid;place-items:center;width:22px;height:22px;padding:0;border:0;border-radius:50%;background:#000c;color:#fff;cursor:pointer}
 .studio-thumb-remove:hover{background:#000}.studio-thumb-remove svg{width:12px;height:12px}
 /* Painting the zone to retouch: the image, the strokes over it, at the image's proportions. */

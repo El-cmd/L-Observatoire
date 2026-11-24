@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-24-zone-description', date: '2026-11-24', level: 'improvement', title: 'Images : une zone de description plus compacte',
+    text: 'Dans l’onglet Images, vos images s’affichent en petites vignettes numérotées au-dessus du texte, et tous les réglages sont réunis dans la barre du bas : le bouton d’image avec un « + », Retoucher (et son menu), Transformer, Améliorer et le bouton pour lancer la création.'},
   {id: '2026-11-24-boutons-retouche', date: '2026-11-24', level: 'improvement', title: 'Retoucher : un menu et de vrais boutons',
     text: 'La petite flèche à côté de « Retoucher » ouvre un menu : « Toute l’image » ou « Peindre la zone à changer » (le pinceau). Le bouton d’image avec un « + », sous vos images, en ajoute une autre. L’image de départ a sa propre croix, même quand elle est seule : touchez-la pour la retirer.'},
   {id: '2026-11-24-images-empilees', date: '2026-11-24', level: 'improvement', title: 'Plusieurs images : plus faciles à suivre',
