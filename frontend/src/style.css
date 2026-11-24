@@ -360,9 +360,9 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .studio-input{display:flex;align-items:flex-start;gap:6px}.studio-input textarea{flex:1;min-width:0}
 .studio-source-icon{flex-shrink:0;width:32px;height:32px;margin:-4px 0 0 -7px;color:#aaa}.studio-source-icon:hover:not(:disabled){color:#fff}.studio-source-icon svg{width:19px;height:19px}
 .studio-source-image{position:relative}.studio-source-image .studio-source-zone{position:absolute;inset:0;opacity:.6;object-fit:fill}
-.studio-zone{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 /* "Retoucher" with other images: one under the other, "Image 1", "Image 2"…, a cross on each. */
-.studio-others{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.studio-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.studio-tool{padding:6px 11px;font-size:12.5px}.studio-tool[aria-pressed=true]{border-color:#bbb;color:#fff}
 .studio-images{flex-shrink:0;align-self:flex-start;display:flex;flex-direction:column;gap:10px;list-style:none;margin:0;padding:0}
 .studio-images li{display:flex;flex-direction:column;align-items:center;gap:4px}
 .studio-images li>span{font-size:12px;color:#bbb}

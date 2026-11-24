@@ -338,8 +338,9 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
                 <div className="studio-thumbwrap">
                   <button type="button" className="studio-source-image" aria-label="Changer l’image de départ" title="Changer l’image de départ" onClick={() => setPicking('source')}>
                     <img src={thumbnailURL(source.id)} alt=""/>{retouch && zone && <img className="studio-source-zone" src={zone.strokes} alt=""/>}</button>
-                  {several && <button type="button" className="studio-thumb-remove" id="studio-remove-1" aria-label="Retirer l’image 1" title="Retirer l’image 1 (l’image 2 prend sa place)"
-                    onClick={() => {const [next, ...rest] = others; startFrom(next); setOthers(rest);}}><Icon name="close"/></button>}
+                  <button type="button" className="studio-thumb-remove" id="studio-remove-1" aria-label={several ? 'Retirer l’image 1' : 'Retirer l’image de départ'}
+                    title={several ? 'Retirer l’image 1 (l’image 2 prend sa place)' : 'Retirer l’image de départ'}
+                    onClick={() => {if (!several) { setSource(null); return; } const [next, ...rest] = others; startFrom(next); setOthers(rest);}}><Icon name="close"/></button>
                 </div>
                 {several && <span>Image 1</span>}
               </li>
@@ -361,15 +362,14 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
                 <button type="button" id="studio-mode-transform" aria-pressed={!retouch} disabled={others.length > 0}
                   title={others.length ? 'Transformer part d’une seule image : retirez d’abord les autres images' : 'Toute l’image est redessinée'} onClick={() => change({edit: 'transformer'})}>Transformer</button>
               </div>
-              {retouch && <div className="studio-zone">
-                <button type="button" id="studio-paint" className="studio-link studio-source-pick" onClick={() => setPainting(true)}>
-                  <Icon name="edit"/>{zone ? 'Zone peinte : la modifier' : several ? 'Peindre la zone à changer dans l’image 1' : 'Peindre la zone à changer'}</button>
-                {zone && <button type="button" className="studio-link" id="studio-zone-remove" onClick={() => setZone(null)}>Toute l’image</button>}
-              </div>}
-              {retouch && <div className="studio-others" id="studio-others">
-                {others.length < config.max_references && <button type="button" id="studio-add-image" className="studio-link studio-source-pick" disabled={busy}
+              {retouch && <div className="studio-tools">
+                <button type="button" id="studio-paint" className="studio-secondary studio-tool" aria-pressed={zone !== null} onClick={() => setPainting(true)}
+                  title={several ? 'Seule la zone peinte de l’image 1 change' : 'Seule la zone peinte change'}>
+                  <Icon name="edit"/>{zone ? 'Modifier la zone peinte' : 'Peindre la zone à changer'}</button>
+                {others.length < config.max_references && <button type="button" id="studio-add-image" className="studio-secondary studio-tool" disabled={busy}
                   title="Prendre une personne, un objet ou un décor dans une autre image" onClick={() => setPicking('other')}>
-                  <Icon name="plus"/>{others.length ? 'Une autre image' : 'Ajouter une image'}</button>}
+                  <Icon name="image"/>{others.length ? 'Une autre image' : 'Ajouter une image'}</button>}
+                {zone && <button type="button" className="studio-link" id="studio-zone-remove" onClick={() => setZone(null)}>Toute l’image</button>}
               </div>}
               {!retouch && <div className="studio-strengths" role="group" aria-label="Liberté prise avec l’image de départ">
                 {config.strengths.map(item => <button key={item.id} type="button" aria-pressed={settings.strength === item.id}
@@ -377,7 +377,6 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
                   onClick={() => change({strength: item.id})}>{item.name}</button>)}
               </div>}
             </div>
-            <button type="button" className="icon-button" id="studio-source-remove" aria-label={several ? 'Ne plus partir de ces images' : 'Ne plus partir de cette image'} title={several ? 'Ne plus partir de ces images' : 'Ne plus partir de cette image'} onClick={() => setSource(null)}><Icon name="close"/></button>
           </div>}
           {/* Without a starting image: its icon in the top left corner, next to the description. */}
           <div className="studio-input">
