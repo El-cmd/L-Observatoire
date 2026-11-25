@@ -81,14 +81,27 @@ pub(crate) struct Clean {
     height: i32,
     data: Vec<u8>,
     thumbnail: Vec<u8>,
+    transparent: bool,
 }
 impl Clean {
     pub fn thumbnail(&self) -> &[u8] { &self.thumbnail }
+    pub fn width(&self) -> i32 { self.width }
+    pub fn height(&self) -> i32 { self.height }
+    pub fn transparent(&self) -> bool { self.transparent }
 }
 
 pub(crate) async fn sanitize(app: &App, body: Bytes) -> Result<Clean, Error> {
+    sanitize_with(app, body, false).await
+}
+
+/// An image whose background was removed: image-guard keeps its transparency (PNG).
+pub(crate) async fn sanitize_transparent(app: &App, body: Bytes) -> Result<Clean, Error> {
+    sanitize_with(app, body, true).await
+}
+
+async fn sanitize_with(app: &App, body: Bytes, keep_alpha: bool) -> Result<Clean, Error> {
     let unavailable = || Error(StatusCode::SERVICE_UNAVAILABLE, "Le traitement des images est indisponible. Réessaie dans un instant.".into());
-    let response = app.http.post(format!("{}/sanitize", app.config.image_guard))
+    let response = app.http.post(format!("{}/sanitize{}", app.config.image_guard, if keep_alpha { "?alpha=1" } else { "" }))
         .timeout(Duration::from_secs(40)).body(body).send().await.map_err(|_| unavailable())?;
     let status = response.status();
     let value: Value = response.json().await.map_err(|_| unavailable())?;
@@ -104,7 +117,7 @@ pub(crate) async fn sanitize(app: &App, body: Bytes) -> Result<Clean, Error> {
     let mime = value.get("mime").and_then(Value::as_str).filter(|m| matches!(*m, "image/jpeg" | "image/png"));
     match (mime, size("width"), size("height"), field("data"), field("thumbnail")) {
         (Some(mime), Some(width), Some(height), Some(data), Some(thumbnail)) if !data.is_empty() && !thumbnail.is_empty() =>
-            Ok(Clean { mime: mime.to_string(), width, height, data, thumbnail }),
+            Ok(Clean { mime: mime.to_string(), width, height, data, thumbnail, transparent: value.get("transparent").and_then(Value::as_bool).unwrap_or(false) }),
         _ => Err(unavailable()),
     }
 }

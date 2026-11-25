@@ -69,7 +69,7 @@ export default function App() {
             onClick={() => {setNews(false); void chat.toggleEphemeral();}}><Icon name="ephemeral"/></button>}<span id="connection" className="sr-only" role="status">{chat.navigating ? 'Chargement…' : chat.auth.configured ? 'API configurée' : 'Configuration requise'}</span>
         </header>
         {news ? <NewsView items={newsFor(chat.auth.user)} onClose={() => setNews(false)}/> : studio ? <ImageStudio userId={chat.auth.user.id} library={chat.library}
-          loadConfig={chat.creationConfig} improvePrompt={chat.improvePrompt} createImage={chat.createImage} uploadImage={chat.uploadImage} styles={chat.styles} onLoad={() => {void chat.loadLibrary();}}
+          loadConfig={chat.creationConfig} improvePrompt={chat.improvePrompt} createImage={chat.createImage} cutoutImage={chat.cutoutImage} uploadImage={chat.uploadImage} styles={chat.styles} onLoad={() => {void chat.loadLibrary();}}
           onOpen={setViewer} onDelete={id => {void chat.deleteImage(id);}} removed={chat.removedImages}
           onStartChat={image => {setStudio(false); void chat.newChat().then(() => {chat.addFromLibrary([image]); askAbout();});}}/> : library !== 'closed' ? <LibraryView library={chat.library} picking={library === 'pick'} room={MAX_IMAGES - chat.pending.length}
           onLoad={() => {void chat.loadLibrary();}} onClose={() => setLibrary('closed')} onOpen={setViewer} onDelete={id => {void chat.deleteImage(id);}}

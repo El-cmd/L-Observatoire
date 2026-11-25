@@ -35,6 +35,8 @@ export interface Generation {
   source?: string; strength?: Strength; retouch?: boolean; zone?: boolean;
   /** Other images of a retouch ("image 2", "image 3"), in order. */
   references?: string[];
+  /** "Enlever le fond": the starting image with its background made transparent (by a detouring model, not drawn). */
+  cutout?: boolean;
   /** HD or Très HD (absent: Standard). */
   quality?: {id: string; name: string};
 }

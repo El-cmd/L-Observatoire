@@ -17,6 +17,15 @@ def png(width, height, color=b'\x80\x60\x40'):
             + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b''))
 
 
+def png_cutout(width, height):
+    """A transparent PNG (RGBA) like the background removal returns: the left half transparent."""
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
+    rows = b''.join(b'\x00' + b''.join(b'\x20\x90\x30' + (b'\x00' if x < width // 2 else b'\xff') for x in range(width)) for _ in range(height))
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 6, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b''))
+
+
 def form(content_type, raw):
     """Fields and files of a multipart form, like the image service reads them."""
     message = BytesParser(policy=HTTP).parsebytes(b'Content-Type: ' + content_type.encode() + b'\r\n\r\n' + raw)
@@ -52,6 +61,15 @@ class Mock(BaseHTTPRequestHandler):
             # "Retoucher": no strength, and never style words (they would restyle the image); the new image is blue.
             fields, files = form(self.headers['Content-Type'], raw)
             mime, image = files.get('image', ('', b''))
+            if fields.get('background') == 'transparent':
+                # "Enlever le fond": one image, a PNG answer; never with a strength, a mask or a size.
+                ok = fields.get('output_format') == 'png' and len(files.get('image*', [])) == 1 and not {'strength', 'mask', 'size'} & (set(fields) | set(files)) \
+                    and ((mime, image[:4]) == ('image/png', b'\x89PNG') or (mime, image[:3]) == ('image/jpeg', b'\xff\xd8\xff'))
+                if not ok:
+                    self.send_error(500, 'Private upstream detail: integration-test-key')
+                    return
+                self.send_json({'created': 1, 'data': [{'b64_json': base64.b64encode(png_cutout(48, 36)).decode()}], 'output_format': 'png'})
+                return
             retouch = 'strength' not in fields
             ok = fields.get('model') == 'qwen-image-turbo' and fields.get('n') == '1' and fields.get('response_format') == 'b64_json' \
                 and fields.get('seed', '').isdigit() and (fields.get('strength') in ('0.625', '0.75', '0.875') or (retouch and 'Style:' not in fields.get('prompt', ''))) \

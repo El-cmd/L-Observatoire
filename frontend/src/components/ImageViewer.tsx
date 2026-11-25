@@ -37,13 +37,15 @@ export function ImageViewer({image, loadInfo, onClose}: {image: AttachmentRef | 
     void navigator.clipboard?.writeText(text).then(() => setCopied(key), () => setCopied(''));
   }
   const generation = info?.generation ?? null;
-  const texts: [string, string, string | null][] = generation ? [
+  const cutout = generation?.cutout === true;
+  const texts: [string, string, string | null][] = generation && !cutout ? [
     ['prompt', 'Votre description', generation.prompt],
     ['improved', 'Améliorée par Qwen', improvedOf(generation)],
     ['sent', 'Envoyée au modèle d’images', generation.sent],
   ] : [];
   const details: [string, string][] = info ? [
-    ...(generation ? [['Style', generation.style_name ?? generation.style], ...(generation.quality ? [['Qualité', generation.quality.name]] : []),
+    ...(cutout ? [['Image de départ', 'Fond enlevé (transparent)'], ['Durée', `${generation!.seconds} s`]] as [string, string][] : []),
+    ...(generation && !cutout ? [['Style', generation.style_name ?? generation.style], ...(generation.quality ? [['Qualité', generation.quality.name]] : []),
       ...(generation.strength ? [['Image de départ', `Transformée · ${generation.strength.name} (${generation.strength.value.toLocaleString('fr-FR')})`]] : []),
       ...(generation.retouch ? [['Image de départ', generation.zone ? 'Retouchée dans la zone peinte' : 'Retouchée : seul le changement demandé']] : []),
       ...(generation.references?.length ? [['Autres images', `${generation.references.length} (prises en compte comme image${generation.references.length > 1 ? 's' : ''} ${generation.references.map((_, index) => index + 2).join(' et ')})`]] : []),
@@ -58,7 +60,7 @@ export function ImageViewer({image, loadInfo, onClose}: {image: AttachmentRef | 
     onClick={event => {if (event.target === dialog.current) onClose();}}>
     {image && <div className="image-viewer-layout">
       <div className="image-viewer-main">
-        <img src={imageURL(image.id)} alt={image.name}/>
+        <img src={imageURL(image.id)} alt={image.name} className={cutout ? 'transparent' : undefined}/>
         <div className="image-viewer-bar">
           <span title={image.name}>{image.name}</span>
           <a className="icon-button" href={`${imageURL(image.id)}?download=1`} download={image.name} aria-label="Télécharger l’image" title="Télécharger"><Icon name="download"/></a>

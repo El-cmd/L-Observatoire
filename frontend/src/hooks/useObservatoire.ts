@@ -518,6 +518,9 @@ export function useObservatoire() {
     client.json<{prompt: string}>('/api/creation/improve', {method:'POST', body:{prompt, style, source, retouch, references}, signal}).then(value => value.prompt);
   const createImage = (body: CreateBody, signal?: AbortSignal) =>
     client.json<LibraryItem>('/api/creation', {method:'POST', body, signal});
+  /** "Enlever le fond": a new transparent copy of an image of the library. */
+  const cutoutImage = (source: string, signal?: AbortSignal) =>
+    client.json<LibraryItem>('/api/creation/cutout', {method:'POST', body:{source}, signal});
   /** An image of the device sent to the library, to start an image from it. */
   async function uploadImage(file: File) {
     const ref = await client.json<AttachmentRef>(`/api/attachments?name=${encodeURIComponent(file.name || 'image')}`, {method:'POST', body:await prepareImage(file)});
@@ -569,7 +572,7 @@ export function useObservatoire() {
   return {auth, initializing, loginError, signingIn, login, logout, changePassword,
     chats, current:activeChat, activity, busy:currentActivity === 'generating', navigating,
     notice:(currentId && notices[currentId]) || notices[''] || null, notify,
-    prompt, setPrompt, pending, addImages, addFromLibrary, removePending, library, loadLibrary, deleteImage, imageConversations, documentText, attachmentInfo, removedImages, creationConfig, improvePrompt, createImage, uploadImage, styles,
+    prompt, setPrompt, pending, addImages, addFromLibrary, removePending, library, loadLibrary, deleteImage, imageConversations, documentText, attachmentInfo, removedImages, creationConfig, improvePrompt, createImage, cutoutImage, uploadImage, styles,
     settings, setSettings, newChat, openChat, ephemeral:isEphemeral(activeChat), toggleEphemeral, deleteChat, renameChat, send, regenerate, continueAnswer,
     contextUsage:contextUsage && contextUsage.conversation_id === currentId && contextUsage.version === activeChat?.version ? contextUsage : null,
     compacting:currentActivity === 'compacting', compactContext, summaryFocus,

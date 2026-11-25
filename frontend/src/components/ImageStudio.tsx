@@ -58,10 +58,11 @@ function restore(config: CreationConfig, saved: Partial<Settings> | null): Setti
 }
 
 /** Images tab: creates images into the library, with a style, a size and a number of images. */
-export function ImageStudio({userId, library, loadConfig, improvePrompt, createImage, uploadImage, styles, onLoad, onOpen, onDelete, onStartChat, removed}: {
+export function ImageStudio({userId, library, loadConfig, improvePrompt, createImage, cutoutImage, uploadImage, styles, onLoad, onOpen, onDelete, onStartChat, removed}: {
   userId: string; library: Library | null; loadConfig: () => Promise<CreationConfig>;
   improvePrompt: (prompt: string, style: string, signal?: AbortSignal, source?: string, retouch?: boolean, references?: string[]) => Promise<string>;
   createImage: (body: CreateBody, signal?: AbortSignal) => Promise<LibraryItem>;
+  cutoutImage: (source: string, signal?: AbortSignal) => Promise<LibraryItem>;
   uploadImage: (file: File) => Promise<AttachmentRef>;
   styles: StyleApi;
   onLoad: () => void; onOpen: (image: AttachmentRef) => void; onDelete: (id: string) => void;
@@ -241,8 +242,48 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
     }
   }
 
+  /** "Enlever le fond", at once: each image (1, 2, 3) gives a new transparent image; the originals stay. */
+  async function removeBackground() {
+    setRetouchOpen(false);
+    if (!source || running.current) return;
+    const list = [source, ...others];
+    setError('');
+    const controller = new AbortController(); running.current = controller;
+    const batch = Date.now().toString(36);
+    setWaiting(list.map((image, index) => ({key: `${batch}-${index}`, size: `${image.width}x${image.height}`,
+      label: list.length > 1 ? `Fond de l’image ${index + 1} en cours…` : 'Fond en cours de retrait…'})));
+    const started = performance.now();
+    let done = 0;
+    try {
+      for (const [index, image] of list.entries()) {
+        try {
+          const item = await cutoutImage(image.id, controller.signal);
+          done++;
+          setCreated(items => [item, ...items.filter(other => other.id !== item.id)]);
+          setWaiting(items => items.filter(other => other.key !== `${batch}-${index}`));
+          setProgress(`${done} / ${list.length} · ${((performance.now() - started) / 1000).toFixed(1)} s`);
+        } catch (failure) {
+          if (failure instanceof Error && failure.name === 'AbortError') throw failure;
+          setWaiting(items => items.map(other => other.key === `${batch}-${index}` ? {...other, error: errorMessage(failure)} : other));
+        }
+      }
+    } catch (failure) {
+      if (!(failure instanceof Error && failure.name === 'AbortError')) setError(errorMessage(failure));
+    } finally {
+      running.current = null;
+      setWaiting(items => items.filter(item => item.error));
+      if (done) onLoad();
+    }
+  }
+
   function reuse(item: LibraryItem) {
     if (!config || !item.generation) return;
+    if (item.generation.cutout) {
+      // A background removed: back to the original image, nothing to write.
+      const original = library?.items.find(value => value.id === item.generation!.source && !removed.has(value.id));
+      setSource(original ? toRef(original) : null); setOthers([]);
+      return;
+    }
     const format = config.formats.find(value => value.size === item.generation!.size);
     change({style: allStyles(config).some(style => style.id === item.generation!.style) ? item.generation.style : config.default_style,
       ...(config.sizes.includes(item.generation.size) ? {size: item.generation.size, format: format ? format.name : 'custom'} : {}), count: 1,
@@ -382,6 +423,9 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
                       onClick={() => {change({edit: 'retouche'}); setRetouchOpen(false); setPainting(true);}}><Icon name="brush"/>
                       <span><span className="web-menu-title">{zone ? 'Modifier la zone peinte' : 'Peindre la zone à changer'}</span>
                         <span className="web-menu-hint">Seule la zone peinte{several ? ' de l’image 1' : ''} est redessinée, le reste ne bouge pas au pixel près.</span></span></button>
+                    <button type="button" role="menuitem" id="studio-cutout" disabled={busy} onClick={() => {void removeBackground();}}><Icon name="scissors"/>
+                      <span><span className="web-menu-title">Enlever le fond</span>
+                        <span className="web-menu-hint">Tout de suite, sans rien écrire : {several ? 'chaque image donne' : 'donne'} une nouvelle image au fond transparent, l’originale reste.</span></span></button>
                   </div>}
                 </div>
                 <button type="button" id="studio-mode-transform" aria-pressed={!retouch} disabled={others.length > 0}

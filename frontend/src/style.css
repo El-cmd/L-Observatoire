@@ -393,6 +393,8 @@ button .context-ring{width:27px;height:27px;fill:none;stroke-width:2.2;transform
 .source-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;list-style:none;margin:0;padding:0;max-height:min(420px,50dvh);overflow:auto}
 .source-grid button{display:block;width:100%;aspect-ratio:1;padding:0;border:2px solid transparent;border-radius:9px;overflow:hidden;background:#1b1b1b}
 .source-grid button:hover,.source-grid button:focus-visible{border-color:#ddd}.source-grid img{display:block;width:100%;height:100%;object-fit:cover}
+/* A transparent image (background removed): a checkerboard behind it shows what is transparent. */
+.image-viewer-main img.transparent{background:repeating-conic-gradient(#3a3a3a 0 25%,#2a2a2a 0 50%) 0 0/20px 20px}
 .image-info-source{margin-bottom:16px}.image-info-source h3{margin:0 0 6px;font-size:12px;font-weight:500;color:#aaa}
 .image-info-source img{display:block;max-width:160px;max-height:160px;border-radius:9px;border:1px solid #303030}
 .image-info-images{display:flex;gap:10px;flex-wrap:wrap;list-style:none;margin:0;padding:0}.image-info-images li{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:#999}

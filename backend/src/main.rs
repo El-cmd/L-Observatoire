@@ -289,6 +289,7 @@ async fn main() -> Result<()> {
         .route("/api/attachments/{id}/conversations", get(attachments::conversations))
         .route("/api/creation", get(creation::config).post(creation::create).layer(DefaultBodyLimit::max(3 * 1024 * 1024)))
         .route("/api/creation/improve", post(creation::improve).layer(DefaultBodyLimit::max(64 * 1024)))
+        .route("/api/creation/cutout", post(creation::cutout).layer(DefaultBodyLimit::max(16 * 1024)))
         .route("/api/creation/styles", post(creation::add_style).layer(DefaultBodyLimit::max(16 * 1024)))
         .route("/api/creation/styles/suggest", post(creation::suggest_style).layer(DefaultBodyLimit::max(16 * 1024)))
         .route("/api/creation/styles/{id}", put(creation::edit_style).delete(creation::delete_style).layer(DefaultBodyLimit::max(16 * 1024)))

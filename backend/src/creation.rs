@@ -360,6 +360,57 @@ pub async fn create(State(app): State<App>, headers: HeaderMap, Json(request): J
     Ok((StatusCode::CREATED, Json(attachments::item(&app, user.user_id, id).await?)))
 }
 
+#[derive(Deserialize)]
+pub struct CutoutRequest {
+    source: Uuid,
+}
+
+/// "Enlever le fond": the image service removes the background (BiRefNet, `background=transparent`), and the
+/// image comes back as a new transparent PNG of the library; the original stays.
+pub async fn cutout(State(app): State<App>, headers: HeaderMap, Json(request): Json<CutoutRequest>) -> Result<(StatusCode, Json<Value>), Error> {
+    let user = session(&app, &headers, true).await?;
+    if !configured(&app) { return Err(not_configured()); }
+    let start = source(&app, user.user_id, request.source).await?;
+    let name: String = sqlx::query_scalar("SELECT name FROM attachments WHERE id=$1 AND user_id=$2").bind(start.id).bind(user.user_id).fetch_one(&app.db).await?;
+    if attachments::used_bytes(&app, user.user_id).await? + 8 * 1024 * 1024 > attachments::QUOTA_BYTES {
+        return Err(Error::bad(attachments::FULL));
+    }
+    let busy = || Error(StatusCode::SERVICE_UNAVAILABLE, "Le fond n’a pas pu être enlevé. Réessayez dans un instant.".into());
+    let started = Instant::now();
+    let data = {
+        let _turn = app.images.acquire().await.map_err(|_| busy())?;
+        let fields = [("model", app.config.image_model.clone()), ("prompt", "Remove the background.".to_string()), ("n", "1".into()),
+                      ("background", "transparent".into()), ("output_format", "png".into()), ("response_format", "b64_json".into())];
+        let (content_type, body) = multipart(&fields, &[("image", start.data.as_slice(), start.mime.as_str())]);
+        let response = app.http.post(format!("{}/images/edits", app.config.api_url)).header("Content-Type", content_type).body(body)
+            .bearer_auth(&app.config.api_key).timeout(Duration::from_secs(90)).send().await.map_err(|_| busy())?;
+        if !response.status().is_success() {
+            tracing::warn!(status = response.status().as_u16(), "background removal failed");
+            return Err(busy());
+        }
+        let value: Value = response.json().await.map_err(|_| busy())?;
+        value.pointer("/data/0/b64_json").and_then(Value::as_str).and_then(|b| STANDARD.decode(b).ok()).ok_or_else(busy)?
+    };
+    // A PNG with transparency (colour type 4 or 6), or the image service does not know how to remove a background
+    // (an older version would redraw the image instead).
+    if !(data.starts_with(b"\x89PNG\r\n\x1a\n") && data.len() > 25 && matches!(data[25], 4 | 6)) {
+        tracing::warn!("background removal answered without transparency");
+        return Err(Error(StatusCode::SERVICE_UNAVAILABLE, "Le service d’images ne sait pas encore enlever le fond.".into()));
+    }
+    let clean = attachments::sanitize_transparent(&app, Bytes::from(data)).await?;
+    if !clean.transparent() {
+        tracing::warn!("background removal answered an opaque image");
+        return Err(Error(StatusCode::SERVICE_UNAVAILABLE, "Le fond n’a pas pu être enlevé.".into()));
+    }
+    let stem = name.rsplit_once('.').map_or(name.as_str(), |(stem, _)| stem).trim();
+    let file = attachments::clean_name(Some(&format!("{} sans fond.png", if stem.is_empty() { "image" } else { stem })), "image sans fond.png");
+    let generation = json!({"prompt": "Enlever le fond", "improved": null, "sent": "", "style": "aucun", "style_name": "Aucun",
+                            "size": format!("{}x{}", clean.width(), clean.height()), "seed": 0,
+                            "seconds": (started.elapsed().as_secs_f64() * 10.0).round() / 10.0, "source": start.id, "cutout": true});
+    let id = attachments::store_image(&app, user.user_id, &clean, &file, Some(generation)).await?;
+    Ok((StatusCode::CREATED, Json(attachments::item(&app, user.user_id, id).await?)))
+}
+
 const IMPROVE: &str = "You turn a short image idea into one detailed prompt for the Qwen-Image text-to-image model.
 
 Rules:

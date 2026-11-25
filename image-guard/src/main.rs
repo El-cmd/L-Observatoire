@@ -4,14 +4,14 @@
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{DefaultBodyLimit, State},
+    extract::{DefaultBodyLimit, RawQuery, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
 use image::{
-    DynamicImage, ImageEncoder, ImageFormat, ImageReader, Limits, RgbImage,
+    DynamicImage, ImageEncoder, ImageFormat, ImageReader, Limits, RgbImage, RgbaImage,
     codecs::{jpeg::JpegEncoder, png::PngEncoder},
     imageops::FilterType,
 };
@@ -25,6 +25,11 @@ const MAX_SIDE: u32 = 2048;
 const THUMB_SIDE: u32 = 640;
 /// A PNG larger than this once re-encoded is stored as JPEG instead.
 const MAX_PNG: usize = 3 * 1024 * 1024;
+/// An image whose transparency is kept (`?alpha=1`, a background removed) stays PNG: reduced until it weighs this.
+const MAX_ALPHA_PNG: usize = 8 * 1024 * 1024;
+/// Below this opacity (a quarter), a pixel is nearly invisible: its colour is laid on white as when flattening,
+/// so that Qwen, which gets the colours without the transparency, cannot read anything the user does not see.
+const VISIBLE_ALPHA: u8 = 64;
 
 #[derive(Debug, PartialEq)]
 struct Clean {
@@ -33,6 +38,8 @@ struct Clean {
     height: u32,
     data: Vec<u8>,
     thumbnail: Vec<u8>,
+    /// Some pixel at least is (partly) transparent: only with `keep_alpha`.
+    transparent: bool,
 }
 
 fn reader(input: &[u8]) -> Result<ImageReader<Cursor<&[u8]>>, String> {
@@ -80,7 +87,34 @@ fn png(image: &RgbImage) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+fn png_rgba(image: &RgbaImage) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    PngEncoder::new(&mut out)
+        .write_image(image.as_raw(), image.width(), image.height(), image::ExtendedColorType::Rgba8)
+        .map_err(|_| "Encodage impossible.".to_string())?;
+    Ok(out)
+}
+
+/// Transparency kept, nearly invisible pixels laid on white (see `VISIBLE_ALPHA`).
+fn transparent(image: DynamicImage) -> RgbaImage {
+    let mut rgba = image.into_rgba8();
+    for pixel in rgba.pixels_mut() {
+        let [r, g, b, a] = pixel.0;
+        if a < VISIBLE_ALPHA {
+            let blend = |c: u8| ((c as u16 * a as u16 + 255 * (255 - a as u16)) / 255) as u8;
+            pixel.0 = [blend(r), blend(g), blend(b), a];
+        }
+    }
+    rgba
+}
+
+#[cfg(test)]
 fn sanitize(input: &[u8]) -> Result<Clean, String> {
+    sanitize_with(input, false)
+}
+
+/// `keep_alpha`: a transparent image stays transparent (PNG); otherwise it is laid on white.
+fn sanitize_with(input: &[u8], keep_alpha: bool) -> Result<Clean, String> {
     if input.is_empty() || input.len() > MAX_INPUT {
         return Err("Image vide ou trop lourde (12 Mo au maximum).".into());
     }
@@ -99,24 +133,37 @@ fn sanitize(input: &[u8]) -> Result<Clean, String> {
         image = image.resize(MAX_SIDE, MAX_SIDE, FilterType::Triangle);
     }
     let thumbnail = flatten(image.thumbnail(THUMB_SIDE, THUMB_SIDE));
+    if keep_alpha && image.color().has_alpha() {
+        let mut rgba = transparent(image);
+        let see_through = rgba.pixels().any(|pixel| pixel.0[3] < 255);
+        loop {
+            let data = png_rgba(&rgba)?;
+            if data.len() <= MAX_ALPHA_PNG || rgba.width().max(rgba.height()) <= 512 {
+                return Ok(Clean { mime: "image/png", width: rgba.width(), height: rgba.height(), data, thumbnail: jpeg(&thumbnail, 78)?, transparent: see_through });
+            }
+            let (width, height) = ((rgba.width() * 3 / 4).max(1), (rgba.height() * 3 / 4).max(1));
+            rgba = image::imageops::resize(&rgba, width, height, FilterType::Triangle);
+        }
+    }
     let rgb = flatten(image);
     // Screenshots stay PNG so that small text remains sharp; photos and heavy PNGs become JPEG.
     let (mime, data) = match source_png.then(|| png(&rgb)).transpose()? {
         Some(data) if data.len() <= MAX_PNG => ("image/png", data),
         _ => ("image/jpeg", jpeg(&rgb, 88)?),
     };
-    Ok(Clean { mime, width: rgb.width(), height: rgb.height(), data, thumbnail: jpeg(&thumbnail, 78)? })
+    Ok(Clean { mime, width: rgb.width(), height: rgb.height(), data, thumbnail: jpeg(&thumbnail, 78)?, transparent: false })
 }
 
-async fn handle(State(work): State<Arc<Semaphore>>, body: Bytes) -> Response {
+async fn handle(State(work): State<Arc<Semaphore>>, RawQuery(query): RawQuery, body: Bytes) -> Response {
+    let keep_alpha = query.as_deref() == Some("alpha=1");
     let Ok(_permit) = work.acquire().await else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    let task = tokio::task::spawn_blocking(move || sanitize(&body));
+    let task = tokio::task::spawn_blocking(move || sanitize_with(&body, keep_alpha));
     match tokio::time::timeout(Duration::from_secs(20), task).await {
         Ok(Ok(Ok(clean))) => Json(json!({
             "mime": clean.mime, "width": clean.width, "height": clean.height,
-            "data": STANDARD.encode(&clean.data), "thumbnail": STANDARD.encode(&clean.thumbnail),
+            "data": STANDARD.encode(&clean.data), "thumbnail": STANDARD.encode(&clean.thumbnail), "transparent": clean.transparent,
         }))
         .into_response(),
         Ok(Ok(Err(message))) => (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({"error": message}))).into_response(),
@@ -191,6 +238,32 @@ mod tests {
         let clean = sanitize(&input).unwrap();
         assert_eq!((clean.width, clean.height), (2048, 7));
         assert!(!clean.data.windows(8).any(|w| w == b"<script>"));
+    }
+    #[test]
+    fn keeps_transparency_only_when_asked() {
+        // Columns 0-3 transparent; one nearly invisible pixel hides a dark colour.
+        let mut image = image::RgbaImage::from_fn(40, 30, |x, _| image::Rgba([10, 20, 30, if x < 4 { 0 } else { 255 }]));
+        image.put_pixel(10, 10, image::Rgba([0, 0, 0, 20]));
+        let mut input = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(image).write_to(&mut input, ImageFormat::Png).unwrap();
+        let input = input.into_inner();
+        let kept = sanitize_with(&input, true).unwrap();
+        assert_eq!((kept.mime, kept.width, kept.height, kept.transparent), ("image/png", 40, 30, true));
+        let decoded = image::load_from_memory(&kept.data).unwrap().into_rgba8();
+        assert_eq!(decoded.get_pixel(0, 0).0[3], 0);
+        assert_eq!(decoded.get_pixel(20, 5).0, [10, 20, 30, 255]);
+        let hidden = decoded.get_pixel(10, 10).0;
+        assert!(hidden[0] > 230 && hidden[3] == 20, "{hidden:?}");
+        assert!(kept.thumbnail.starts_with(&[0xFF, 0xD8]));
+        // Without asking: laid on white, as before.
+        let flat = image::load_from_memory(&sanitize_with(&input, false).unwrap().data).unwrap();
+        assert!(!flat.color().has_alpha());
+        // A transparency channel without any transparent pixel: not transparent.
+        let mut opaque = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(20, 20, image::Rgba([1, 2, 3, 255]))).write_to(&mut opaque, ImageFormat::Png).unwrap();
+        assert!(!sanitize_with(&opaque.into_inner(), true).unwrap().transparent);
+        // An image without transparency is unchanged by the option.
+        assert_eq!(sanitize_with(&encoded(ImageFormat::Jpeg, 40, 30), true).unwrap().mime, "image/jpeg");
     }
     #[test]
     fn rejects_non_images_and_pixel_bombs() {

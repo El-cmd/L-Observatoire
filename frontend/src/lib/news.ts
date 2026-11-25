@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-25-enlever-le-fond', date: '2026-11-25', level: 'major', title: 'Enlever le fond d’une image',
+    text: 'Dans l’onglet Images, partez d’une image, ouvrez la petite flèche à côté de « Retoucher » et choisissez « Enlever le fond » : en une seconde environ, une nouvelle image au fond transparent (PNG) apparaît, prête pour un autocollant, un logo ou un montage. L’originale reste dans votre bibliothèque. Avec plusieurs images, chacune est détourée.'},
   {id: '2026-11-24-zone-description', date: '2026-11-24', level: 'improvement', title: 'Images : une zone de description plus compacte',
     text: 'Dans l’onglet Images, vos images s’affichent en petites vignettes numérotées au-dessus du texte, et tous les réglages sont réunis dans la barre du bas : le bouton d’image avec un « + », Retoucher (et son menu), Transformer, Améliorer et le bouton pour lancer la création.'},
   {id: '2026-11-24-boutons-retouche', date: '2026-11-24', level: 'improvement', title: 'Retoucher : un menu et de vrais boutons',

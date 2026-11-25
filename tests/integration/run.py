@@ -473,6 +473,16 @@ class Integration(unittest.TestCase):
                      {'source': start['id'], 'retouch': True, 'references': ['00000000-0000-4000-8000-000000000000']}):
             self.assertEqual(self.alice.call('/api/creation', 'POST', {'prompt': 'x', 'size': '1024x1024', **body})[0], 400, body)
         self.assertEqual(self.alice.call('/api/creation', 'GET')[1]['max_references'], 2)
+        # "Enlever le fond": a new transparent PNG next to the original, which stays.
+        code, cut, _ = self.alice.call('/api/creation/cutout', 'POST', {'source': start['id']})
+        self.assertEqual(code, 201, cut)
+        self.assertEqual((cut['mime'], cut['width'], cut['height'], cut['name']), ('image/png', 48, 36, 'départ sans fond.png'))
+        self.assertEqual((cut['generation']['cutout'], cut['generation']['source']), (True, start['id']))
+        stored = read(cut['id'])
+        self.assertEqual(stored[25], 6, 'PNG with transparency (colour type RGBA)')
+        _, bob_picture = upload(self.bob, png(9, 9))
+        for body in ({'source': bob_picture['id']}, {'source': '00000000-0000-4000-8000-000000000000'}, {'source': 'pas-un-id'}, {}):
+            self.assertIn(self.alice.call('/api/creation/cutout', 'POST', body)[0], (400, 422), body)
         # Without a starting image, "retouch" means nothing: an ordinary image.
         code, alone, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'une pomme', 'style': 'aucun', 'size': '768x768', 'retouch': True})
         self.assertEqual((code, 'retouch' in alone['generation'], 'source' in alone['generation']), (201, False, False))
