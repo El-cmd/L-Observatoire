@@ -69,14 +69,14 @@ export default function App() {
             onClick={() => {setNews(false); void chat.toggleEphemeral();}}><Icon name="ephemeral"/></button>}<span id="connection" className="sr-only" role="status">{chat.navigating ? 'Chargement…' : chat.auth.configured ? 'API configurée' : 'Configuration requise'}</span>
         </header>
         {news ? <NewsView items={newsFor(chat.auth.user)} onClose={() => setNews(false)}/> : studio ? <ImageStudio userId={chat.auth.user.id} library={chat.library}
-          loadConfig={chat.creationConfig} improvePrompt={chat.improvePrompt} createImage={chat.createImage} cutoutImage={chat.cutoutImage} uploadImage={chat.uploadImage} styles={chat.styles} onLoad={() => {void chat.loadLibrary();}}
+          loadConfig={chat.creationConfig} improvePrompt={chat.improvePrompt} createImage={chat.createImage} cutoutImage={chat.cutoutImage} voteImage={chat.voteImage} uploadImage={chat.uploadImage} styles={chat.styles} onLoad={() => {void chat.loadLibrary();}}
           onOpen={setViewer} onDelete={id => {void chat.deleteImage(id);}} removed={chat.removedImages}
           onStartChat={image => {setStudio(false); void chat.newChat().then(() => {chat.addFromLibrary([image]); askAbout();});}}/> : library !== 'closed' ? <LibraryView library={chat.library} picking={library === 'pick'} room={MAX_IMAGES - chat.pending.length}
           onLoad={() => {void chat.loadLibrary();}} onClose={() => setLibrary('closed')} onOpen={setViewer} onDelete={id => {void chat.deleteImage(id);}}
           onPick={images => {chat.addFromLibrary(images); setLibrary('closed');}}
           onStartChat={image => {setLibrary('closed'); void chat.newChat().then(() => {chat.addFromLibrary([image]); askAbout();});}} onOpenChat={id => {setLibrary('closed'); void chat.openChat(id);}}
           findConversations={chat.imageConversations} onError={chat.notify}/> : <>
-        <MessageList chat={chat.current} ephemeral={chat.ephemeral} busy={chat.busy} summaryFocus={chat.summaryFocus} removedImages={chat.removedImages} onRegenerate={() => {void chat.regenerate();}} onContinue={() => {void chat.continueAnswer();}} onOpenImage={setViewer} onAskImage={image => {chat.addFromLibrary([image]); askAbout();}} onError={chat.notify}/>
+        <MessageList chat={chat.current} ephemeral={chat.ephemeral} loadVotes={chat.loadVotes} sendVote={chat.sendVote} busy={chat.busy} summaryFocus={chat.summaryFocus} removedImages={chat.removedImages} onRegenerate={() => {void chat.regenerate();}} onContinue={() => {void chat.continueAnswer();}} onOpenImage={setViewer} onAskImage={image => {chat.addFromLibrary([image]); askAbout();}} onError={chat.notify}/>
         <Composer prompt={chat.prompt} onPrompt={chat.setPrompt} pending={chat.pending} onAddImages={files => {void chat.addImages(files);}}
           onRemovePending={chat.removePending} onOpenLibrary={() => setLibrary('pick')} onSend={value => {void chat.send(value);}} onStop={chat.stop}
           onRegenerate={() => {void chat.regenerate();}} onContinue={() => {void chat.continueAnswer();}} settings={chat.settings} onSettings={chat.setSettings} busy={chat.busy}

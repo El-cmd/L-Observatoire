@@ -192,8 +192,11 @@ struct Item {
     error: Option<String>,
     /// Images created in the Images tab: how they were made. None for files sent by the user.
     generation: Option<DbJson<Value>>,
+    /// The user's thumbs up or down on a created image (see feedback.rs).
+    feedback: Option<DbJson<Value>>,
 }
-const ITEM: &str = "SELECT id,name,kind,mime,width,height,size,created_at,status,pages,progress,scanned,doubts,tokens,error,generation FROM attachments";
+const ITEM: &str = "SELECT id,name,kind,mime,width,height,size,created_at,status,pages,progress,scanned,doubts,tokens,error,generation,\
+    (SELECT json_build_object('rating',f.rating,'reasons',f.reasons,'comment',f.comment) FROM feedback f WHERE f.attachment_id=attachments.id) AS feedback FROM attachments";
 
 pub async fn item(app: &App, user: Uuid, id: Uuid) -> Result<Value, Error> {
     let found: Item = sqlx::query_as(&format!("{ITEM} WHERE id=$1 AND user_id=$2")).bind(id).bind(user)

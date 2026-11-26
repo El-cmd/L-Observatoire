@@ -1,4 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
+import type {Feedback} from '../lib/feedback';
 import {APIClient, APIError, errorMessage} from '../lib/api';
 import {consumeCompletion} from '../lib/stream';
 import {MAX_IMAGES, documentSize, isDocument, isImage, prepareImage, thumbnailURL, toRef} from '../lib/images';
@@ -518,6 +519,14 @@ export function useObservatoire() {
     client.json<{prompt: string}>('/api/creation/improve', {method:'POST', body:{prompt, style, source, retouch, references}, signal}).then(value => value.prompt);
   const createImage = (body: CreateBody, signal?: AbortSignal) =>
     client.json<LibraryItem>('/api/creation', {method:'POST', body, signal});
+  /** Thumbs up or down on an answer (only recorded), and the votes of a conversation on its answers still there. */
+  const loadVotes = (id: string) =>
+    client.json<{votes: (Feedback & {index: number})[]}>(`/api/conversations/${id}/feedback`).then(value => value.votes);
+  const sendVote = (id: string, index: number, vote: Feedback | null) =>
+    client.json<void>(`/api/conversations/${id}/feedback`, {method:'PUT', body: vote ? {index, ...vote} : {index, rating: 0}});
+  /** Thumbs up or down on a created image. */
+  const voteImage = (id: string, vote: Feedback | null) =>
+    client.json<void>(`/api/attachments/${id}/feedback`, {method:'PUT', body: vote ?? {rating: 0}});
   /** "Enlever le fond": a new transparent copy of an image of the library. */
   const cutoutImage = (source: string, signal?: AbortSignal) =>
     client.json<LibraryItem>('/api/creation/cutout', {method:'POST', body:{source}, signal});
@@ -572,7 +581,7 @@ export function useObservatoire() {
   return {auth, initializing, loginError, signingIn, login, logout, changePassword,
     chats, current:activeChat, activity, busy:currentActivity === 'generating', navigating,
     notice:(currentId && notices[currentId]) || notices[''] || null, notify,
-    prompt, setPrompt, pending, addImages, addFromLibrary, removePending, library, loadLibrary, deleteImage, imageConversations, documentText, attachmentInfo, removedImages, creationConfig, improvePrompt, createImage, cutoutImage, uploadImage, styles,
+    prompt, setPrompt, pending, addImages, addFromLibrary, removePending, library, loadLibrary, deleteImage, imageConversations, documentText, attachmentInfo, removedImages, creationConfig, improvePrompt, createImage, cutoutImage, uploadImage, styles, loadVotes, sendVote, voteImage,
     settings, setSettings, newChat, openChat, ephemeral:isEphemeral(activeChat), toggleEphemeral, deleteChat, renameChat, send, regenerate, continueAnswer,
     contextUsage:contextUsage && contextUsage.conversation_id === currentId && contextUsage.version === activeChat?.version ? contextUsage : null,
     compacting:currentActivity === 'compacting', compactContext, summaryFocus,

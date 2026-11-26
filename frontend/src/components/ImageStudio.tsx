@@ -2,6 +2,8 @@ import {useEffect, useRef, useState} from 'react';
 import type {AttachmentRef, CreateBody, CreationConfig, CreationStyle, Library, LibraryItem, MyStyle} from '../types';
 import {imageURL, thumbnailURL, toRef} from '../lib/images';
 import {errorMessage} from '../lib/api';
+import {FeedbackButtons} from './FeedbackButtons';
+import {IMAGE_REASONS, type Feedback} from '../lib/feedback';
 import {Icon} from './Icon';
 import {StyleDialog, type StyleApi} from './StyleDialog';
 import {SourcePicker} from './SourcePicker';
@@ -58,11 +60,12 @@ function restore(config: CreationConfig, saved: Partial<Settings> | null): Setti
 }
 
 /** Images tab: creates images into the library, with a style, a size and a number of images. */
-export function ImageStudio({userId, library, loadConfig, improvePrompt, createImage, cutoutImage, uploadImage, styles, onLoad, onOpen, onDelete, onStartChat, removed}: {
+export function ImageStudio({userId, library, loadConfig, improvePrompt, createImage, cutoutImage, voteImage, uploadImage, styles, onLoad, onOpen, onDelete, onStartChat, removed}: {
   userId: string; library: Library | null; loadConfig: () => Promise<CreationConfig>;
   improvePrompt: (prompt: string, style: string, signal?: AbortSignal, source?: string, retouch?: boolean, references?: string[]) => Promise<string>;
   createImage: (body: CreateBody, signal?: AbortSignal) => Promise<LibraryItem>;
   cutoutImage: (source: string, signal?: AbortSignal) => Promise<LibraryItem>;
+  voteImage: (id: string, vote: Feedback | null) => Promise<void>;
   uploadImage: (file: File) => Promise<AttachmentRef>;
   styles: StyleApi;
   onLoad: () => void; onOpen: (image: AttachmentRef) => void; onDelete: (id: string) => void;
@@ -89,6 +92,8 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   // The library opened to choose the starting image, or another image of a retouch ("image 2", "image 3").
   const [picking, setPicking] = useState<'source' | 'other' | null>(null);
   const [others, setOthers] = useState<AttachmentRef[]>([]);
+  // Votes given since the library was loaded (the library brings the older ones).
+  const [votes, setVotes] = useState<Record<string, Feedback | null>>({});
   // "Retoucher" a painted zone only (forgotten when the starting image changes).
   const [zone, setZone] = useState<Zone | null>(null);
   const [painting, setPainting] = useState(false);
@@ -467,6 +472,8 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
                 <img src={thumbnailURL(item.id)} alt="" loading="lazy"/>
                 {item.generation && <span className="studio-caption">{item.generation.prompt}</span>}
               </button>
+              {item.generation && <FeedbackButtons value={item.id in votes ? votes[item.id] : item.feedback ?? null} reasons={IMAGE_REASONS} what="image"
+                className="studio-item-feedback" onChange={async vote => {await voteImage(item.id, vote); setVotes(map => ({...map, [item.id]: vote}));}}/>}
               <div className="studio-item-actions">
                 <button type="button" className="icon-button" aria-label={`Nouvelle conversation avec ${item.name}`} title="Nouvelle conversation avec cette image" onClick={() => onStartChat(toRef(item))}><Icon name="ask"/></button>
                 <button type="button" className="icon-button" aria-label={`Partir de ${item.name}`} title="Partir de cette image pour en créer une autre" onClick={() => startFrom(toRef(item))}><Icon name="image"/></button>

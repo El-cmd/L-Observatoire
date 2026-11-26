@@ -22,6 +22,8 @@ export interface AttachmentRef { id: string; name: string; width: number; height
 /** A document is read once when added: `progress` of `pages` done, then ready or failed. */
 export interface LibraryItem {
   id: string; name: string; kind: 'image' | 'document'; mime: string; width: number; height: number; size: number; created_at: string;
+  /** The user's thumbs up or down on a created image. */
+  feedback?: import('./lib/feedback').Feedback | null;
   status: 'reading' | 'ready' | 'failed'; pages: number; progress: number; scanned: number; doubts: number; tokens: number; error: string | null;
   /** Images created in the Images tab: how they were made. */
   generation?: Generation | null;

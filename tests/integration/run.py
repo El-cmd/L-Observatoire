@@ -188,6 +188,41 @@ class Integration(unittest.TestCase):
         other_browser = Client(); other_browser.login()
         self.assertEqual(other_browser.call(path)[1]['messages'], saved['messages'])
 
+    def test_05l_answers_and_images_get_a_thumbs_up_or_down(self):
+        chat = self.alice.create('une question à noter'); path = '/api/conversations/' + chat['id']
+        with self.alice.call(path + '/generate', 'POST', {'version': chat['version']}, stream=True) as response:
+            response.read()
+        saved = self.alice.call(path)[1]
+        self.assertEqual(self.alice.call(path + '/feedback')[1], {'votes': []})
+        self.assertEqual(self.alice.call(path + '/feedback', 'PUT', {'index': 1, 'rating': 1})[0], 204)
+        self.assertEqual(self.alice.call(path + '/feedback')[1]['votes'], [{'index': 1, 'rating': 1, 'reasons': [], 'comment': None}])
+        # A thumbs down with reasons and a comment replaces the thumbs up.
+        self.assertEqual(self.alice.call(path + '/feedback', 'PUT', {'index': 1, 'rating': -1, 'reasons': ['faux', 'trop_long'], 'comment': ' La date est fausse. '})[0], 204)
+        self.assertEqual(self.alice.call(path + '/feedback')[1]['votes'], [{'index': 1, 'rating': -1, 'reasons': ['faux', 'trop_long'], 'comment': 'La date est fausse.'}])
+        # Not on a question, not an unknown reason, not someone else's conversation.
+        for body in ({'index': 0, 'rating': 1}, {'index': 9, 'rating': 1}, {'index': 1, 'rating': -1, 'reasons': ['inconnue']}, {'index': 1, 'rating': 3}):
+            self.assertEqual(self.alice.call(path + '/feedback', 'PUT', body)[0], 400, body)
+        self.assertEqual(self.bob.call(path + '/feedback', 'PUT', {'index': 1, 'rating': 1})[0], 404)
+        self.assertEqual(self.bob.call(path + '/feedback')[0], 404)
+        # An answer replaced (as by "Relancer") no longer shows the vote given to the old one.
+        messages = saved['messages'][:1] + [{**saved['messages'][1], 'content': 'Une autre réponse.'}]
+        self.assertEqual(self.alice.call(path, 'PUT', {'version': saved['version'], 'messages': messages})[0], 200)
+        self.assertEqual(self.alice.call(path + '/feedback')[1], {'votes': []})
+        self.assertEqual(self.alice.call(path + '/feedback', 'PUT', {'index': 1, 'rating': 1})[0], 204)
+        self.assertEqual(self.alice.call(path + '/feedback', 'PUT', {'index': 1, 'rating': 0})[0], 204)
+        self.assertEqual(self.alice.call(path + '/feedback')[1], {'votes': []})
+        # A created image: the vote comes back with the library; a file sent by the user cannot be voted on.
+        code, made, _ = self.alice.call('/api/creation', 'POST', {'prompt': 'une image à noter', 'style': 'aucun', 'size': '1568x672'})
+        self.assertEqual(code, 201, made)
+        self.assertIsNone(made['feedback'])
+        self.assertEqual(self.alice.call('/api/attachments/' + made['id'] + '/feedback', 'PUT', {'rating': -1, 'reasons': ['style'], 'comment': 'Trop sombre'})[0], 204)
+        found = next(item for item in self.alice.call('/api/attachments')[1]['items'] if item['id'] == made['id'])
+        self.assertEqual(found['feedback'], {'rating': -1, 'reasons': ['style'], 'comment': 'Trop sombre'})
+        _, sent = upload(self.alice, png(43, 30), 'envoyée.png')
+        self.assertEqual(self.alice.call('/api/attachments/' + sent['id'] + '/feedback', 'PUT', {'rating': 1})[0], 400)
+        self.assertEqual(self.bob.call('/api/attachments/' + made['id'] + '/feedback', 'PUT', {'rating': 1})[0], 400)
+        self.assertEqual(self.alice.call('/api/attachments/' + made['id'] + '/feedback', 'PUT', {'rating': -1, 'reasons': ['faux']})[0], 400)
+
     def test_05b_context_starts_from_qwen_prompt_count(self):
         chat = self.alice.create('combien de tokens ?'); path = '/api/conversations/'+chat['id']
         with self.alice.call(path+'/generate', 'POST', {'version':chat['version']}, stream=True) as response:

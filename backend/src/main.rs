@@ -5,6 +5,7 @@ mod context;
 mod creation;
 mod documents;
 mod ephemere;
+mod feedback;
 
 use anyhow::{Context, Result};
 use axum::{
@@ -278,12 +279,14 @@ async fn main() -> Result<()> {
         )
         .route("/api/conversations/{id}/generate", post(chat::generate))
         .route("/api/conversations/{id}/stop", post(chat::stop))
+        .route("/api/conversations/{id}/feedback", get(feedback::conversation).put(feedback::answer).layer(DefaultBodyLimit::max(16 * 1024)))
         .route("/api/ephemere", post(ephemere::generate))
         .route("/api/ephemere/{id}/stop", post(ephemere::stop))
         .route("/api/conversations/{id}/title", put(chat::rename).layer(DefaultBodyLimit::max(8192)))
         .route("/api/attachments", get(attachments::list).post(attachments::upload).layer(DefaultBodyLimit::max(documents::MAX_UPLOAD)))
         .route("/api/attachments/{id}", get(attachments::file).delete(attachments::delete))
         .route("/api/attachments/{id}/thumbnail", get(attachments::thumbnail))
+        .route("/api/attachments/{id}/feedback", put(feedback::image).layer(DefaultBodyLimit::max(16 * 1024)))
         .route("/api/attachments/{id}/status", get(attachments::status))
         .route("/api/attachments/{id}/text", get(attachments::text))
         .route("/api/attachments/{id}/conversations", get(attachments::conversations))

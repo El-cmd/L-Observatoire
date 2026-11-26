@@ -1,7 +1,9 @@
-import {lazy, memo, Suspense, useLayoutEffect, useMemo, useRef, useState} from 'react';
+import {lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import type {AttachmentRef, Conversation, Message} from '../types';
 import {documentSize, isDocument, thumbnailURL} from '../lib/images';
 import {CopyButton} from './CopyButton';
+import {FeedbackButtons} from './FeedbackButtons';
+import {ANSWER_REASONS, type Feedback} from '../lib/feedback';
 const Markdown = lazy(() => import('./Markdown').then(module => ({default:module.Markdown})));
 import {Icon} from './Icon';
 import {ToolTrace, citationSources, provisionalReport} from './ToolTrace';
@@ -31,8 +33,9 @@ function MessageImage({image, removed, onOpen, onAsk}: {image: AttachmentRef; re
   </div>;
 }
 
-const MessageItem = memo(function MessageItem({message, streaming, last, removedImages, onRegenerate, onContinue, onOpenImage, onAskImage, onError}: {
-  message: Message; streaming: boolean; last: boolean; removedImages: ReadonlySet<string>; onRegenerate: () => void; onContinue: () => void;
+const MessageItem = memo(function MessageItem({message, index, vote, onVote, streaming, last, removedImages, onRegenerate, onContinue, onOpenImage, onAskImage, onError}: {
+  message: Message; index: number; vote: Feedback | null; onVote?: (index: number, vote: Feedback | null) => Promise<void>;
+  streaming: boolean; last: boolean; removedImages: ReadonlySet<string>; onRegenerate: () => void; onContinue: () => void;
   onOpenImage: (image: AttachmentRef) => void; onAskImage: (image: AttachmentRef) => void; onError: (message: string) => void;
 }) {
   const user = message.role === 'user';
@@ -51,20 +54,58 @@ const MessageItem = memo(function MessageItem({message, streaming, last, removed
     {(!user || message.content) && <div className="message-content">{user ? message.content : shown ? <Suspense fallback={<span className="typing">Affichage de la réponse…</span>}><Markdown content={cards ? cards.body : shown} onError={onError} sources={sources}/>{cards && <SourceList numbers={cards.cited} sources={sources}/>}</Suspense> : <span className="typing">{streaming ? message.outils?.length ? message.outils.some(e => e.outil === 'recherche_web') ? 'Recherche sur Internet…' : 'Lecture de la page…' : 'L’Observatoire prépare sa réponse…' : 'Aucune réponse finale reçue.'}</span>}</div>}
     {!streaming && <div className="message-footer">
       <CopyButton text={message.content} label={user ? 'Copier la question' : 'Copier la réponse'} onError={onError}/>
+      {!user && onVote && message.content.trim() && <FeedbackButtons value={vote} reasons={ANSWER_REASONS} what="réponse" className="message-feedback"
+        onChange={value => onVote(index, value)}/>}
       {!user && last && message.truncated && <button className="message-action continue-response" type="button" title="La réponse a atteint la longueur maximale" onClick={onContinue}>Continuer la réponse</button>}
       {!user && last && <button className="message-action retry-response" type="button" aria-label="Relancer la réponse" title="Relancer la réponse" onClick={onRegenerate}><Icon name="retry"/></button>}
     </div>}
   </article>;
 });
 
-export function MessageList({chat, busy, summaryFocus, removedImages, onRegenerate, onContinue, onOpenImage, onAskImage, onError, ephemeral = false}: {
+export function MessageList({chat, busy, summaryFocus, removedImages, onRegenerate, onContinue, onOpenImage, onAskImage, onError, ephemeral = false, loadVotes, sendVote}: {
   chat?: Conversation; busy: boolean; ephemeral?: boolean; summaryFocus: number; removedImages: ReadonlySet<string>; onRegenerate: () => void; onContinue: () => void;
+  /** Thumbs up or down on the answers (not in an ephemeral chat: nothing of it is kept). */
+  loadVotes?: (id: string) => Promise<(Feedback & {index: number})[]>; sendVote?: (id: string, index: number, vote: Feedback | null) => Promise<void>;
   onOpenImage: (image: AttachmentRef) => void; onAskImage: (image: AttachmentRef) => void; onError: (message: string) => void;
 }) {
   const scroll = useRef<HTMLElement>(null);
   const atBottom = useRef(true);
   const previousId = useRef<string | undefined>(undefined);
   const messages = chat?.messages || [];
+  const chatId = chat?.id;
+  const latest = useRef(messages); latest.current = messages;
+  // The functions of the page change at each render: kept in a ref, so that the answers are not drawn again.
+  const api = useRef({loadVotes, sendVote}); api.current = {loadVotes, sendVote};
+  // Each vote with the answer it was given to: an answer replaced by "Relancer" has no vote any more.
+  const [votes, setVotes] = useState<{chat?: string; map: Record<number, {vote: Feedback; content: string}>}>({map: {}});
+  useEffect(() => {
+    const load = api.current.loadVotes;
+    if (!chatId || ephemeral || !load) return;
+    let current = true;
+    load(chatId).then(list => {
+      if (!current) return;
+      const map: Record<number, {vote: Feedback; content: string}> = {};
+      for (const {index, ...vote} of list) map[index] = {vote, content: latest.current[index]?.content ?? ''};
+      setVotes({chat: chatId, map});
+    }, () => {});
+    return () => {current = false;};
+  }, [chatId, ephemeral]);
+  const onVote = useCallback(async (index: number, vote: Feedback | null) => {
+    const send = api.current.sendVote;
+    if (!chatId || !send) return;
+    const content = latest.current[index]?.content ?? '';
+    await send(chatId, index, vote);
+    setVotes(current => {
+      const map = {...(current.chat === chatId ? current.map : {})};
+      if (vote) map[index] = {vote, content}; else delete map[index];
+      return {chat: chatId, map};
+    });
+  }, [chatId]);
+  const voteOf = (index: number, message: Message) => {
+    const found = votes.chat === chatId ? votes.map[index] : undefined;
+    return found && found.content === message.content ? found.vote : null;
+  };
+  const canVote = !ephemeral && sendVote ? onVote : undefined;
   const through = Math.min(chat?.compacted_through || 0, messages.length);
   const summary = useRef<HTMLDetailsElement>(null);
   const previousFocus = useRef(summaryFocus);
@@ -93,10 +134,10 @@ export function MessageList({chat, busy, summaryFocus, removedImages, onRegenera
           <div className="message-content"><Suspense fallback={<span className="typing">Chargement du résumé…</span>}><Markdown content={chat.context_summary} onError={onError}/></Suspense></div>
         </details>
         <details className="archived-messages"><summary>Voir les {through} messages d’origine</summary>
-          {messages.slice(0, through).map((message, index) => <MessageItem key={`${chat.id}:${index}`} message={message} streaming={false} last={false} removedImages={removedImages} onRegenerate={onRegenerate} onContinue={onContinue} onOpenImage={onOpenImage} onAskImage={onAskImage} onError={onError}/>)}
+          {messages.slice(0, through).map((message, index) => <MessageItem key={`${chat.id}:${index}`} message={message} index={index} vote={voteOf(index, message)} onVote={canVote} streaming={false} last={false} removedImages={removedImages} onRegenerate={onRegenerate} onContinue={onContinue} onOpenImage={onOpenImage} onAskImage={onAskImage} onError={onError}/>)}
         </details>
       </div>}
-      {messages.slice(through).map((message, offset) => {const index = through + offset; return <MessageItem key={`${chat?.id}:${index}`} message={message}
+      {messages.slice(through).map((message, offset) => {const index = through + offset; return <MessageItem key={`${chat?.id}:${index}`} message={message} index={index} vote={voteOf(index, message)} onVote={canVote}
         last={index === messages.length - 1} streaming={busy && message.role === 'assistant' && index === messages.length - 1}
         removedImages={removedImages} onRegenerate={onRegenerate} onContinue={onContinue} onOpenImage={onOpenImage} onAskImage={onAskImage} onError={onError}/>;})}
     </div>

@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-26-pouces', date: '2026-11-26', level: 'major', title: 'Donnez votre avis : pouce en l’air ou en bas',
+    text: 'Sous chaque réponse, à côté de « Copier », et sur chaque image créée dans l’onglet Images, deux pouces permettent de dire si c’était bien ou non. Avec le pouce en bas, vous pouvez dire ce qui n’allait pas (faux, incomplet, hors sujet…) et ajouter un mot, si vous le souhaitez. Vos avis sont seulement enregistrés : ils servent à améliorer L’Observatoire et ne changent pas les réponses. Touchez à nouveau un pouce pour retirer votre avis.'},
   {id: '2026-11-25-enlever-le-fond', date: '2026-11-25', level: 'major', title: 'Enlever le fond d’une image',
     text: 'Dans l’onglet Images, partez d’une image, ouvrez la petite flèche à côté de « Retoucher » et choisissez « Enlever le fond » : en une seconde environ, une nouvelle image au fond transparent (PNG) apparaît, prête pour un autocollant, un logo ou un montage. L’originale reste dans votre bibliothèque. Avec plusieurs images, chacune est détourée.'},
   {id: '2026-11-24-zone-description', date: '2026-11-24', level: 'improvement', title: 'Images : une zone de description plus compacte',
