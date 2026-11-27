@@ -11,8 +11,12 @@ import {DocumentViewer} from './components/DocumentViewer';
 import {LibraryView} from './components/LibraryView';
 import {NewsView} from './components/NewsView';
 import {ImageStudio} from './components/ImageStudio';
+import {VideoStudio} from './components/VideoStudio';
+import {VideoViewer} from './components/VideoViewer';
+import {useVideos} from './hooks/useVideos';
+import {isOpen} from './lib/video';
 import {hasUnreadNews, markNewsRead, newsFor} from './lib/news';
-import {MAX_IMAGES, formatBytes, isDocument} from './lib/images';
+import {MAX_IMAGES, formatBytes, isDocument, isVideo} from './lib/images';
 import type {AttachmentRef} from './types';
 
 export default function App() {
@@ -26,34 +30,41 @@ export default function App() {
   const [news, setNews] = useState(false);
   // Images tab: creates images into the library; replaces the conversation like the library.
   const [studio, setStudio] = useState(false);
+  // Video tab, and the image chosen with "Animer" in the Images tab.
+  const [videoTab, setVideoTab] = useState(false);
+  const [animate, setAnimate] = useState<AttachmentRef | null>(null);
   const [unreadNews, setUnreadNews] = useState(false);
   const userId = chat.auth?.user.id;
   const searcher = chat.auth?.user.recherche_web === true;
+  // Followed wherever the user is: the end of a video is announced from any page.
+  const videos = useVideos(chat.video, userId, () => {void chat.loadLibrary();});
   useEffect(() => {
-    setSidebarOpen(false); setPasswordOpen(false); setLibrary('closed'); setViewer(null); setNews(false); setStudio(false);
+    setSidebarOpen(false); setPasswordOpen(false); setLibrary('closed'); setViewer(null); setNews(false); setStudio(false); setVideoTab(false); setAnimate(null);
     setUnreadNews(chat.auth ? hasUnreadNews(chat.auth.user) : false);
   }, [userId, searcher]);
   useEffect(() => {
     function key(event: KeyboardEvent) {
       if (event.key === 'Escape') setSidebarOpen(false);
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'n') {event.preventDefault(); setLibrary('closed'); setNews(false); setStudio(false); void chat.newChat();}
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'n') {event.preventDefault(); setLibrary('closed'); setNews(false); setStudio(false); setVideoTab(false); void chat.newChat();}
     }
     document.addEventListener('keydown', key); return () => document.removeEventListener('keydown', key);
   }, [chat.newChat]);
   if (!chat.auth) return <Login initializing={chat.initializing} pending={chat.signingIn} error={chat.loginError} onLogin={chat.login}/>;
-  const empty = library === 'closed' && !news && !studio && !chat.current?.messages.length;
+  const empty = library === 'closed' && !news && !studio && !videoTab && !chat.current?.messages.length;
   // The chosen image waits above the input: the user only has to type the question.
   const askAbout = () => document.getElementById('prompt')?.focus();
-  const page = studio ? 'Images' : library === 'pick' ? 'Choisir dans la bibliothèque' : library !== 'closed' ? 'Bibliothèque' : null;
+  const page = studio ? 'Images' : videoTab ? 'Vidéo' : library === 'pick' ? 'Choisir dans la bibliothèque' : library !== 'closed' ? 'Bibliothèque' : null;
   return <>
     <div className="app" id="chat-app">
       <Sidebar user={chat.auth.user} chats={chat.chats} activity={chat.activity} currentId={chat.current?.id} libraryOpen={library === 'browse'} imagesOpen={studio}
-        onLibrary={() => {setNews(false); setStudio(false); setLibrary('browse'); setSidebarOpen(false);}}
-        onImages={() => {setNews(false); setLibrary('closed'); setStudio(true); setSidebarOpen(false);}} newsOpen={news} unreadNews={unreadNews}
-        onNews={() => {setLibrary('closed'); setStudio(false); setNews(true); setSidebarOpen(false); markNewsRead(chat.auth!.user); setUnreadNews(false);}} open={sidebarOpen} collapsed={sidebarCollapsed}
+        onLibrary={() => {setNews(false); setStudio(false); setVideoTab(false); setLibrary('browse'); setSidebarOpen(false);}}
+        onImages={() => {setNews(false); setLibrary('closed'); setVideoTab(false); setStudio(true); setSidebarOpen(false);}}
+        videoOpen={videoTab} videoBusy={videos.config?.videos.some(isOpen) ?? false}
+        onVideo={() => {setNews(false); setLibrary('closed'); setStudio(false); setVideoTab(true); setSidebarOpen(false); void videos.reload();}} newsOpen={news} unreadNews={unreadNews}
+        onNews={() => {setLibrary('closed'); setStudio(false); setVideoTab(false); setNews(true); setSidebarOpen(false); markNewsRead(chat.auth!.user); setUnreadNews(false);}} open={sidebarOpen} collapsed={sidebarCollapsed}
         navigating={chat.navigating} canImport={chat.canImport} importing={chat.importing} onClose={() => {if (innerWidth <= 760) setSidebarOpen(false); else setSidebarCollapsed(true);}}
-        onNew={() => {setLibrary('closed'); setNews(false); setStudio(false); void chat.newChat().then(() => setSidebarOpen(false));}}
-        onSelect={id => {setLibrary('closed'); setNews(false); setStudio(false); void chat.openChat(id).then(() => setSidebarOpen(false));}}
+        onNew={() => {setLibrary('closed'); setNews(false); setStudio(false); setVideoTab(false); void chat.newChat().then(() => setSidebarOpen(false));}}
+        onSelect={id => {setLibrary('closed'); setNews(false); setStudio(false); setVideoTab(false); void chat.openChat(id).then(() => setSidebarOpen(false));}}
         onRename={(id, title) => {void chat.renameChat(id, title);}} onDelete={id => {void chat.deleteChat(id);}} onImport={() => {void chat.importLegacy();}}
         onPassword={() => setPasswordOpen(true)} onLogout={() => {void chat.logout();}}/>
       <button id="sidebar-backdrop" className="sidebar-backdrop" aria-label="Fermer les conversations" tabIndex={-1} onClick={() => setSidebarOpen(false)}/>
@@ -61,9 +72,9 @@ export default function App() {
         <header className="topbar"><button id="menu" className="icon-button" aria-label="Ouvrir les conversations" title="Conversations" onClick={() => {if (innerWidth <= 760) setSidebarOpen(value => !value); else setSidebarCollapsed(value => !value);}}><Icon name="sidebar"/></button>
           {/* The open page names itself here, fixed above its content. */}
           <span className={`topbar-title${page ? ' page' : ''}`} id="page-title">{page ?? 'L’Observatoire'}</span>
-          {library !== 'closed' && !studio && chat.library && <p className="library-usage topbar-usage">{formatBytes(chat.library.used_bytes)} sur {formatBytes(chat.library.quota_bytes)}
+          {library !== 'closed' && !studio && !videoTab && chat.library && <p className="library-usage topbar-usage">{formatBytes(chat.library.used_bytes)} sur {formatBytes(chat.library.quota_bytes)}
             <span className="library-meter" aria-hidden="true"><span style={{width: `${Math.min(100, chat.library.used_bytes / chat.library.quota_bytes * 100)}%`}}/></span></p>}
-          {!studio && library === 'closed' && <button id="ephemeral-toggle" type="button" className={`icon-button ephemeral-toggle${chat.ephemeral ? ' active' : ''}`} aria-pressed={chat.ephemeral}
+          {!studio && !videoTab && library === 'closed' && <button id="ephemeral-toggle" type="button" className={`icon-button ephemeral-toggle${chat.ephemeral ? ' active' : ''}`} aria-pressed={chat.ephemeral}
             aria-label={chat.ephemeral ? 'Quitter le chat éphémère' : 'Ouvrir un chat éphémère, qui n’est pas enregistré'}
             title={chat.ephemeral ? 'Quitter le chat éphémère' : 'Chat éphémère : rien n’est enregistré'}
             onClick={() => {setNews(false); void chat.toggleEphemeral();}}><Icon name="ephemeral"/></button>}<span id="connection" className="sr-only" role="status">{chat.navigating ? 'Chargement…' : chat.auth.configured ? 'API configurée' : 'Configuration requise'}</span>
@@ -71,7 +82,11 @@ export default function App() {
         {news ? <NewsView items={newsFor(chat.auth.user)} onClose={() => setNews(false)}/> : studio ? <ImageStudio userId={chat.auth.user.id} library={chat.library}
           loadConfig={chat.creationConfig} improvePrompt={chat.improvePrompt} createImage={chat.createImage} cutoutImage={chat.cutoutImage} voteImage={chat.voteImage} uploadImage={chat.uploadImage} styles={chat.styles} onLoad={() => {void chat.loadLibrary();}}
           onOpen={setViewer} onDelete={id => {void chat.deleteImage(id);}} removed={chat.removedImages}
-          onStartChat={image => {setStudio(false); void chat.newChat().then(() => {chat.addFromLibrary([image]); askAbout();});}}/> : library !== 'closed' ? <LibraryView library={chat.library} picking={library === 'pick'} room={MAX_IMAGES - chat.pending.length}
+          onStartChat={image => {setStudio(false); void chat.newChat().then(() => {chat.addFromLibrary([image]); askAbout();});}}
+          onAnimate={image => {setStudio(false); setAnimate(image); setVideoTab(true); void videos.reload();}}/>
+          : videoTab ? <VideoStudio userId={chat.auth.user.id} config={videos.config} loadError={videos.error} reload={videos.reload} api={chat.video}
+            library={chat.library} onLoad={() => {void chat.loadLibrary();}} uploadImage={chat.uploadImage} start={animate} onStarted={() => setAnimate(null)} onOpen={setViewer}/>
+          : library !== 'closed' ? <LibraryView library={chat.library} picking={library === 'pick'} room={MAX_IMAGES - chat.pending.length}
           onLoad={() => {void chat.loadLibrary();}} onClose={() => setLibrary('closed')} onOpen={setViewer} onDelete={id => {void chat.deleteImage(id);}}
           onPick={images => {chat.addFromLibrary(images); setLibrary('closed');}}
           onStartChat={image => {setLibrary('closed'); void chat.newChat().then(() => {chat.addFromLibrary([image]); askAbout();});}} onOpenChat={id => {setLibrary('closed'); void chat.openChat(id);}}
@@ -87,7 +102,8 @@ export default function App() {
       </div>
     </div>
     <PasswordDialog open={passwordOpen} onClose={() => setPasswordOpen(false)} onChange={chat.changePassword}/>
-    <ImageViewer image={viewer && !isDocument(viewer) ? viewer : null} loadInfo={chat.attachmentInfo} onClose={() => setViewer(null)}/>
+    <ImageViewer image={viewer && !isDocument(viewer) && !isVideo(viewer) ? viewer : null} loadInfo={chat.attachmentInfo} onClose={() => setViewer(null)}/>
     <DocumentViewer file={viewer && isDocument(viewer) ? viewer : null} load={chat.documentText} onClose={() => setViewer(null)} onError={chat.notify}/>
+    <VideoViewer video={viewer && isVideo(viewer) ? viewer : null} loadInfo={chat.attachmentInfo} exportVideo={chat.video.export} onClose={() => setViewer(null)}/>
   </>;
 }

@@ -60,7 +60,7 @@ function restore(config: CreationConfig, saved: Partial<Settings> | null): Setti
 }
 
 /** Images tab: creates images into the library, with a style, a size and a number of images. */
-export function ImageStudio({userId, library, loadConfig, improvePrompt, createImage, cutoutImage, voteImage, uploadImage, styles, onLoad, onOpen, onDelete, onStartChat, removed}: {
+export function ImageStudio({userId, library, loadConfig, improvePrompt, createImage, cutoutImage, voteImage, uploadImage, styles, onLoad, onOpen, onDelete, onStartChat, onAnimate, removed}: {
   userId: string; library: Library | null; loadConfig: () => Promise<CreationConfig>;
   improvePrompt: (prompt: string, style: string, signal?: AbortSignal, source?: string, retouch?: boolean, references?: string[]) => Promise<string>;
   createImage: (body: CreateBody, signal?: AbortSignal) => Promise<LibraryItem>;
@@ -70,6 +70,8 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
   styles: StyleApi;
   onLoad: () => void; onOpen: (image: AttachmentRef) => void; onDelete: (id: string) => void;
   onStartChat: (image: AttachmentRef) => void; removed: ReadonlySet<string>;
+  /** "Animer": the image becomes the starting image of the Video tab (absent: no Video tab). */
+  onAnimate?: (image: AttachmentRef) => void;
 }) {
   const storageKey = `observatoire-creation:${userId}`;
   const [config, setConfig] = useState<CreationConfig | null>(null);
@@ -161,7 +163,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
 
   // Images created here first, then those of the library (the same image once).
   const seen = new Set<string>();
-  const images = [...created, ...(library?.items.filter(item => item.generation) ?? [])]
+  const images = [...created, ...(library?.items.filter(item => item.generation && item.kind === 'image') ?? [])]
     .filter(item => !removed.has(item.id) && !seen.has(item.id) && seen.add(item.id));
   const busy = running.current !== null;
   const retouch = source !== null && settings?.edit === 'retouche';
@@ -477,6 +479,7 @@ export function ImageStudio({userId, library, loadConfig, improvePrompt, createI
               <div className="studio-item-actions">
                 <button type="button" className="icon-button" aria-label={`Nouvelle conversation avec ${item.name}`} title="Nouvelle conversation avec cette image" onClick={() => onStartChat(toRef(item))}><Icon name="ask"/></button>
                 <button type="button" className="icon-button" aria-label={`Partir de ${item.name}`} title="Partir de cette image pour en créer une autre" onClick={() => startFrom(toRef(item))}><Icon name="image"/></button>
+                {onAnimate && <button type="button" className="icon-button" aria-label={`Animer ${item.name}`} title="Animer : en faire une courte vidéo (onglet Vidéo)" onClick={() => onAnimate(toRef(item))}><Icon name="video"/></button>}
                 <button type="button" className="icon-button" aria-label={`Reprendre les réglages de ${item.name}`} title="Reprendre la description et les réglages" onClick={() => reuse(item)}><Icon name="retry"/></button>
                 <a className="icon-button" href={`${imageURL(item.id)}?download=1`} download={item.name} aria-label={`Télécharger ${item.name}`} title="Télécharger"><Icon name="download"/></a>
                 <button type="button" className="icon-button library-delete" aria-label={`Supprimer ${item.name}`} title="Supprimer" onClick={() => onDelete(item.id)}><Icon name="trash"/></button>

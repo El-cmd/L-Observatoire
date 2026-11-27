@@ -53,6 +53,8 @@ fn message(m:&Message,shown:&mut std::collections::HashSet<Uuid>)->Value{
         (Kind::Image,false)=>json!({"type":"text","text":format!("[Question sur l’image « {} », montrée plus haut dans la conversation]",a.name)}),
         (Kind::Document,true)=>json!({"type":"document","id":a.id,"name":a.name,"pages":a.pages,"tokens":a.tokens}),
         (Kind::Document,false)=>json!({"type":"text","text":format!("[Question sur le document « {} », joint plus haut dans la conversation]",a.name)}),
+        // Never accepted in a message (AttachmentRef::is_valid); a name only, should one be there.
+        (Kind::Video,_)=>json!({"type":"text","text":format!("[Vidéo « {} »]",a.name)}),
     }));
     json!({"role":m.role,"content":parts})
 }
@@ -247,6 +249,7 @@ async fn summarize(app:&App,user:Uuid,row:&Conversation,end:usize)->Result<Strin
                     let content=attachments::document_text(app,user,file.id).await.unwrap_or_else(||"contenu indisponible (document supprimé)".into());
                     text.push_str(&format!("\n\n[Document « {} » : {}]",file.name,content));
                 }
+                Kind::Video=>text.push_str(&format!("\n\n[Vidéo « {} »]",file.name)),
             }
         }
         for (index,part) in split_text(&text).iter().enumerate(){segments.push(json!({"role":message.role,"partie":index+1,"content":part}));}

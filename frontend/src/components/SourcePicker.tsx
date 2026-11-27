@@ -6,9 +6,9 @@ import {Icon} from './Icon';
 
 /** "Image → image": chooses the starting image, among the images of the library or from the device
  * (sent to the library first, like an image sent in a conversation). */
-export function SourcePicker({open, other = false, library, removed, upload, onChoose, onClose}: {
-  /** `other`: another image of a retouch, after the starting image. */
-  open: boolean; other?: boolean; library: Library | null; removed: ReadonlySet<string>;
+export function SourcePicker({open, other = false, hint, library, removed, upload, onChoose, onClose}: {
+  /** `other`: another image of a retouch, after the starting image. `hint`: what the image is for, if not a redrawing. */
+  open: boolean; other?: boolean; hint?: string; library: Library | null; removed: ReadonlySet<string>;
   upload: (file: File) => Promise<AttachmentRef>; onChoose: (image: AttachmentRef) => void; onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -34,9 +34,9 @@ export function SourcePicker({open, other = false, library, removed, upload, onC
       <h2 id="source-picker-title">{other ? 'Ajouter une image' : 'Partir d’une image'}</h2>
       <button type="button" className="icon-button" aria-label="Fermer" title="Fermer" onClick={onClose}><Icon name="close"/></button>
     </header>
-    <p className="password-hint">{other
+    <p className="password-hint">{hint ?? (other
       ? 'Une personne, un objet, un vêtement ou un décor à prendre dans cette image : désignez-la par son numéro dans la description.'
-      : 'L’image est redessinée selon votre description : sa composition et ses couleurs servent de point de départ.'}</p>
+      : 'L’image est redessinée selon votre description : sa composition et ses couleurs servent de point de départ.')}</p>
     <button type="button" id="source-upload" className="studio-secondary source-upload" disabled={sending} onClick={() => input.current?.click()}>
       <Icon name="plus"/>{sending ? 'Envoi…' : 'Depuis votre appareil'}</button>
     <input ref={input} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={event => {void send(event.target.files?.[0]);}}/>

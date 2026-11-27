@@ -35,25 +35,25 @@ export function LibraryView({library, picking, room, onLoad, onClose, onOpen, on
   }
   return <section className={`library${picking ? ' picking' : ''}`} id="library" aria-label="Bibliothèque">
     {!library ? <p className="library-empty" role="status">Chargement…</p>
-      : !library.items.length ? <p className="library-empty">Les images et documents que tu envoies apparaîtront ici.</p>
+      : !library.items.length ? <p className="library-empty">Les images, documents et vidéos que tu envoies ou crées apparaîtront ici.</p>
       : <ul className="library-grid">{library.items.map(item => {
         const chosen = selected.includes(item.id);
-        const document = item.kind === 'document', ready = item.status === 'ready';
+        const document = item.kind === 'document', video = item.kind === 'video', ready = item.status === 'ready';
         return <li key={item.id} className={`library-item${chosen ? ' selected' : ''}${document ? ` is-document is-${item.status}` : ''}`}>
-          <button type="button" className="library-thumb" aria-label={picking ? `Choisir ${item.name}` : document ? `Voir le texte lu dans ${item.name}` : `Agrandir ${item.name}`}
-            aria-pressed={picking ? chosen : undefined} disabled={!ready || picking && !chosen && selected.length >= room}
+          <button type="button" className="library-thumb" aria-label={picking ? `Choisir ${item.name}` : document ? `Voir le texte lu dans ${item.name}` : video ? `Lire ${item.name}` : `Agrandir ${item.name}`}
+            aria-pressed={picking ? chosen : undefined} disabled={!ready || picking && (video || !chosen && selected.length >= room)}
             onClick={() => picking ? toggle(item.id) : onOpen(ref(item))}>{document
               ? <span className="library-document"><Icon name="document"/><span>{item.name.split('.').pop()?.slice(0, 5).toUpperCase()}</span></span>
-              : <img src={thumbnailURL(item.id)} alt="" loading="lazy"/>}</button>
+              : <><img src={thumbnailURL(item.id)} alt="" loading="lazy"/>{video && <span className="library-play" aria-hidden="true"><Icon name="play"/></span>}</>}</button>
           <div className="library-meta">
             <span className="library-name" title={item.name}>{item.name}</span>
             <span>{new Date(item.created_at).toLocaleDateString('fr-FR')} · {formatBytes(item.size)}</span>
             {document && <span className={`library-state${item.status === 'failed' ? ' error' : ''}`} role={item.status === 'reading' ? 'status' : undefined}>{state(item)}</span>}
           </div>
           {!picking && <div className="library-actions">
-            <button type="button" className="icon-button" aria-label={`Nouvelle conversation avec ${item.name}`} title={document ? 'Nouvelle conversation avec ce document' : 'Nouvelle conversation avec cette image'} disabled={!ready} onClick={() => onStartChat(ref(item))}><Icon name="ask"/></button>
+            {!video && <button type="button" className="icon-button" aria-label={`Nouvelle conversation avec ${item.name}`} title={document ? 'Nouvelle conversation avec ce document' : 'Nouvelle conversation avec cette image'} disabled={!ready} onClick={() => onStartChat(ref(item))}><Icon name="ask"/></button>}
             <a className="icon-button" href={`${imageURL(item.id)}?download=1`} download={item.name} aria-label={`Télécharger ${item.name}`} title="Télécharger"><Icon name="download"/></a>
-            <button type="button" className="icon-button" aria-label={`Conversations avec ${item.name}`} title="Conversations" aria-expanded={links?.id === item.id} onClick={() => {void showLinks(item.id);}}><Icon name="link"/></button>
+            {!video && <button type="button" className="icon-button" aria-label={`Conversations avec ${item.name}`} title="Conversations" aria-expanded={links?.id === item.id} onClick={() => {void showLinks(item.id);}}><Icon name="link"/></button>}
             <button type="button" className="icon-button library-delete" aria-label={`Supprimer ${item.name}`} title="Supprimer" onClick={() => onDelete(item.id)}><Icon name="trash"/></button>
           </div>}
           {links?.id === item.id && <div className="library-links">

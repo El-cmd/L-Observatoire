@@ -582,6 +582,139 @@ class Integration(unittest.TestCase):
         self.assertEqual(self.alice.call(path, 'DELETE')[0], 404)
         self.assertEqual(self.alice.call('/api/creation', 'POST', {'prompt': 'x', 'style': style['id'], 'size': '1024x1024'})[0], 400)
 
+    def test_05m_videos_are_queued_followed_and_kept_in_the_library(self):
+        def binary(client, path, body=None, headers=None):
+            request = urllib.request.Request(ORIGIN + path, data=json.dumps(body).encode() if body is not None else None, method='POST' if body is not None else 'GET',
+                                             headers={'Origin': ORIGIN, 'X-CSRF-Token': client.csrf, **({'Content-Type': 'application/json'} if body is not None else {}), **(headers or {})})
+            try: response = client.opener.open(request, timeout=60)
+            except urllib.error.HTTPError as error: response = error
+            with response: return response.status, response.read(), response.headers
+
+        def until(client, video, statuses, seconds=60):
+            deadline = time.monotonic() + seconds
+            while time.monotonic() < deadline:
+                code, current, _ = client.call('/api/video/' + video['id'])
+                if code == 200 and current['status'] in statuses: return current
+                time.sleep(0.4)
+            self.fail(f'video {video["id"]} never reached {statuses}: {current}')
+
+        code, config, _ = self.alice.call('/api/video')
+        self.assertEqual(code, 200)
+        self.assertTrue(config['configured'])
+        self.assertEqual([d['frames'] for d in config['durations']], [33, 49, 81])
+        self.assertEqual([(r['id'], r['measured']) for r in config['resolutions']], [('480p', True), ('720p', False)])
+        self.assertEqual((config['max_total'], config['open'], config['videos']), (2, 0, []))
+        self.assertEqual(Client().call('/api/video')[0], 401)
+        code, start = upload(self.alice, png(48, 36, b'video-start'))
+        self.assertEqual(code, 201)
+        code, bob_start = upload(self.bob, png(40, 30, b'video-bob'))
+        self.assertEqual(code, 201)
+
+        # "Améliorer": Qwen looks at the starting image (its thumbnail); quotes around the answer are removed.
+        code, improved, _ = self.alice.call('/api/video/improve', 'POST', {'prompt': 'il tourne', 'source': start['id']})
+        self.assertEqual((code, improved), (200, {'prompt': 'The small brown square slowly rotates while the light shifts. il tourne'}))
+        self.assertEqual(self.alice.call('/api/video/improve', 'POST', {'prompt': '', 'source': bob_start['id']})[0], 400, 'not her image')
+
+        base = {'source': start['id'], 'prompt': 'video-slow un carré', 'resolution': '480p', 'orientation': 'paysage', 'duration': 2, 'steps': 20,
+                'smooth': True, 'camera': 'avance', 'negative': 'blurry,   text'}
+        for bad in ({'resolution': '1080p'}, {'orientation': 'carré'}, {'duration': 4}, {'steps': 25}, {'camera': 'zoom'}, {'prompt': 'x <lora:a:1>'},
+                    {'source': str(uuid.uuid4())}, {'source': bob_start['id']}, {'seed': 2**31}, {'prompt': ' ', 'camera': None}):
+            self.assertEqual(self.alice.call('/api/video', 'POST', {**base, **bad})[0], 400, bad)
+        self.assertEqual(self.alice.call('/api/video', 'POST', base, csrf=False)[0], 403)
+
+        # Alice's video is sent at once; Bob's waits in the queue of L'Observatoire (the fake service refuses two at once).
+        code, first, _ = self.alice.call('/api/video', 'POST', base)
+        self.assertEqual(code, 201, first)
+        self.assertEqual(first['sent'], 'video-slow un carré The camera slowly pushes in toward the subject.')
+        self.assertEqual((first['negative'], first['settings']['size'], first['settings']['frames'], first['settings']['fps'], first['settings']['estimate_seconds']),
+                         ('blurry, text', '832x480', 33, 32, 94))
+        self.assertIsInstance(first['settings']['seed'], int)
+        self.assertEqual(self.alice.call('/api/video', 'POST', base)[0], 429, 'one video at a time per account')
+        code, second, _ = self.bob.call('/api/video', 'POST', {**base, 'source': bob_start['id'], 'prompt': 'un carré de bob', 'camera': None, 'seed': 7, 'smooth': False})
+        self.assertEqual(code, 201, second)
+        self.assertEqual(second['sent'], 'un carré de bob')
+        compose('exec', '-T', 'backend', '/app/observatoire', 'create-user', input=json.dumps({'username': 'carol', 'password': PASSWORD}).encode(), stdout=subprocess.DEVNULL)
+        carol = Client(); carol.login('carol')
+        code, carol_start = upload(carol, png(40, 30, b'video-carol'))
+        code, refused, _ = carol.call('/api/video', 'POST', {**base, 'source': carol_start['id']})
+        self.assertEqual(code, 429, 'two videos in all')
+        self.assertIn('file', refused['error'])
+        self.assertEqual(carol.call('/api/video')[1]['open'], 2)
+        first = until(self.alice, first, ('running',))
+        waiting = self.bob.call('/api/video/' + second['id'])[1]
+        self.assertEqual((waiting['status'], waiting['position']), ('waiting', 1))
+        self.assertEqual(self.bob.call('/api/video/' + second['id'], 'DELETE')[0], 204, 'a waiting video leaves the queue')
+        self.assertEqual(self.alice.call('/api/video/' + first['id'], 'DELETE')[0], 409, 'a video being made cannot be stopped')
+        self.assertEqual(self.alice.call('/api/video/' + second['id'])[0], 404)
+        code, second, _ = self.bob.call('/api/video', 'POST', {**base, 'source': bob_start['id'], 'prompt': 'un carré de bob', 'camera': None, 'seed': 7, 'smooth': False})
+        self.assertEqual(code, 201, second)
+
+        # The API restarts while one video is being made and another waits: both are taken up from the database.
+        compose('restart', 'backend', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        wait_ready()
+        first = until(self.alice, first, ('ready', 'failed', 'lost'))
+        self.assertEqual(first['status'], 'ready', first)
+        self.assertTrue(first['started_at'] and first['finished_at'] and first['attachment'])
+        second = until(self.bob, second, ('ready', 'failed', 'lost'))
+        self.assertEqual(second['status'], 'ready', second)
+
+        # The MP4 lives in the library: played in parts (Range), with the starting image as thumbnail.
+        items = {item['id']: item for item in self.alice.call('/api/attachments')[1]['items']}
+        video = items[first['attachment']]
+        self.assertEqual((video['kind'], video['mime'], video['width'], video['height']), ('video', 'video/mp4', 832, 480))
+        self.assertEqual(video['name'], 'video-slow un carré.mp4')
+        self.assertTrue(video['generation']['video'])
+        self.assertEqual((video['generation']['seed'], video['generation']['source'], video['generation']['camera']), (first['settings']['seed'], start['id'], 'avance'))
+        code, data, headers = binary(self.alice, '/api/attachments/' + video['id'])
+        self.assertEqual((code, headers['Content-Type'], data[4:8], headers['Accept-Ranges']), (200, 'video/mp4', b'ftyp', 'bytes'))
+        self.assertEqual(len(data), video['size'])
+        code, part, headers = binary(self.alice, '/api/attachments/' + video['id'], headers={'Range': 'bytes=4-11'})
+        self.assertEqual((code, part, headers['Content-Range']), (206, data[4:12], f'bytes 4-11/{len(data)}'))
+        code, thumb, headers = binary(self.alice, '/api/attachments/' + video['id'] + '/thumbnail')
+        self.assertEqual((code, headers['Content-Type'], thumb[:3]), (200, 'image/jpeg', b'\xff\xd8\xff'))
+        self.assertEqual(binary(self.bob, '/api/attachments/' + video['id'])[0], 404)
+        self.assertEqual(binary(self.alice, '/api/video/' + first['id'] + '/thumbnail')[0], 200)
+        self.assertEqual(binary(self.bob, '/api/video/' + first['id'] + '/thumbnail')[0], 404)
+        self.assertEqual(sql(f"SELECT octet_length(source_data) FROM videos WHERE id='{first['id']}'"), '0', 'the starting image is let go once done')
+
+        # GIF and WebP made from the kept MP4.
+        code, gif, headers = binary(self.alice, '/api/video/export', {'attachment': video['id'], 'format': 'gif'})
+        self.assertEqual((code, headers['Content-Type'], gif[:6]), (200, 'image/gif', b'GIF89a'))
+        self.assertIn('video-slow', headers['Content-Disposition'])
+        code, webp, headers = binary(self.alice, '/api/video/export', {'attachment': video['id'], 'format': 'webp'})
+        self.assertEqual((code, headers['Content-Type'], webp[8:12]), (200, 'image/webp', b'WEBP'))
+        self.assertEqual(binary(self.alice, '/api/video/export', {'attachment': video['id'], 'format': 'png'})[0], 400)
+        self.assertEqual(binary(self.bob, '/api/video/export', {'attachment': video['id'], 'format': 'gif'})[0], 404)
+        self.assertEqual(binary(self.alice, '/api/video/export', {'attachment': start['id'], 'format': 'gif'})[0], 404, 'an image is not a video')
+
+        # A video is never attached to a message (Qwen does not read videos).
+        chat = self.alice.create('Une vidéo ?')
+        code, _, _ = self.alice.call('/api/conversations/' + chat['id'], 'PUT', {'version': chat['version'], 'messages': [
+            {'role': 'user', 'content': 'Regarde', 'attachments': [{'id': video['id'], 'name': video['name'], 'kind': 'video', 'width': 832, 'height': 480}]}]})
+        self.assertEqual(code, 400)
+
+        # Failed on the server, forgotten by the server (state 500, content 404), not an MP4: said plainly.
+        for prompt, status, words in (('video-fail', 'failed', 'CUDA out of memory'), ('video-lost', 'lost', 'ne connaît plus'), ('video-notmp4', 'failed', 'MP4')):
+            code, made, _ = self.alice.call('/api/video', 'POST', {**base, 'prompt': prompt, 'smooth': False})
+            self.assertEqual(code, 201, made)
+            made = until(self.alice, made, ('ready', 'failed', 'lost'))
+            self.assertEqual(made['status'], status, made)
+            self.assertIn(words, made['error'])
+
+        # A finished video leaves the list; the library keeps it.
+        self.assertEqual(self.alice.call('/api/video/' + first['id'], 'DELETE')[0], 204)
+        self.assertEqual(binary(self.alice, '/api/attachments/' + video['id'])[0], 200)
+        self.assertNotIn(first['id'], [v['id'] for v in self.alice.call('/api/video')[1]['videos']])
+
+        # Room for the MP4 is kept in the library (30 Mo).
+        sql(f"UPDATE attachments SET size=size+{480 * 1024 * 1024} WHERE id='{start['id']}'")
+        try:
+            code, full, _ = self.alice.call('/api/video', 'POST', base)
+            self.assertEqual(code, 400)
+            self.assertIn('30 Mo', full['error'])
+        finally:
+            sql(f"UPDATE attachments SET size=size-{480 * 1024 * 1024} WHERE id='{start['id']}'")
+
     def test_06_upstream_errors_release_the_generation_lease(self):
         chat = self.alice.create('upstream-error'); path = '/api/conversations/'+chat['id']
         code, result, _ = self.alice.call(path+'/generate', 'POST', {'version':chat['version']})

@@ -168,4 +168,8 @@ w("### Ce que reçoit le modèle d’images\n\nPas de consigne système : la des
 w("### Sujet de l’image d’exemple d’un style (`EXAMPLE_SCENE`) — Système\n\nÀ l’enregistrement d’un style de « Mes styles », Qwen reçoit ses mots. S’ils nomment un personnage ou un univers, il propose une scène qui le montre ; sinon l’exemple garde le sujet habituel.\n\n" + bloc(rust_const('backend/src/creation.rs', 'EXAMPLE_SCENE')))
 w("Sujet habituel, avec la graine 42, pour comparer les styles entre eux (`EXAMPLE_SUBJECT`) :\n\n" + bloc(rust_const('backend/src/creation.rs', 'EXAMPLE_SUBJECT')))
 w("Les mots des 15 styles fournis sont dans `STYLES`, au début de `backend/src/creation.rs`.\n")
+w("\n## 6. Onglet Vidéo\n\n`backend/src/video.rs`.\n\n")
+w("### Écrire la description d’une vidéo (`DESCRIBE`) — Système\n\nBouton « Améliorer » : Qwen reçoit l’idée de l’utilisateur (ou rien) et la miniature de l’image de départ, et écrit la description envoyée à Wan 2.2. Reprise de la consigne du Labo vidéo d’Amelia.\n\n" + bloc(rust_const('backend/src/video.rs', 'DESCRIBE')))
+w("Ce que la vidéo doit éviter, par défaut (`DEFAULT_NEGATIVE`, modifiable dans les réglages) :\n\n" + bloc(rust_const('backend/src/video.rs', 'DEFAULT_NEGATIVE')))
+w("Les phrases des mouvements de caméra, ajoutées après la description, sont dans `CAMERAS`, au début de `backend/src/video.rs`.\n")
 print(''.join(out), end='')

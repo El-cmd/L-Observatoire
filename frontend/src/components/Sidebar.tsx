@@ -3,9 +3,11 @@ import type {Activity, Conversation, User} from '../types';
 import {Icon} from './Icon';
 import {install, useInstallPrompt} from '../hooks/useInstall';
 
-export function Sidebar({user, chats, activity, currentId, libraryOpen, imagesOpen, onImages, newsOpen, unreadNews, open, collapsed, navigating, canImport, importing, onClose, onNew, onLibrary, onNews,
+export function Sidebar({user, chats, activity, currentId, libraryOpen, imagesOpen, onImages, videoOpen, onVideo, videoBusy, newsOpen, unreadNews, open, collapsed, navigating, canImport, importing, onClose, onNew, onLibrary, onNews,
   onSelect, onRename, onDelete, onImport, onPassword, onLogout}: {
-  user: User; chats: Conversation[]; activity: Record<string, Activity>; currentId?: string; libraryOpen: boolean; onLibrary: () => void; imagesOpen: boolean; onImages: () => void; newsOpen: boolean; unreadNews: boolean; onNews: () => void; open: boolean; collapsed: boolean; navigating: boolean;
+  user: User; chats: Conversation[]; activity: Record<string, Activity>; currentId?: string; libraryOpen: boolean; onLibrary: () => void; imagesOpen: boolean; onImages: () => void;
+  /** Video tab; `videoBusy`: a video of the account is waiting or being made. */
+  videoOpen: boolean; onVideo: () => void; videoBusy: boolean; newsOpen: boolean; unreadNews: boolean; onNews: () => void; open: boolean; collapsed: boolean; navigating: boolean;
   canImport: boolean; importing: boolean; onClose: () => void; onNew: () => void;
   onSelect: (id: string) => void; onRename: (id: string, title: string) => void; onDelete: (id: string) => void; onImport: () => void;
   onPassword: () => void; onLogout: () => void;
@@ -39,10 +41,12 @@ export function Sidebar({user, chats, activity, currentId, libraryOpen, imagesOp
     <button className="new-chat" id="new-chat" type="button" title="Ctrl / Cmd + Maj + N" disabled={navigating} onClick={onNew}><Icon name="new"/><span>Nouveau chat</span></button>
     <button className={`library-link${libraryOpen ? ' active' : ''}`} id="library-link" type="button" aria-current={libraryOpen ? 'page' : undefined} onClick={onLibrary}><Icon name="image"/><span>Bibliothèque</span></button>
     <button className={`library-link images-link${imagesOpen ? ' active' : ''}`} id="images-link" type="button" aria-current={imagesOpen ? 'page' : undefined} onClick={onImages}><Icon name="create"/><span>Images</span></button>
+    <button className={`library-link video-link${videoOpen ? ' active' : ''}`} id="video-link" type="button" aria-current={videoOpen ? 'page' : undefined} onClick={onVideo}><Icon name="video"/><span>Vidéo</span>
+      {videoBusy && <span className="history-activity" role="status" aria-label="Vidéo en cours" title="Vidéo en cours"/>}</button>
     <div className="history-label">Conversations</div>
     <div className="history" id="history" aria-label="Historique des conversations">
       {!visible.length && <p className="history-empty">Vos conversations apparaîtront ici.</p>}
-      {visible.map(chat => <div className={`history-row${chat.id === currentId && !libraryOpen && !imagesOpen && !newsOpen ? ' active' : ''}`} key={chat.id}>
+      {visible.map(chat => <div className={`history-row${chat.id === currentId && !libraryOpen && !imagesOpen && !videoOpen && !newsOpen ? ' active' : ''}`} key={chat.id}>
         {editing === chat.id
           ? <input className="history-rename" aria-label="Nouveau titre de la conversation" maxLength={80} autoFocus value={draft}
               onChange={event => setDraft(event.target.value)} onFocus={event => event.target.select()} onBlur={() => finishRename(chat)}

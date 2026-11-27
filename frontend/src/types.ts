@@ -17,11 +17,12 @@ export interface Message {
   /** Steps of the tools used for this answer (web search), shown above it. */
   outils?: ToolEvent[];
 }
-/** Width and height are 0 for documents; pages is 0 for Word and text files. */
-export interface AttachmentRef { id: string; name: string; width: number; height: number; kind?: 'document'; pages?: number; tokens?: number }
+/** Width and height are 0 for documents; pages is 0 for Word and text files. Videos stay in the library
+ * (never attached to a message). */
+export interface AttachmentRef { id: string; name: string; width: number; height: number; kind?: 'document' | 'video'; pages?: number; tokens?: number }
 /** A document is read once when added: `progress` of `pages` done, then ready or failed. */
 export interface LibraryItem {
-  id: string; name: string; kind: 'image' | 'document'; mime: string; width: number; height: number; size: number; created_at: string;
+  id: string; name: string; kind: 'image' | 'document' | 'video'; mime: string; width: number; height: number; size: number; created_at: string;
   /** The user's thumbs up or down on a created image. */
   feedback?: import('./lib/feedback').Feedback | null;
   status: 'reading' | 'ready' | 'failed'; pages: number; progress: number; scanned: number; doubts: number; tokens: number; error: string | null;
@@ -41,6 +42,39 @@ export interface Generation {
   cutout?: boolean;
   /** HD or Très HD (absent: Standard). */
   quality?: {id: string; name: string};
+  /** Videos of the Video tab: how they were made (the settings of `VideoSettings` too). */
+  video?: boolean; negative?: string; resolution?: string; orientation?: Orientation; duration?: number; frames?: number; steps?: number;
+  smooth?: boolean; fps?: number; camera?: string | null; waited?: number; estimate_seconds?: number;
+}
+export type Orientation = 'portrait' | 'paysage';
+/** Settings of a video, as asked. */
+export interface VideoSettings {
+  resolution: string; orientation: Orientation; size: string; duration: number; frames: number; steps: number; smooth: boolean; fps: number;
+  seed: number; camera: string | null; estimate_seconds: number;
+}
+/** A video of the Video tab: waiting in the queue of L'Observatoire, being made on the AI server, ready (in the
+ * library: `attachment`), failed, or lost (forgotten by the video server). */
+export interface Video {
+  id: string; status: 'waiting' | 'running' | 'ready' | 'failed' | 'lost'; service_status: string | null; settings: VideoSettings;
+  prompt: string; improved: string | null; sent: string; negative: string; source: string | null; attachment: string | null; error: string | null;
+  created_at: string; submitted_at: string | null; finished_at: string | null;
+  /** When the AI server started computing it (for the estimated progress). */
+  started_at: string | null;
+  /** Videos before this one in the queue (0: sent to the AI server). */
+  position: number;
+}
+export interface VideoConfig {
+  configured: boolean; resolutions: {id: string; portrait: string; paysage: string; measured: boolean}[];
+  durations: {seconds: number; frames: number}[]; steps: number[]; fps: number; fps_smooth: number;
+  cameras: {id: string; name: string; sentence: string}[]; default_negative: string; max_prompt: number; max_negative: number; max_total: number;
+  /** Videos of every account waiting or being made. */
+  open: number;
+  videos: Video[];
+}
+/** Asks a video of the Video tab. */
+export interface VideoBody {
+  source: string; prompt: string; improved?: string | null; resolution: string; orientation: Orientation; duration: number; steps: number;
+  smooth: boolean; seed?: number; negative: string; camera?: string | null;
 }
 /** Asks one image of the Images tab; `source` and `strength` for "Image → image". */
 export interface CreateBody { prompt: string; style: string; size: string; improved?: string | null; source?: string; strength?: string; retouch?: boolean; mask?: string; quality?: string; references?: string[] }
