@@ -13,6 +13,8 @@ export const NEWS_LEVELS: Record<NewsLevel, {label: string; hint: string}> = {
 };
 
 export const NEWS: NewsItem[] = [
+  {id: '2026-11-27-sources-officielles', date: '2026-11-27', level: 'improvement', title: 'Recherche sur Internet : les sources officielles d’abord',
+    text: 'Quand vous cherchez sur Internet (bouton Web), L’Observatoire lit en premier les sites qui font foi : service-public, ameli, Légifrance, impots.gouv… pour les démarches et la santé, le site officiel du logiciel ou de la compétition pour le reste. Il sait aussi lire les documents PDF (barèmes, notes officielles) et cite ces sources en priorité dans sa réponse.'},
   {id: '2026-11-26-pouces', date: '2026-11-26', level: 'major', title: 'Donnez votre avis : pouce en l’air ou en bas',
     text: 'Sous chaque réponse, à côté de « Copier », et sur chaque image créée dans l’onglet Images, deux pouces permettent de dire si c’était bien ou non. Avec le pouce en bas, vous pouvez dire ce qui n’allait pas (faux, incomplet, hors sujet…) et ajouter un mot, si vous le souhaitez. Vos avis sont seulement enregistrés : ils servent à améliorer L’Observatoire et ne changent pas les réponses. Touchez à nouveau un pouce pour retirer votre avis.'},
   {id: '2026-11-25-enlever-le-fond', date: '2026-11-25', level: 'major', title: 'Enlever le fond d’une image',

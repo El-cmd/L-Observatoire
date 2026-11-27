@@ -14,6 +14,9 @@ from datetime import datetime
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
+import tomllib
+from pathlib import Path
+
 import snowballstemmer
 
 import qualite
@@ -49,8 +52,44 @@ SOURCES_FAVORISEES = (
     "kernel.org", "man7.org", "debian.org", "ubuntu.com", "archlinux.org", "git-scm.com", "go.dev",
     "learn.microsoft.com", "developers.cloudflare.com", "huggingface.co", "docs.vllm.ai", "langchain.com",
 )
-BONUS = {"favorisee": 1.2, "autre": 1.0}
-LIBELLE_GROUPE = {"favorisee": "source favorisée", "autre": "autre source"}
+BONUS = {"officielle": 1.5, "favorisee": 1.2, "autre": 1.0}
+LIBELLE_GROUPE = {"officielle": "source officielle", "favorisee": "source favorisée", "autre": "autre source"}
+
+
+def charger_themes(chemin: Path = Path(__file__).with_name("sources.toml")) -> dict[str, dict]:
+    """Thèmes de sources.toml : {nom: {"description", "domaines", "requetes_site"}} (domaines en minuscules, sans www)."""
+    themes = tomllib.loads(chemin.read_text(encoding="utf-8")).get("themes", {})
+    return {nom: {"description": str(t.get("description", "")),
+                  "domaines": tuple(d.lower().removeprefix("www.") for d in t.get("domaines", [])),
+                  "requetes_site": tuple(t.get("requetes_site", []))} for nom, t in themes.items()}
+
+
+THEMES = charger_themes()
+
+
+def du_domaine(hote: str, domaines) -> bool:
+    return any(hote == d or hote.endswith("." + d) for d in domaines)
+
+
+_DOMAINE = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}")
+
+
+def sites_valides(sites) -> tuple[str, ...]:
+    """Sites officiels propres à la question (proposés par Qwen) : noms de domaine seuls, 2 au plus."""
+    if not isinstance(sites, list):
+        return ()
+    propres = [s.lower().removeprefix("www.") for s in sites if isinstance(s, str) and _DOMAINE.fullmatch(s.lower().removeprefix("www."))]
+    return tuple(dict.fromkeys(propres))[:2]
+
+
+def requetes_officielles(theme: str | None, requete: str, sites: tuple[str, ...] = ()) -> list[str]:
+    """Requêtes de plus limitées aux sites officiels (« … site:gouv.fr ») : ceux de la question, puis ceux du thème
+    (3 au plus), pour avoir leurs pages parmi les résultats même quand les moteurs les classent loin."""
+    if not requete:
+        return []
+    domaines = list(sites) + list(THEMES[theme]["requetes_site"] if theme in THEMES else ())
+    domaines = [d for i, d in enumerate(domaines) if not any(d == e or d.endswith("." + e) for e in domaines[:i])]
+    return [f"{requete} site:{d}" for d in domaines[:3]]
 
 DEBUT, FIN = "<<<PASSAGE", "<<<FIN DU PASSAGE>>>"
 
@@ -141,9 +180,13 @@ def bm25(morceaux_termes: list[list[str]], requete: list[str], k1: float = 1.5, 
 
 # ── Sources ─────────────────────────────────────────────────────────────────
 
-def groupe(url: str) -> str:
+def groupe(url: str, theme: str | None = None, sites: tuple[str, ...] = ()) -> str:
     parties = urlsplit(url)
     hote = (parties.hostname or "").lower()
+    # Sources officielles du thème (sources.toml) ou de la question (sites proposés par Qwen) : lues en premier,
+    # bonus le plus fort.
+    if du_domaine(hote, sites) or (theme in THEMES and du_domaine(hote, THEMES[theme]["domaines"])):
+        return "officielle"
     # Tout ce qui est wiki (wiki.archlinux.org, wiki.debian.org, fr.wikipedia.org…) ou une source de la liste.
     if "wiki" in hote.split(".") or any(p.startswith("wiki") for p in hote.split(".")[:-1]) \
             or any(hote == d or hote.endswith("." + d) for d in SOURCES_FAVORISEES):
@@ -182,11 +225,11 @@ def secours(resultat: dict) -> bool:
     return bool(moteurs) and moteurs <= MOTEURS_SECOURS
 
 
-def ordonner(resultats: list[dict]) -> list[dict]:
-    """Un résultat par site ; résultats des seuls moteurs de secours en dernier, puis sources favorisées d'abord,
-    ordre de SearXNG sinon. Pour chaque site, c'est le mieux placé dans cet ordre qui est gardé."""
-    rang = {"favorisee": 0, "autre": 1}
-    tous = sorted(({**r, "groupe": groupe(r["url"])} for r in resultats),
+def ordonner(resultats: list[dict], theme: str | None = None, sites: tuple[str, ...] = ()) -> list[dict]:
+    """Un résultat par site ; résultats des seuls moteurs de secours en dernier, puis sources officielles du thème,
+    sources favorisées, ordre de SearXNG sinon. Pour chaque site, c'est le mieux placé dans cet ordre qui est gardé."""
+    rang = {"officielle": 0, "favorisee": 1, "autre": 2}
+    tous = sorted(({**r, "groupe": groupe(r["url"], theme, sites)} for r in resultats),
                   key=lambda r: (secours(r), rang[r["groupe"]], r["position"]))
     vus, candidats = set(), []
     for r in tous:
@@ -346,7 +389,8 @@ def contexte(requete: str, sources: list[dict], passages: list[dict], date: str)
         "Sources :",
     ]
     for s in sources:
-        lignes.append(f"[{s['numero']}] {_sur(s['titre'] or s['url'])} — {s['url']} (consultée le {_date(s['date_consultation'])})")
+        officielle = " — source officielle" if s.get("groupe") == "officielle" else ""
+        lignes.append(f"[{s['numero']}] {_sur(s['titre'] or s['url'])} — {s['url']}{officielle} (consultée le {_date(s['date_consultation'])})")
     lignes.append("")
     precedent = None
     for p in passages:
@@ -418,7 +462,7 @@ def selectionner(requete: str, lues: list[dict], budget: int, optimise: bool = T
     def essai(liste):
         numeros = sorted({p["numero"] for p in liste} | {n for p in liste for n in p.get("aussi_dans", [])})
         sources = [{"numero": n, "titre": sources_utiles[n]["titre"], "url": sources_utiles[n]["url"],
-                    "date_consultation": sources_utiles[n]["date_consultation"]} for n in numeros]
+                    "date_consultation": sources_utiles[n]["date_consultation"], "groupe": sources_utiles[n].get("groupe")} for n in numeros]
         ordre = sorted(liste, key=lambda p: (p["numero"], p["position"]))
         texte = contexte(requete, sources, ordre, lues[0]["date_consultation"] if lues else "")
         return texte, jetons(texte)

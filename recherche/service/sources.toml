@@ -1,0 +1,71 @@
+# Sources officielles par thème. La planification classe chaque question dans un thème ; les pages des domaines de
+# ce thème sont alors lues en premier et gardent un bonus au classement des passages (« source officielle »).
+# Un domaine vaut pour ses sous-domaines (« gouv.fr » : service-public.gouv.fr, legifrance.gouv.fr…).
+# requetes_site : pour ce thème, une requête de plus par domaine, limitée à ce site (« … site:gouv.fr »), pour que
+# les pages officielles soient parmi les résultats même quand les moteurs les classent loin.
+# Les wikis et les sources de développement de multi.SOURCES_FAVORISEES restent favorisés pour tous les thèmes.
+
+[themes.administratif]
+description = "démarches, droits, prestations et aides sociales, Sécurité sociale, impôts, travail et salaires, retraite, logement, lois et règlements en France"
+requetes_site = ["gouv.fr", "ameli.fr"]
+domaines = [
+  "gouv.fr", "ameli.fr", "caf.fr", "urssaf.fr", "francetravail.fr", "msa.fr", "lassuranceretraite.fr",
+  "info-retraite.fr", "agirc-arrco.fr", "net-entreprises.fr", "vie-publique.fr", "insee.fr", "conseil-constitutionnel.fr",
+  "conseil-etat.fr", "courdecassation.fr", "defenseurdesdroits.fr", "anil.org", "europa.eu",
+]
+
+[themes.sante]
+description = "santé, maladies, médicaments, remboursements de soins, prévention"
+requetes_site = ["ameli.fr", "gouv.fr"]
+domaines = [
+  "ameli.fr", "gouv.fr", "has-sante.fr", "santepubliquefrance.fr", "ansm.sante.fr", "inserm.fr", "pasteur.fr",
+  "vidal.fr", "who.int", "ecdc.europa.eu", "ema.europa.eu", "cnil.fr",
+]
+
+[themes.developpement]
+description = "programmation, logiciels, versions, bibliothèques, outils, systèmes, réseaux, bases de données, erreurs"
+requetes_site = []
+# Les sites officiels des projets courants ; multi.SOURCES_FAVORISEES (documentations, dépôts, Stack Overflow) s'y ajoute.
+domaines = [
+  "postgresql.org", "python.org", "nodejs.org", "git-scm.com", "rust-lang.org", "go.dev", "php.net", "java.com",
+  "oracle.com", "openjdk.org", "kotlinlang.org", "dotnet.microsoft.com", "learn.microsoft.com", "developer.apple.com",
+  "android.com", "mysql.com", "mariadb.org", "mongodb.com", "sqlite.org", "redis.io", "nginx.org", "apache.org",
+  "docker.com", "kubernetes.io", "kernel.org", "debian.org", "ubuntu.com", "fedoraproject.org", "archlinux.org",
+  "endoflife.date", "developer.mozilla.org", "typescriptlang.org", "react.dev", "vuejs.org", "angular.dev",
+  "symfony.com", "laravel.com", "djangoproject.com", "spring.io", "github.com", "gitlab.com", "stackoverflow.com",
+]
+
+[themes.sport]
+description = "sport, compétitions, résultats, joueurs, clubs"
+requetes_site = []
+domaines = [
+  "lequipe.fr", "fifa.com", "uefa.com", "ballondor.com", "francefootball.fr", "fff.fr", "ligue1.com", "letour.fr",
+  "uci.org", "olympics.com", "worldathletics.org", "ffr.fr", "world.rugby", "atptour.com", "wtatennis.com",
+  "rolandgarros.com", "formula1.com", "nba.com", "francetvinfo.fr", "bbc.com", "rmcsport.bfmtv.com",
+]
+
+[themes.actualite]
+description = "actualité, politique, événements récents, international, culture, faits divers"
+requetes_site = []
+domaines = [
+  "afp.com", "francetvinfo.fr", "lemonde.fr", "radiofrance.fr", "franceinter.fr", "lefigaro.fr", "liberation.fr",
+  "lesechos.fr", "ouest-france.fr", "20minutes.fr", "la-croix.com", "vie-publique.fr", "gouv.fr", "elysee.fr",
+  "assemblee-nationale.fr", "senat.fr", "reuters.com", "apnews.com", "bbc.com", "theguardian.com", "europa.eu",
+]
+
+[themes.economie]
+description = "économie, finances, entreprises, marchés, inflation, statistiques"
+requetes_site = []
+domaines = [
+  "insee.fr", "banque-france.fr", "economie.gouv.fr", "gouv.fr", "ecb.europa.eu", "europa.eu", "imf.org", "oecd.org",
+  "worldbank.org", "amf-france.org", "lesechos.fr", "latribune.fr",
+]
+
+[themes.sciences]
+description = "sciences, recherche, espace, climat, environnement, histoire, géographie"
+requetes_site = []
+domaines = [
+  "cnrs.fr", "inria.fr", "cea.fr", "ird.fr", "inrae.fr", "ifremer.fr", "meteofrance.com", "ipcc.ch", "nasa.gov",
+  "esa.int", "cnes.fr", "nature.com", "science.org", "pnas.org", "arxiv.org", "britannica.com", "larousse.fr",
+  "bnf.fr", "insee.fr",
+]

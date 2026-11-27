@@ -52,7 +52,8 @@ class Telechargement(unittest.TestCase):
 
     def test_refus_qui_menent_au_navigateur(self):
         for reponse, raison in [(html("Accès refusé", 403), "statut HTTP 403"),
-                                (httpx.Response(200, content=b"%PDF-1.7", headers={"content-type": "application/pdf"}), "pas une page HTML"),
+                                (httpx.Response(200, content=b"%PDF-1.7", headers={"content-type": "application/zip"}), "pas une page HTML"),
+                                (httpx.Response(200, content=b"<html>pas un PDF", headers={"content-type": "application/pdf"}), "PDF illisible"),
                                 (html("x", **{"content-length": str(telechargement.OCTETS_MAX + 1)}), "page trop lourde")]:
             with self.assertRaises(telechargement.Echec) as e:
                 telecharger({"https://exemple.fr/": reponse}, "https://exemple.fr/")
@@ -60,6 +61,12 @@ class Telechargement(unittest.TestCase):
         with mock_octets_max(1000), self.assertRaises(telechargement.Echec) as e:
             telecharger({"https://exemple.fr/": html("a" * 5000, genre="text/html")}, "https://exemple.fr/")
         self.assertEqual(e.exception.raison, "page trop lourde", "taille comptée pendant la réception, sans en-tête")
+
+    def test_pdf_rendu_tel_quel(self):
+        (contenu, finale), _ = telecharger({"https://exemple.fr/bareme.pdf": httpx.Response(200, content=b"%PDF-1.7 plafonds",
+                                           headers={"content-type": "application/pdf"})}, "https://exemple.fr/bareme.pdf")
+        self.assertIsInstance(contenu, telechargement.Pdf)
+        self.assertEqual((bytes(contenu), finale), (b"%PDF-1.7 plafonds", "https://exemple.fr/bareme.pdf"))
 
     def test_jeu_de_caracteres(self):
         latin = '<html><head><meta charset="iso-8859-1"></head><body>Santé</body></html>'.encode("latin-1")
@@ -139,6 +146,31 @@ class LectureSimple(unittest.TestCase):
             self.assertTrue(lue["succes"], lue)
             self.assertEqual((lue["lecture"], lue["repli_navigateur"], lue["titre"]), ("navigateur", raison, "Lue au navigateur"))
             self.assertIn("https://exemple.fr/", self.crawls, "page ouverte au navigateur")
+
+    def test_pdf_lu_par_doc_guard(self):
+        pdf = httpx.Response(200, content=b"%PDF-1.7 ...", headers={"content-type": "application/pdf"})
+        url = "https://www.exemple.gouv.fr/files/2026%20Plafonds_C2S.pdf"
+        envoyes = []
+
+        def doc_guard(r: httpx.Request) -> httpx.Response:
+            if r.url.host == "doc-guard":
+                envoyes.append((r.url.path, r.content))
+                return httpx.Response(200, json={"kind": "pdf", "pages": [{"text": "Plafonds 2026\n1 personne 10 421 €"}, {"text": "Forfaits logement"}]})
+            return crawl4ai_faux(self.crawls)(r)
+
+        tc = self.client({url: pdf})
+        c4 = app.state.crawl4ai
+        c4.client, c4.doc_guard = httpx.AsyncClient(transport=httpx.MockTransport(doc_guard)), "http://doc-guard:8080"
+        self.addCleanup(setattr, c4, "doc_guard", "")
+        lue = tc.post("/lire", json={"url": url}).json()
+        self.assertTrue(lue["succes"], lue)
+        self.assertEqual((lue["lecture"], lue["titre"]), ("pdf", "2026 Plafonds C2S"))
+        self.assertIn("10 421 €", lue["versions"]["sans_liens"]["texte"])
+        self.assertEqual(envoyes, [("/analyse", b"%PDF-1.7 ...")])
+        self.assertEqual(self.crawls, [], "ni navigateur ni Crawl4AI pour un PDF")
+        # Sans doc-guard : le PDF n'est pas lu (le navigateur ne lit pas mieux un PDF).
+        c4.doc_guard = ""
+        self.assertFalse(tc.post("/lire", json={"url": url}).json().get("lecture") == "pdf")
 
     def test_sans_proxy_de_sortie_toujours_le_navigateur(self):
         tc = self.client({})

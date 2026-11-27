@@ -45,7 +45,8 @@ async def cycle(app: FastAPI):
     # chemin de ce service vers Internet. Redirections suivies une à une, chaque adresse contrôlée (telechargement.py).
     proxy = os.environ.get("SORTIE_PROXY", "")
     sortie = httpx.AsyncClient(proxy=proxy, trust_env=False, follow_redirects=False) if proxy else None
-    app.state.crawl4ai = Crawl4ai(os.environ.get("CRAWL4AI_URL", "http://crawl4ai:11235"), os.environ.get("CRAWL4AI_API_TOKEN", ""), client, sortie)
+    app.state.crawl4ai = Crawl4ai(os.environ.get("CRAWL4AI_URL", "http://crawl4ai:11235"), os.environ.get("CRAWL4AI_API_TOKEN", ""), client, sortie,
+                                  os.environ.get("DOC_GUARD_URL", ""))
     app.state.lectures = asyncio.Semaphore(LECTURES_SIMULTANEES)
     app.state.icones = Icones(sortie)
     yield
@@ -276,8 +277,13 @@ async def recherche_multi(request: Request):
     avec_passages = donnees.get("passages", False)
     if not isinstance(avec_passages, bool):
         raise garde.Refus("passages_invalide", "Passages : vrai ou faux.")
+    # Thème de la question (planification) : ses sources officielles sont lues en premier (sources.toml).
+    theme = donnees.get("theme")
+    theme = theme if isinstance(theme, str) and theme in multi.THEMES else None
+    sites = multi.sites_valides(donnees.get("sites"))
+    officielles = [q for q in multi.requetes_officielles(theme, requetes[0], sites) if q not in requetes]
     debut = time.monotonic()
-    recherches = [await request.app.state.searxng.rechercher(q, RESULTATS_MAX) for q in requetes]
+    recherches = [await request.app.state.searxng.rechercher(q, RESULTATS_MAX) for q in requetes + officielles]
     # Résultats entrelacés (1er de chaque requête, puis 2e…), sans doublon d'adresse.
     fusion, vues = [], set()
     for rang in range(RESULTATS_MAX):
@@ -290,7 +296,7 @@ async def recherche_multi(request: Request):
     recherche = {"resultats": fusion, "moteurs_muets": sorted({m for r in recherches for m in r["moteurs_muets"]})}
     candidats = []
     pertinents, hors_sujet = multi.pertinents(recherche["resultats"], [requete, *requetes])
-    for r in multi.ordonner(pertinents):
+    for r in multi.ordonner(pertinents, theme, sites):
         if r["url"] in exclure:
             continue
         try:
@@ -381,6 +387,6 @@ async def recherche_multi(request: Request):
                                  for m in selection.pop("_gardes")]
     else:
         selection.pop("_gardes", None)
-    return {"requete": requete, "requetes": requetes, "budget": budget, "pages_demandees": nombre, "date": maintenant(),
+    return {"requete": requete, "requetes": requetes + officielles, "theme": theme, "sites": list(sites), "budget": budget, "pages_demandees": nombre, "date": maintenant(),
             "pages": [etats[r["url"]] for r in candidats if etats[r["url"]]["etat"] != "non_essayee"],
             "moteurs_muets": recherche["moteurs_muets"], "duree_s": round(time.monotonic() - debut, 1), **selection}

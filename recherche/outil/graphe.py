@@ -98,7 +98,7 @@ CONSIGNES = Path(os.environ.get('CONSIGNES', Path(__file__).parent / 'consignes'
 CONSIGNES_UTILES = ('aiguillage', 'clarification', 'direct', 'plan', 'plan_filtre', 'lecture', 'verification', 'redaction',
                     'redaction_web', 'cahier', 'superviseur', 'compression', 'section', 'synthese', 'eval_generation',
                     'eval_qualite', 'eval_citations')
-BLOCS = ('date', 'donnees', 'citer', 'rediger')   # dans cet ordre : un bloc peut utiliser ceux qui le précèdent
+BLOCS = ('date', 'themes', 'donnees', 'citer', 'rediger')   # dans cet ordre : un bloc peut utiliser ceux qui le précèdent
 JOURS = ('lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche')
 MOIS = ('janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre')
 
@@ -167,6 +167,8 @@ def cumule(avant: list, ajout: list | None) -> list:
 
 class Etat(TypedDict, total=False):
     question: str
+    theme: str                         # thème de la question (sources officielles lues en premier, sources.toml du service)
+    sites: list[str]                   # sites officiels propres à la question (fifa.com, git-scm.com…), proposés par Qwen
     a_faire: list[str]                 # requêtes de la prochaine recherche
     iteration: int
     requetes: list[str]                # requêtes déjà faites
@@ -242,6 +244,25 @@ def charger_consignes(chemin: Path = CONSIGNES, maintenant: datetime | None = No
             raise AgentErreur(f'Repère inconnu dans la consigne « {k} » ({chemin.name}) : {", ".join(dict.fromkeys(inconnus))}.')
         consignes[k] = texte
     return consignes
+
+
+def theme_valide(theme: Any) -> str:
+    return theme if isinstance(theme, str) and theme in THEMES else 'autre'
+
+
+_DOMAINE = re.compile(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}')
+
+
+def sites_valides(sites: Any) -> list[str]:
+    """Noms de domaine seuls (« fifa.com »), 2 au plus : adresse, chemin et « www. » retirés, le reste ignoré."""
+    propres = []
+    for s in sites if isinstance(sites, list) else []:
+        if not isinstance(s, str):
+            continue
+        d = re.sub(r'^[a-z]+://', '', s.strip().lower()).split('/')[0].removeprefix('www.')
+        if _DOMAINE.fullmatch(d) and d not in propres:
+            propres.append(d)
+    return propres[:2]
 
 
 def requetes_valides(requetes: Any) -> list[str]:
@@ -368,23 +389,23 @@ async def appel(ctx: RechercheContext, etape: str, messages: list[dict], schema:
 
 
 async def recherche_multi(ctx: RechercheContext, question: str, requetes: list[str], exclure: list[str], budget: int,
-                          passages: bool) -> dict:
+                          passages: bool, theme: str | None = None, sites: list[str] | None = None) -> dict:
     """/recherche-multi du service de recherche ; un nouvel essai si aucune page n'est revenue (moteurs qui coupent la
     connexion ou limitent le rythme, fréquent juste après le démarrage de SearXNG)."""
-    resultat = await _recherche_multi(ctx, question, requetes, exclure, budget, passages)
+    resultat = await _recherche_multi(ctx, question, requetes, exclure, budget, passages, theme, sites)
     if not resultat.get('pages'):
         await asyncio.sleep(2)
-        resultat = await _recherche_multi(ctx, question, requetes, exclure, budget, passages)
+        resultat = await _recherche_multi(ctx, question, requetes, exclure, budget, passages, theme, sites)
         resultat.setdefault('avertissements', []).insert(0, 'Aucun résultat au premier essai : recherche relancée une fois.')
     return resultat
 
 
 async def _recherche_multi(ctx: RechercheContext, question: str, requetes: list[str], exclure: list[str], budget: int,
-                           passages: bool) -> dict:
+                           passages: bool, theme: str | None = None, sites: list[str] | None = None) -> dict:
     try:
         r = await ctx.web.post('/recherche-multi', json={
             'requete': question[:500], 'requetes': requetes, 'exclure': exclure, 'budget': budget, 'pages': PAGES_PAR_ITERATION,
-            'passages': passages, 'filtre': ctx.filtre}, timeout=RECHERCHE_DELAI)
+            'passages': passages, 'filtre': ctx.filtre, **({'theme': theme} if theme else {}), **({'sites': sites} if sites else {})}, timeout=RECHERCHE_DELAI)
     except httpx.TimeoutException:
         raise AgentErreur('La recherche web n’a pas abouti à temps.') from None
     except httpx.HTTPError:
@@ -430,6 +451,7 @@ def enregistrer_pages(resultat: dict, sources: dict, urls: list, partielles: lis
     partielles notées (`sources`, `urls`, `partielles` complétés sur place). Rend les passages, identifiés
     S<source>.<position>."""
     numeros: dict[int, int] = {}
+    officielles: set[int] = set()
     for page in resultat.get('pages') or []:
         url = str(page.get('url') or '')
         if not url:
@@ -438,9 +460,11 @@ def enregistrer_pages(resultat: dict, sources: dict, urls: list, partielles: lis
             urls.append(url)
         if page.get('etat') == 'lue':
             sources.setdefault(url, {'numero': len(sources) + 1, 'url': url, 'titre': str(page.get('titre') or url),
-                                     'iteration': iteration, 'favorisee': page.get('groupe') == 'favorisee', 'icone': icone(page), 'site': nom_du_site(page)})
+                                     'iteration': iteration, 'favorisee': page.get('groupe') in ('favorisee', 'officielle'), 'officielle': page.get('groupe') == 'officielle', 'icone': icone(page), 'site': nom_du_site(page)})
             if page.get('numero') is not None:
                 numeros[int(page['numero'])] = sources[url]['numero']
+                if page.get('groupe') == 'officielle':
+                    officielles.add(sources[url]['numero'])
         elif page.get('etat') in ('incomplete', 'erreur', 'delai'):
             partielles.append({'url': url, 'raison': str(page.get('erreur') or page.get('etat'))})
     liste = []
@@ -448,6 +472,7 @@ def enregistrer_pages(resultat: dict, sources: dict, urls: list, partielles: lis
         n = numeros.get(int(p.get('numero') or 0))
         if n is not None:
             liste.append({'id': f'S{n}.{int(p.get("position") or 0)}', 'source': n, 'section': str(p.get('section') or ''),
+                          'officielle': n in officielles,
                           'jetons': int(p.get('jetons') or 0), 'texte': str(p.get('texte') or '')})
     return liste
 
@@ -455,7 +480,8 @@ def enregistrer_pages(resultat: dict, sources: dict, urls: list, partielles: lis
 async def lire_lot(ctx: 'RechercheContext', question: str, lot: list[dict], precision: str = '') -> tuple[dict, dict, list[str]]:
     """Un lecteur : un appel à Qwen sur un lot de passages délimités. Rend (réponse, jetons, identifiants permis)."""
     ids = [p['id'] for p in lot]
-    texte = '\n\n'.join(f'<<<PASSAGE {p["id"]}' + (f' — section : {sur(p["section"])}' if p['section'] else '')
+    texte = '\n\n'.join(f'<<<PASSAGE {p["id"]}' + (' — source officielle' if p.get('officielle') else '')
+                         + (f' — section : {sur(p["section"])}' if p['section'] else '')
                          + f'>>>\n{sur(p["texte"])}\nFIN>>>' for p in lot)
     try:
         reponse, jetons = await appel(ctx, 'lecture', [
@@ -539,7 +565,12 @@ def _objet(proprietes: dict) -> dict:
 
 
 _REFS = {'type': 'array', 'minItems': 1, 'maxItems': 4, 'items': {'type': 'string', 'maxLength': 20}}
-SCHEMA_PLAN = _objet({'recherche_necessaire': {'type': 'boolean'}, 'raison': {'type': 'string', 'maxLength': 300},
+# Thèmes de recherche/service/sources.toml (mêmes noms) : les sources officielles du thème sont lues en premier.
+THEMES = ('administratif', 'sante', 'developpement', 'sport', 'actualite', 'economie', 'sciences', 'autre')
+_THEME = {'type': 'string', 'enum': list(THEMES)}
+_SITES = {'type': 'array', 'maxItems': 2, 'items': {'type': 'string', 'maxLength': 60}}
+SCHEMA_PLAN = _objet({'recherche_necessaire': {'type': 'boolean'}, 'raison': {'type': 'string', 'maxLength': 300}, 'theme': _THEME,
+                      'sites_officiels': _SITES,
                       'requetes': {'type': 'array', 'minItems': 1, 'maxItems': 3, 'items': {'type': 'string', 'maxLength': REQUETE_MAX}}})
 SCHEMA_LECTURE = _objet({
     'faits': {'type': 'array', 'maxItems': 12, 'items': _objet({'texte': {'type': 'string', 'maxLength': 400}, 'references': _REFS})},
@@ -552,7 +583,7 @@ SCHEMA_VERIFICATION = _objet({
     'nouvelles_requetes': {'type': 'array', 'maxItems': 3, 'items': {'type': 'string', 'maxLength': REQUETE_MAX}}})
 _REQUETES = {'type': 'array', 'minItems': 1, 'maxItems': 3, 'items': {'type': 'string', 'maxLength': REQUETE_MAX}}
 SCHEMA_CAHIER = _objet({
-    'objectif': {'type': 'string', 'maxLength': 400},
+    'objectif': {'type': 'string', 'maxLength': 400}, 'theme': _THEME, 'sites_officiels': _SITES,
     'sous_questions': {'type': 'array', 'minItems': 1, 'maxItems': SOUS_QUESTIONS_MAX,
                        'items': _objet({'question': {'type': 'string', 'maxLength': 250},
                                         # 2 au plus : les sous-questions cherchent en même temps (moteurs et rafales)
@@ -610,9 +641,10 @@ async def planifier(etat: Etat, runtime: Runtime[RechercheContext]) -> dict:
         runtime.stream_writer({'type': 'clarification', 'question': precision, 'jetons': jetons})
         return {'clarification': precision}
     requetes = requetes_valides(plan.get('requetes'))
+    theme, sites = theme_valide(plan.get('theme')), sites_valides(plan.get('sites_officiels'))
     runtime.stream_writer({'type': 'planification', 'recherche_necessaire': bool(plan.get('recherche_necessaire', True)),
-                           'raison': str(plan.get('raison', '')), 'requetes': requetes, 'jetons': jetons})
-    return {'a_faire': requetes or [question[:REQUETE_MAX]], 'iteration': 0}
+                           'raison': str(plan.get('raison', '')), 'requetes': requetes, 'theme': theme, 'sites': sites, 'jetons': jetons})
+    return {'a_faire': requetes or [question[:REQUETE_MAX]], 'iteration': 0, 'theme': theme, 'sites': sites}
 
 
 def apres_planification(suivant: str) -> Callable[[Etat], str]:
@@ -622,7 +654,7 @@ def apres_planification(suivant: str) -> Callable[[Etat], str]:
 
 def pages_pour_affichage(resultat: dict, sources: dict) -> list[dict]:
     return [{'url': p.get('url', ''), 'titre': p.get('titre', ''), 'etat': p.get('etat', ''), 'erreur': p.get('erreur'),
-             'favorisee': p.get('groupe') == 'favorisee',
+             'favorisee': p.get('groupe') in ('favorisee', 'officielle'), 'officielle': p.get('groupe') == 'officielle',
              'source': sources[p['url']]['numero'] if p.get('etat') == 'lue' and p.get('url') in sources else None}
             for p in resultat.get('pages') or []]
 
@@ -634,7 +666,7 @@ async def recherche_simple(etat: Etat, runtime: Runtime[RechercheContext]) -> di
     essai, les pages déjà essayées sont exclues : le service lit les résultats suivants des mêmes requêtes."""
     ctx, requetes = runtime.context, etat['a_faire']
     iteration, urls = etat.get('iteration', 0) + 1, list(etat.get('urls', []))
-    resultat = await recherche_multi(ctx, etat['question'], requetes, urls, BUDGET_WEB, False)
+    resultat = await recherche_multi(ctx, etat['question'], requetes, urls, BUDGET_WEB, False, etat.get('theme'), etat.get('sites'))
     urls += [str(p['url']) for p in resultat.get('pages') or [] if p.get('url') and p['url'] not in urls]
     if iteration > 1:
         resultat.setdefault('avertissements', []).insert(0, 'Aucun passage utile dans les premières pages : pages suivantes lues.')
@@ -642,7 +674,7 @@ async def recherche_simple(etat: Etat, runtime: Runtime[RechercheContext]) -> di
     for page in resultat.get('pages') or []:
         if page.get('etat') == 'lue' and page.get('numero') is not None:
             sources[page['url']] = {'numero': int(page['numero']), 'url': page['url'], 'titre': str(page.get('titre') or page['url']),
-                                    'iteration': iteration, 'favorisee': page.get('groupe') == 'favorisee', 'icone': icone(page), 'site': nom_du_site(page)}
+                                    'iteration': iteration, 'favorisee': page.get('groupe') in ('favorisee', 'officielle'), 'officielle': page.get('groupe') == 'officielle', 'icone': icone(page), 'site': nom_du_site(page)}
     pages = resultat.get('pages') or []
     citables = sorted({int(p['numero']) for p in pages if p.get('numero') is not None and p.get('gardes')})
     contexte = (resultat.get('contexte') or {})
@@ -692,7 +724,7 @@ async def rechercher(etat: Etat, runtime: Runtime[RechercheContext]) -> dict:
     deja = list(dict.fromkeys(etat.get('requetes', []) + requetes))
     urls, sources = list(etat.get('urls', [])), dict(etat.get('sources', {}))
     partielles, corrections = list(etat.get('pages_partielles', [])), list(etat.get('corrections', []))
-    resultat = await recherche_multi(ctx, etat['question'], requetes, urls, LOT_JETONS * LOTS_PAR_ITERATION, True)
+    resultat = await recherche_multi(ctx, etat['question'], requetes, urls, LOT_JETONS * LOTS_PAR_ITERATION, True, etat.get('theme'), etat.get('sites'))
     liste = enregistrer_pages(resultat, sources, urls, partielles, iteration)
     ctx.passages.update({p['id']: p['texte'] for p in liste})
     corrections += [c for c in resultat.get('corrections') or [] if isinstance(c, dict)]
@@ -788,7 +820,8 @@ async def rediger(etat: Etat, runtime: Runtime[RechercheContext]) -> dict:
         runtime.stream_writer({'type': 'redaction', 'jetons': None})
         return {'redaction': {'reponse': 'Aucune information fiable n’a été trouvée pour répondre à cette question dans les pages consultées.',
                               'limites': limites, 'citations_invalides': 0}}
-    sources = '\n'.join(f'[{s["numero"]}] {sur(s["titre"])} — {s["url"]}' for s in etat['sources'].values())
+    sources = '\n'.join(f'[{s["numero"]}] {sur(s["titre"])} — {s["url"]}' + (' — source officielle' if s.get('officielle') else '')
+                        for s in etat['sources'].values())
     runtime.stream_writer({'type': 'redaction_debut'})
     texte, jetons = await appel(ctx, 'redaction', [
         {'role': 'system', 'content': ctx.consignes['redaction']},
@@ -858,8 +891,9 @@ async def ecrire_cahier(etat: Etat, runtime: Runtime[RechercheContext]) -> dict:
         sous_questions = [{'id': 'Q1', 'question': question[:250], 'requetes': [question[:REQUETE_MAX]]}]
     cahier = {'objectif': str(r.get('objectif') or '').strip()[:400],
               'criteres': [str(c).strip()[:200] for c in r.get('criteres') or [] if str(c).strip()][:5]}
-    runtime.stream_writer({'type': 'cahier', **cahier, 'sous_questions': sous_questions, 'jetons': jetons})
-    return {'cahier': cahier, 'tour': 1, 'lots_par_chercheur': lots_disponibles(ctx, len(sous_questions), 1 + finale(len(sous_questions))),
+    theme, sites = theme_valide(r.get('theme')), sites_valides(r.get('sites_officiels'))
+    runtime.stream_writer({'type': 'cahier', **cahier, 'theme': theme, 'sites': sites, 'sous_questions': sous_questions, 'jetons': jetons})
+    return {'cahier': cahier, 'theme': theme, 'sites': sites, 'tour': 1, 'lots_par_chercheur': lots_disponibles(ctx, len(sous_questions), 1 + finale(len(sous_questions))),
             'par_sq': {sq['id']: {'id': sq['id'], 'question': sq['question'], 'requetes': [], 'faits': [], 'manques': [],
                                   'contradictions': []} for sq in sous_questions},
             'a_relancer': [{'id': sq['id'], 'requetes': sq['requetes']} for sq in sous_questions]}
@@ -877,7 +911,7 @@ def vers_chercheurs(etat: Etat):
         d = etat['par_sq'][r['id']]
         envois.append(Send('chercheur', {
             'sous_question': {'id': d['id'], 'question': d['question']}, 'objectif': (etat.get('cahier') or {}).get('objectif', ''),
-            'requetes': r['requetes'], 'tour': etat['tour'], 'lots': etat['lots_par_chercheur'], 'exclure': exclure,
+            'requetes': r['requetes'], 'tour': etat['tour'], 'lots': etat['lots_par_chercheur'], 'exclure': exclure, 'theme': etat.get('theme'), 'sites': etat.get('sites'),
             'connus': [cle(f['texte']) for f in d['faits']], 'place': FAITS_PAR_SOUS_QUESTION - len(d['faits'])}))
     return envois
 
@@ -888,7 +922,8 @@ async def chercheur(entree: dict, runtime: Runtime[RechercheContext]) -> dict:
     ctx, sq, tour, requetes = runtime.context, entree['sous_question'], entree['tour'], entree['requetes']
     runtime.stream_writer({'type': 'chercheur_debut', 'id': sq['id'], 'question': sq['question'], 'tour': tour, 'requetes': requetes})
     async with ctx.recherches:
-        resultat = await recherche_multi(ctx, sq['question'], requetes, entree['exclure'], LOT_JETONS * max(1, entree['lots']), True)
+        resultat = await recherche_multi(ctx, sq['question'], requetes, entree['exclure'], LOT_JETONS * max(1, entree['lots']), True,
+                                         entree.get('theme'), entree.get('sites'))
     urls, partielles = [], []
     liste = enregistrer_pages(resultat, ctx.sources_lues, urls, partielles, tour)
     ctx.passages.update({p['id']: p['texte'] for p in liste})

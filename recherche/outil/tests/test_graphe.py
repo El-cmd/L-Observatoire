@@ -86,6 +86,18 @@ def lancer(mode: str, reponses: dict, filtre: bool = True, clarifier: bool = Fal
 PLAN = {'recherche_necessaire': True, 'raison': 'technique', 'requetes': ['docker rootless memory limit', 'docker rootless memory limit']}
 
 
+class Planification(unittest.TestCase):
+    def test_theme_et_sites(self):
+        self.assertEqual(graphe.theme_valide('administratif'), 'administratif')
+        self.assertEqual(graphe.theme_valide('inconnu'), 'autre')
+        self.assertEqual(graphe.theme_valide(None), 'autre')
+        self.assertEqual(graphe.sites_valides(['https://www.FIFA.com/fr/x', 'git-scm.com', 'troisieme.org']), ['fifa.com', 'git-scm.com'])
+        self.assertEqual(graphe.sites_valides(['pas un site', 7, 'a b.com']), [])
+        self.assertEqual(graphe.sites_valides('fifa.com'), [])
+        self.assertIn('sites_officiels', graphe.SCHEMA_PLAN['properties'])
+        self.assertEqual(graphe.SCHEMA_PLAN['properties']['theme']['enum'][-1], 'autre')
+
+
 class Outils(unittest.TestCase):
     def test_citations_verifiees(self):
         self.assertEqual(graphe.verifier_citations('A [1], B [3], C [12].', {1, 12}), ('A [1], B [source inconnue], C [12].', 1))

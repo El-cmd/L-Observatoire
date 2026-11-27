@@ -1,9 +1,10 @@
 """Clients de SearXNG et de Crawl4AI. Réponses normalisées ; aucun texte de requête ni adresse lue dans les journaux."""
 import asyncio
 import os
+import re
 import time
 from datetime import datetime, timezone
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import httpx
 
@@ -18,6 +19,7 @@ DELAI_RECHERCHE = 15.0
 DELAI_LECTURE = 95.0          # Crawl4AI borne lui-même chaque lecture à 90 s
 DELAI_SANTE = 3.0
 DELAI_RETRAITEMENT = 30.0     # retraitement du HTML déjà reçu (« raw: »), sans réseau
+DELAI_PDF = 60.0              # texte d'un PDF par doc-guard (il borne lui-même chaque document à 120 s)
 DELAI_CONNEXION = 3.0       # réseau interne : un conteneur arrêté ne refuse pas, il ne répond plus
 MEMOIRE_ETAT = 600            # un échec récent rend l'état « dégradé » pendant 10 min
 
@@ -135,7 +137,9 @@ class Searxng:
 
 
 class Crawl4ai:
-    def __init__(self, url: str, jeton: str, client: httpx.AsyncClient, sortie: httpx.AsyncClient | None = None):
+    def __init__(self, url: str, jeton: str, client: httpx.AsyncClient, sortie: httpx.AsyncClient | None = None, doc_guard: str = ""):
+        # doc-guard (réseau interne, sans Internet) lit le texte des PDF ; sans lui, un PDF n'est pas lu.
+        self.doc_guard = doc_guard.rstrip("/")
         self.url = url.rstrip("/")
         self.jeton = jeton
         self.client = client
@@ -203,6 +207,9 @@ class Crawl4ai:
             html, url_finale = await telechargement.telecharger(self.sortie, url)
         except telechargement.Echec as e:
             return None, e.raison
+        if isinstance(html, telechargement.Pdf):
+            texte = await self._texte_pdf(html)
+            return ((None, url_finale, texte), None) if texte else (None, "PDF illisible")
         html = nettoyage.liens_absolus(html, url_finale)
         if len(html.encode()) > nettoyage.HTML_MAX:
             return None, "page trop lourde"
@@ -217,6 +224,30 @@ class Crawl4ai:
         raison = telechargement.besoin_navigateur(self._markdown(resultat))
         return (None, raison) if raison else ((resultat, url_finale, html), None)
 
+    async def _texte_pdf(self, pdf: bytes) -> str:
+        """Texte d'un PDF, page après page, lu par doc-guard (qui ouvre chaque document dans un processus à part)."""
+        if not self.doc_guard:
+            return ""
+        try:
+            r = await self.client.post(f"{self.doc_guard}/analyse", params={"name": "page.pdf"}, content=bytes(pdf), timeout=DELAI_PDF)
+            pages = r.json().get("pages") if r.status_code == 200 else None
+        except (httpx.HTTPError, ValueError):
+            return ""
+        if not isinstance(pages, list):
+            return ""
+        return "\n\n".join(str(p.get("text") or "").strip() for p in pages if isinstance(p, dict)).strip()
+
+    def _lue_pdf(self, url: str, url_finale: str, texte: str, date: str) -> dict:
+        """Page lue pour un PDF : son texte, titré par le nom du fichier."""
+        nom = unquote(urlsplit(url_finale).path.rsplit("/", 1)[-1]).removesuffix(".pdf").removesuffix(".PDF")
+        titre = _texte(re.sub(r"[_\s]+", " ", nom).strip() or "Document PDF", TITRE_MAX)
+        markdown = f"# {titre}\n\n{texte}"
+        lue = {"url": url, "url_finale": url_finale, "succes": True, "statut_http": 200, "lecture": "pdf", "titre": titre,
+               "site": "", "description": "", "langue": "", "markdown": markdown[:CONTENU_MAX], "caracteres": len(markdown),
+               "tronque": len(markdown) > CONTENU_MAX, "date_consultation": date, "liens": []}
+        lue.update(nettoyage.assembler(markdown, markdown, markdown, markdown, None, CONTENU_MAX))
+        return lue
+
     async def lire(self, url: str, requete: str = "") -> dict:
         """Texte de la page en plusieurs versions (voir nettoyage.py), métadonnées et date de consultation.
 
@@ -226,6 +257,9 @@ class Crawl4ai:
         """
         date = maintenant()
         simple, raison = await self._lecture_simple(url) if self.sortie is not None else (None, None)
+        if simple is not None and simple[0] is None:            # PDF lu par doc-guard
+            self.etat.noter_succes()
+            return self._lue_pdf(url, simple[1], simple[2], date)
         if simple is not None:
             resultat, url_finale, html = simple
             statut = 200

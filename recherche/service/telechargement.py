@@ -26,12 +26,18 @@ DELAI_CONNEXION = 5.0
 REDIRECTIONS_MAX = 5
 OCTETS_MAX = 6 * 1024 * 1024     # au-delà, le nettoyage « raw: » est refusé de toute façon (nettoyage.HTML_MAX)
 TYPES = ("text/html", "application/xhtml+xml")
+# PDF (barèmes officiels, notes de version…) : rendus tels quels, leur texte est lu par doc-guard (voir moteurs.py).
+TYPES_PDF = ("application/pdf", "application/x-pdf")
 TEXTE_MIN = 800                  # Markdown plus court : page probablement remplie par JavaScript
 COURT = 5000                     # en dessous, une page qui demande JavaScript ou fait patienter est relue au navigateur
 _JAVASCRIPT = re.compile(r"(enable|activer|activez|autoriser|autorisez)\s+(le\s+)?javascript|javascript\s+(is\s+)?(disabled|required|est\s+désactivé)|"
                          r"just a moment|checking your browser|vérification de (votre )?navigateur|attention required|"
                          r"verify you are (a )?human|vérifiez que vous (n'|n’)?êtes (pas )?(un robot|humain)", re.IGNORECASE)
 _CHARSET = re.compile(rb"""<meta[^>]+charset\s*=\s*["']?([\w.:-]+)""", re.IGNORECASE)
+
+
+class Pdf(bytes):
+    """Contenu d'un PDF téléchargé (commence par %PDF), à faire lire par doc-guard."""
 
 
 class Echec(Exception):
@@ -69,7 +75,8 @@ async def _recevoir(client: httpx.AsyncClient, url: str) -> tuple[str, str]:
             if r.status_code != 200:
                 raise Echec(f"statut HTTP {r.status_code}")
             genre = r.headers.get("content-type", "")
-            if genre.split(";")[0].strip().lower() not in TYPES:
+            nature = genre.split(";")[0].strip().lower()
+            if nature not in TYPES and nature not in TYPES_PDF:
                 raise Echec("pas une page HTML")
             if int(r.headers.get("content-length") or 0) > OCTETS_MAX:
                 raise Echec("page trop lourde")
@@ -79,12 +86,17 @@ async def _recevoir(client: httpx.AsyncClient, url: str) -> tuple[str, str]:
                 if taille > OCTETS_MAX:
                     raise Echec("page trop lourde")
                 morceaux.append(morceau)
-            return _decoder(b"".join(morceaux), genre), url
+            contenu = b"".join(morceaux)
+            if nature in TYPES_PDF:
+                if not contenu.startswith(b"%PDF"):
+                    raise Echec("PDF illisible")
+                return Pdf(contenu), url
+            return _decoder(contenu, genre), url
     raise Echec("trop de redirections")
 
 
-async def telecharger(client: httpx.AsyncClient, url: str) -> tuple[str, str]:
-    """(HTML, adresse finale) de la page, ou Echec. `url` a déjà passé garde.url_publique."""
+async def telecharger(client: httpx.AsyncClient, url: str) -> tuple[str | Pdf, str]:
+    """(HTML ou Pdf, adresse finale) de la page, ou Echec. `url` a déjà passé garde.url_publique."""
     try:
         return await asyncio.wait_for(_recevoir(client, url), DELAI)
     except TimeoutError:

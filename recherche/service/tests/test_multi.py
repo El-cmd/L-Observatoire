@@ -381,3 +381,42 @@ class Route(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SourcesOfficielles(unittest.TestCase):
+    def test_themes_charges(self):
+        self.assertIn("administratif", multi.THEMES)
+        self.assertIn("gouv.fr", multi.THEMES["administratif"]["domaines"])
+        for nom, theme in multi.THEMES.items():
+            with self.subTest(theme=nom):
+                self.assertTrue(theme["domaines"] and theme["description"])
+                self.assertTrue(all(d == d.lower() and not d.startswith("www.") for d in theme["domaines"]))
+
+    def test_groupe_selon_le_theme_et_les_sites(self):
+        url = "https://www.service-public.gouv.fr/particuliers/vosdroits/F10027"
+        self.assertEqual(multi.groupe(url, "administratif"), "officielle")
+        self.assertEqual(multi.groupe(url), "autre")
+        self.assertEqual(multi.groupe(url, "sport"), "autre")
+        self.assertEqual(multi.groupe("https://inside.fifa.com/fr/news/x", "autre", ("fifa.com",)), "officielle")
+        self.assertEqual(multi.groupe("https://notfifa.com/x", "autre", ("fifa.com",)), "autre")
+        # Un wiki reste favorisé ; un site officiel passe devant.
+        self.assertEqual(multi.groupe("https://fr.wikipedia.org/wiki/Paris", "sport"), "favorisee")
+        ordre = multi.ordonner([{"url": "https://fr.wikipedia.org/wiki/A", "position": 1},
+                                {"url": "https://blog.exemple.fr/a", "position": 2},
+                                {"url": "https://www.ameli.fr/assure", "position": 3}], "administratif")
+        self.assertEqual([r["groupe"] for r in ordre], ["officielle", "favorisee", "autre"])
+
+    def test_requetes_officielles(self):
+        self.assertEqual(multi.requetes_officielles("administratif", "plafond CSS 2026"),
+                         ["plafond CSS 2026 site:gouv.fr", "plafond CSS 2026 site:ameli.fr"])
+        self.assertEqual(multi.requetes_officielles("sport", "vainqueur Tour 2026", ("letour.fr",)), ["vainqueur Tour 2026 site:letour.fr"])
+        # Un site déjà couvert par un domaine du thème n'est pas cherché deux fois ; 3 requêtes au plus.
+        self.assertEqual(multi.requetes_officielles("administratif", "q", ("ameli.fr", "service-public.gouv.fr")),
+                         ["q site:ameli.fr", "q site:service-public.gouv.fr", "q site:gouv.fr"])
+        self.assertEqual(multi.requetes_officielles(None, "q"), [])
+        self.assertEqual(multi.requetes_officielles("inconnu", "q"), [])
+
+    def test_sites_valides(self):
+        self.assertEqual(multi.sites_valides(["www.FIFA.com", "git-scm.com", "x.org"]), ("fifa.com", "git-scm.com"))
+        self.assertEqual(multi.sites_valides(["https://fifa.com/x", "pas un site", 3, "a.b c"]), ())
+        self.assertEqual(multi.sites_valides("fifa.com"), ())

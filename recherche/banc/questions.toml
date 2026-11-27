@@ -1,0 +1,88 @@
+# Banc d'essai de la recherche web (bouton Web de L'Observatoire, mode Automatique). Réponses vérifiées le 26/11/2026.
+# attendu : expressions régulières (insensibles à la casse) qui doivent toutes se trouver dans la réponse.
+# officiels : domaines (ou suffixes) des sources officielles ; l'une d'elles doit être citée.
+# Note sur 10 : juste 5, source officielle citée 3, source officielle lue 1, réponse en moins de 60 s 1.
+
+[[question]]
+id = "css"
+theme = "administratif"
+question = "Quel est le plafond de ressources annuel pour bénéficier de la Complémentaire santé solidaire sans participation financière, pour une personne seule en métropole, en 2026 ?"
+attendu = ['10[\s  .]?421']
+officiels = ["gouv.fr", "ameli.fr"]
+
+[[question]]
+id = "smic"
+theme = "administratif"
+question = "Quel est le montant du SMIC horaire brut en France en novembre 2026 ?"
+attendu = ['12[,.]31']
+officiels = ["gouv.fr"]
+
+[[question]]
+id = "pass"
+theme = "administratif"
+question = "Quel est le montant du plafond annuel de la sécurité sociale (PASS) en 2026 ?"
+attendu = ['48[\s  .]?060']
+officiels = ["gouv.fr", "urssaf.fr"]
+
+[[question]]
+id = "carence"
+theme = "administratif"
+question = "Combien de jours de carence s'appliquent à un arrêt maladie pour un salarié du secteur privé ?"
+attendu = ['\b(3|trois) jours']
+officiels = ["gouv.fr", "ameli.fr"]
+
+[[question]]
+id = "participation"
+theme = "sante"
+question = "Quel est le montant de la participation forfaitaire payée par un assuré pour une consultation chez le médecin en 2026 ?"
+attendu = ['\b2[\s  ]?(€|euros?)']
+officiels = ["ameli.fr", "gouv.fr"]
+
+[[question]]
+id = "postgresql"
+theme = "developpement"
+question = "Quelle est la dernière version stable de PostgreSQL et quelles sont ses principales nouveautés ?"
+attendu = ['PostgreSQL 19|version 19|19\.0']
+officiels = ["postgresql.org"]
+
+[[question]]
+id = "python"
+theme = "developpement"
+question = "Quelle est la dernière version stable de Python ?"
+attendu = ['3\.15']
+officiels = ["python.org"]
+
+[[question]]
+id = "nodejs"
+theme = "developpement"
+question = "Quelle est la version LTS active de Node.js aujourd'hui ?"
+attendu = ['Node(\.js)?\s*(v)?26|\b26\b']
+officiels = ["nodejs.org"]
+
+[[question]]
+id = "git"
+theme = "developpement"
+question = "Comment annuler le dernier commit git sans perdre les modifications ?"
+attendu = ['reset\s+--soft\s+HEAD(~1?|\^)']
+officiels = ["git-scm.com", "stackoverflow.com", "github.com", "atlassian.com"]
+
+[[question]]
+id = "ballon-or"
+theme = "sport"
+question = "Qui a remporté le Ballon d'Or 2026, et quand la cérémonie a-t-elle eu lieu ?"
+attendu = ['Kane', '26 octobre']
+officiels = ["ballondor.com", "uefa.com", "francefootball.fr", "lequipe.fr"]
+
+[[question]]
+id = "coupe-monde"
+theme = "sport"
+question = "Qui a gagné la Coupe du monde de football 2026 ?"
+attendu = ['Espagne']
+officiels = ["fifa.com", "lequipe.fr", "uefa.com"]
+
+[[question]]
+id = "tour"
+theme = "sport"
+question = "Qui a remporté le Tour de France 2026 ?"
+attendu = ['Poga[cč]ar']
+officiels = ["letour.fr", "lequipe.fr", "uci.org"]

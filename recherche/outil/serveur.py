@@ -71,7 +71,7 @@ def clients() -> tuple[httpx.AsyncClient, httpx.AsyncClient]:
 
 def _pages(liste: Any) -> list[dict]:
     return [{'url': str(p.get('url') or ''), 'titre': str(p.get('titre') or '')[:200], 'etat': p.get('etat'),
-             'source': p.get('source'), 'favorisee': bool(p.get('favorisee'))}
+             'source': p.get('source'), 'favorisee': bool(p.get('favorisee')), 'officielle': bool(p.get('officielle'))}
             for p in (liste or [])[:PAGES_AFFICHEES] if isinstance(p, dict)]
 
 

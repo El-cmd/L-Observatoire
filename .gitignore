@@ -19,3 +19,4 @@ frontend/dist/
 
 # Worktrees des agents Claude Code
 .claude/worktrees/
+recherche/banc/resultats/
