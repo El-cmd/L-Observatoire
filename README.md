@@ -78,6 +78,8 @@ Le rôle SQL de l’API n’est pas superutilisateur et ne peut créer ni base n
 | `QWEN_MODEL` | `qwen3.8-27b-abliterated` par défaut |
 | `POSTGRES_PASSWORD` | Mot de passe du rôle applicatif, généré par `make init` |
 | `POSTGRES_ADMIN_PASSWORD` | Mot de passe de l’administrateur PostgreSQL, généré séparément |
+| `VIDEO_MODEL` | Modèle de l’onglet Vidéo, `wan2.2-i2v-a14b` par défaut (vide : pas de vidéos) |
+| `VIDEO_MAX_TOTAL` | Vidéos en attente ou en cours pour tout le site, `2` par défaut |
 | `BOOTSTRAP_USERNAME`, `BOOTSTRAP_PASSWORD` | Facultatifs : création du premier administrateur uniquement si aucun utilisateur n’existe |
 
 `make init` conserve les valeurs existantes et crée les secrets PostgreSQL manquants. `.env` reste local, avec permissions 600, et est exclu de Git et des images. Ne pas modifier les mots de passe PostgreSQL dans `.env` après création du volume sans modifier aussi les rôles dans la base. Les secrets générés utilisent un alphabet compatible avec les URL PostgreSQL.
@@ -108,6 +110,17 @@ Le bouton **+** de la saisie ajoute des images depuis l’ordinateur ou depuis l
 - Côté serveur, l’API ne décode jamais un fichier reçu : elle le transmet à **image-guard**, conteneur sans réseau sortant (réseau Docker `guard` interne), sans base, secrets ni volume, en lecture seule, non root, sans capacités, limité en mémoire, CPU et processus. Il vérifie le format réel (PNG, JPEG, WebP, GIF, décodeurs en Rust pur), refuse les bombes de décompression, réencode depuis les pixels et renvoie l’image propre et sa miniature. Une image qui bloquerait le décodeur fait redémarrer le conteneur.
 - Seule la copie nettoyée est stockée (PostgreSQL), affichée et envoyée à Qwen. Elle appartient à la **bibliothèque** du compte (500 Mo) : la même image n’est stockée qu’une fois, elle survit à la suppression d’une conversation, et sa suppression la remplace par « Image supprimée » dans les messages.
 - Qwen lit les images lui-même (modèle multimodal). Elles restent envoyées telles quelles tant que la conversation tient dans le contexte : une image coûte un token par carré de 32 px (environ 1 900 pour 1 600 × 1 200). Quand le contexte est plein, Qwen transcrit une fois les images des messages résumés ; la transcription sert au résumé.
+
+## Onglet Vidéo
+
+L’onglet **Vidéo** anime une image de la bibliothèque en courte vidéo (2, 3 ou 5 s) avec **Wan 2.2 I2V A14B**, servi sur le serveur IA derrière le même LiteLLM que Qwen (`POST /videos`, `GET /videos/{id}`, `GET /videos/{id}/content`). Code : `backend/src/video.rs`, `frontend/src/components/VideoStudio.tsx`.
+
+- Le service vidéo fait **une vidéo à la fois**, efface ses vidéos au bout de 24 h et les oublie quand il redémarre. L’API tient donc sa propre file dans la table `videos` : elle n’envoie qu’une vidéo à la fois, la suit **en tâche de fond** (toutes les `VIDEO_POLL_SECONDS`, 7 s par défaut, pas dans le navigateur) et range le MP4 fini (boîte `ftyp` vérifiée, 30 Mo au plus) dans la **bibliothèque** du compte, avec l’image de départ comme vignette. Après un redémarrage de l’API, les vidéos en attente ou en cours sont reprises depuis la base. Une vidéo que le service ne connaît plus (état 404, ou 500 trois fois de suite, contenu 404) est marquée « perdue ».
+- Limites : une vidéo en attente ou en cours par compte, `VIDEO_MAX_TOTAL` (2 par défaut) pour tout le site, réponse 429 au-delà. 30 Mo de libre sont exigés dans la bibliothèque.
+- L’image de départ est une image de la bibliothèque, donc déjà passée par image-guard. « Améliorer » : Qwen regarde sa miniature et écrit la description en anglais (consigne `DESCRIBE`, reprise du Labo vidéo d’Amelia).
+- Réglages : 480p ou 720p (720p jamais mesuré : la durée affichée est une estimation, environ 3 fois le 480p), portrait ou paysage, durée, 20 à 40 étapes, fluidité 32 i/s (RIFE), graine, description négative, mouvement de caméra en un clic. « Essai rapide » : 480p, 2 s, 20 étapes (≈ 1 min 30) ; « Refaire en qualité » : 5 s, 40 étapes, même graine (≈ 8 min en 480p).
+- GIF et WebP : faits à la demande par le serveur IA (`POST /video-export` de LiteLLM) à partir du MP4 gardé, donc aussi après 24 h ; donnés à télécharger, pas rangés. « Continuer la vidéo » : le navigateur prend la dernière image et l’envoie à la bibliothèque comme une image envoyée.
+- Les vidéos ne sont jamais jointes à un message : Qwen ne lit pas les vidéos.
 
 ## Documents
 

@@ -18,3 +18,12 @@ self.addEventListener('fetch', event => {
   if (event.request.mode !== 'navigate') return;
   event.respondWith(fetch(event.request).catch(() => caches.match(HORS_LIGNE)));
 });
+
+// Notification « vidéo prête » : la toucher ramène sur le site (l'onglet ouvert, sinon un nouveau).
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  event.waitUntil(self.clients.matchAll({type: 'window', includeUncontrolled: true}).then(fenetres => {
+    const ouverte = fenetres.find(fenetre => new URL(fenetre.url).origin === self.location.origin);
+    return ouverte ? ouverte.focus() : self.clients.openWindow('/');
+  }));
+});

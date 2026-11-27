@@ -11,6 +11,8 @@ services:
       BOOTSTRAP_USERNAME: ""
       BOOTSTRAP_PASSWORD: ""
       RUST_LOG: observatoire=warn,tower_http=warn
+      # The video queue is followed every second (7 s on the site), against the fake video service of the mock.
+      VIDEO_POLL_SECONDS: "1"
     depends_on:
       mock:
         condition: service_started

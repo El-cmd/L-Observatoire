@@ -250,14 +250,14 @@ fn strength(id: Option<&str>) -> Result<&'static (&'static str, &'static str, f6
 
 /// Multipart form of `/images/edits` (text fields, then files: the images in order and perhaps the mask),
 /// written by hand: reqwest is built without its multipart feature.
-fn multipart(fields: &[(&str, String)], files: &[(&str, &[u8], &str)]) -> (String, Vec<u8>) {
+pub(crate) fn multipart(fields: &[(&str, String)], files: &[(&str, &[u8], &str)]) -> (String, Vec<u8>) {
     let boundary = format!("observatoire-{}", Uuid::new_v4().simple());
     let mut body = Vec::with_capacity(files.iter().map(|f| f.1.len()).sum::<usize>() + 4096);
     for (name, value) in fields {
         body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n").as_bytes());
     }
     for (name, data, mime) in files {
-        let extension = if *mime == "image/png" { "png" } else { "jpg" };
+        let extension = match *mime { "image/png" => "png", "video/mp4" => "mp4", _ => "jpg" };
         body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{name}.{extension}\"\r\nContent-Type: {mime}\r\n\r\n").as_bytes());
         body.extend_from_slice(data);
         body.extend_from_slice(b"\r\n");
@@ -545,7 +545,7 @@ pub async fn improve(State(app): State<App>, headers: HeaderMap, Json(request): 
 }
 
 /// One short answer from Qwen, without reasoning; None when it cannot answer.
-async fn ask_qwen(app: &App, system: &str, user: Value, temperature: f64, max_tokens: u32) -> Option<String> {
+pub(crate) async fn ask_qwen(app: &App, system: &str, user: Value, temperature: f64, max_tokens: u32) -> Option<String> {
     let body = json!({"model": app.config.model, "reasoning_effort": "none", "temperature": temperature, "max_tokens": max_tokens, "stream": false,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]});
     let response = app.http.post(format!("{}/chat/completions", app.config.api_url)).bearer_auth(&app.config.api_key)

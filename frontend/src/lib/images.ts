@@ -44,9 +44,11 @@ export function formatBytes(value: number): string {
 export const DOCUMENT_TYPES = '.pdf,.docx,.txt,.md,.markdown,.csv,.tsv,.json,.xml,.yaml,.yml,.toml,.ini,.log,.srt,.tex,.html,.py,.js,.ts,.tsx,.jsx,.rs,.go,.java,.c,.h,.cpp,.cs,.php,.rb,.sh,.sql,.css,.scss';
 export const isImage = (file: File) => file.type.startsWith('image/');
 export const isDocument = (ref: AttachmentRef) => ref.kind === 'document';
+export const isVideo = (ref: AttachmentRef) => ref.kind === 'video';
 
 export function toRef(item: LibraryItem): AttachmentRef {
   return item.kind === 'document' ? {id:item.id, name:item.name, width:0, height:0, kind:'document', pages:item.pages, tokens:item.tokens}
+    : item.kind === 'video' ? {id:item.id, name:item.name, width:item.width, height:item.height, kind:'video'}
     : {id:item.id, name:item.name, width:item.width, height:item.height};
 }
 

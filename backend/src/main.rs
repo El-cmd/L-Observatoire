@@ -6,6 +6,7 @@ mod creation;
 mod documents;
 mod ephemere;
 mod feedback;
+mod video;
 
 use anyhow::{Context, Result};
 use axum::{
@@ -40,6 +41,8 @@ pub struct App {
     pub running: Arc<std::sync::Mutex<std::collections::HashMap<uuid::Uuid, chat::Running>>>,
     /// Answers of ephemeral chats (never saved), by the identifier their page chose.
     pub ephemeres: Arc<std::sync::Mutex<std::collections::HashMap<uuid::Uuid, ephemere::Running>>>,
+    /// Wakes the video queue up when a video is added (see video.rs).
+    pub videos: Arc<tokio::sync::Notify>,
 }
 
 pub struct Config {
@@ -56,6 +59,11 @@ pub struct Config {
     /// Image model of the Images tab, served by the same LiteLLM as Qwen, and the sizes it accepts.
     pub image_model: String,
     pub image_sizes: Vec<String>,
+    /// Video model of the Video tab (empty: no Video tab), videos waiting or being made at most for the whole
+    /// site, and how often the background task asks the video service.
+    pub video_model: String,
+    pub video_max_total: i64,
+    pub video_poll: Duration,
     pub origin: String,
     pub secure_cookie: bool,
 }
@@ -209,6 +217,9 @@ async fn main() -> Result<()> {
         image_model: env::var("IMAGE_MODEL").unwrap_or_else(|_| "qwen-image-turbo".into()),
         image_sizes: env::var("IMAGE_SIZES").ok().filter(|v| !v.trim().is_empty()).unwrap_or_else(|| creation::DEFAULT_SIZES.into())
             .split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+        video_model: env::var("VIDEO_MODEL").unwrap_or_else(|_| "wan2.2-i2v-a14b".into()).trim().to_string(),
+        video_max_total: env::var("VIDEO_MAX_TOTAL").ok().and_then(|v| v.trim().parse().ok()).filter(|v: &i64| (1..=20).contains(v)).unwrap_or(2),
+        video_poll: Duration::from_secs(env::var("VIDEO_POLL_SECONDS").ok().and_then(|v| v.trim().parse().ok()).filter(|v: &u64| (1..=60).contains(v)).unwrap_or(7)),
         secure_cookie: parsed.scheme() == "https",
         origin,
     };
@@ -232,6 +243,7 @@ async fn main() -> Result<()> {
         token_counts: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         running: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         ephemeres: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        videos: Arc::new(tokio::sync::Notify::new()),
         db: db.clone(),
         http: reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
@@ -264,6 +276,8 @@ async fn main() -> Result<()> {
     });
     if !app.config.api_url.is_empty() && !app.config.api_key.is_empty() {
         tokio::spawn(chat::name_untitled(app.clone()));
+        // Videos waiting or being made when the API stopped are taken up again from the database.
+        if !app.config.video_model.is_empty() { tokio::spawn(video::follow(app.clone())); }
     }
     let router = Router::new()
         .route("/api/health", get(health))
@@ -297,6 +311,11 @@ async fn main() -> Result<()> {
         .route("/api/creation/styles/suggest", post(creation::suggest_style).layer(DefaultBodyLimit::max(16 * 1024)))
         .route("/api/creation/styles/{id}", put(creation::edit_style).delete(creation::delete_style).layer(DefaultBodyLimit::max(16 * 1024)))
         .route("/api/creation/styles/{id}/example", get(creation::style_example).post(creation::make_example))
+        .route("/api/video", get(video::config).post(video::create).layer(DefaultBodyLimit::max(64 * 1024)))
+        .route("/api/video/improve", post(video::improve).layer(DefaultBodyLimit::max(64 * 1024)))
+        .route("/api/video/export", post(video::export).layer(DefaultBodyLimit::max(16 * 1024)))
+        .route("/api/video/{id}", get(video::get_one).delete(video::delete))
+        .route("/api/video/{id}/thumbnail", get(video::thumbnail))
         .route("/api/conversations/{id}/context", get(context::usage))
         .route("/api/conversations/{id}/compact", post(context::compact))
         .fallback(|| async { Error(StatusCode::NOT_FOUND, "Route introuvable.".into()) })

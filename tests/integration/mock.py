@@ -4,7 +4,9 @@ from email.parser import BytesParser
 from email.policy import HTTP
 import json
 import struct
+import threading
 import time
+from urllib.parse import unquote
 import zlib
 
 
@@ -42,7 +44,103 @@ def form(content_type, raw):
     return fields, files
 
 
+# Video service behind LiteLLM (Wan 2.2 I2V): one video at a time, kept in memory like the real one. What the
+# description contains decides what happens: "video-slow" takes 6 s, "video-fail" fails, "video-lost" is forgotten
+# (state 500, content 404, as after a restart of the service), "video-notmp4" answers JSON as content.
+VIDEOS = {}
+VIDEOS_LOCK = threading.Lock()
+SIZES = {'480x832', '832x480', '720x1280', '1280x720'}
+
+
+def mp4(seed):
+    """Bytes that start like an MP4 (an ftyp box), different for each video."""
+    return b'\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isommp41' + str(seed).encode() * 50
+
+
+def video_state(job):
+    """queued, then in_progress, then completed (or failed), as the client asks again and again."""
+    job['asked'] += 1
+    if 'video-fail' in job['prompt'] and job['asked'] > 1:
+        return 'failed'
+    if 'video-slow' in job['prompt']:
+        return 'completed' if time.monotonic() - job['created'] > 6 else 'in_progress'
+    return ('queued', 'in_progress', 'completed')[min(job['asked'] - 1, 2)]
+
+
 class Mock(BaseHTTPRequestHandler):
+    def send_bytes(self, status, payload, content_type):
+        self.send_response(status)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Length', str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_GET(self):
+        if self.headers.get('Authorization') != 'Bearer integration-test-key':
+            self.send_error(401)
+            return
+        if not self.path.startswith('/v1/videos/'):
+            self.send_error(404)
+            return
+        # The identifier comes back escaped in the path; it must be exactly the one given at creation.
+        rest = self.path[len('/v1/videos/'):]
+        content = rest.endswith('/content')
+        video_id = unquote(rest[:-len('/content')] if content else rest)
+        with VIDEOS_LOCK:
+            job = VIDEOS.get(video_id)
+            if job is None or 'video-lost' in job['prompt']:
+                self.send_error(404 if content else 500, 'Video not found')
+                return
+            if content:
+                if job['state'] != 'completed':
+                    self.send_error(400, 'Video not ready')
+                elif 'video-notmp4' in job['prompt']:
+                    self.send_bytes(200, b'{"error": "oops"}', 'application/json')
+                else:
+                    self.send_bytes(200, mp4(job['seed']), 'video/mp4')
+                return
+            if job['state'] not in ('completed', 'failed'):
+                job['state'] = video_state(job)
+            answer = {'id': video_id, 'object': 'video', 'status': job['state'], 'progress': 0}
+            if job['state'] == 'failed':
+                answer['error'] = {'message': 'CUDA out of memory'}
+        self.send_json(answer)
+
+    def videos(self, raw):
+        """POST /v1/videos: Wan 2.2 I2V, multipart, the image in input_reference."""
+        fields, files = form(self.headers['Content-Type'], raw)
+        mime, image = files.get('input_reference', ('', b''))
+        smooth = fields.get('enable_frame_interpolation') == 'true'
+        ok = fields.get('model') == 'wan2.2-i2v-a14b' and fields.get('size') in SIZES and fields.get('size') == f"{fields.get('width')}x{fields.get('height')}" \
+            and fields.get('num_frames') in ('33', '49', '81') and fields.get('num_inference_steps') in ('20', '30', '40') and fields.get('fps') == '16' \
+            and fields.get('seed', '').isdigit() and fields.get('guidance_scale') == '3.5' and fields.get('guidance_scale_2') == '3.5' and fields.get('flow_shift') == '5.0' \
+            and (not smooth or (fields.get('frame_interpolation_exp') == '1' and fields.get('frame_interpolation_model_path') == '/models/rife-4.22-lite')) \
+            and ((mime, image[:4]) == ('image/png', b'\x89PNG') or (mime, image[:3]) == ('image/jpeg', b'\xff\xd8\xff')) and fields.get('prompt')
+        if not ok:
+            self.send_bytes(400, json.dumps({'error': {'message': 'bad video request'}}).encode(), 'application/json')
+            return
+        with VIDEOS_LOCK:
+            # L'Observatoire must send one video at a time: a second one while the first is not finished is refused.
+            if any(job['state'] not in ('completed', 'failed') and 'video-lost' not in job['prompt'] for job in VIDEOS.values()):
+                self.send_bytes(409, json.dumps({'error': {'message': 'two videos at once'}}).encode(), 'application/json')
+                return
+            # Like LiteLLM: "video_" then base64, with "+", "/" and "=" to escape in a path.
+            video_id = 'video_' + base64.b64encode(f'litellm:custom_llm_provider:openai;model_id:{len(VIDEOS)}?>'.encode()).decode() + '+/='
+            VIDEOS[video_id] = {'prompt': fields['prompt'], 'seed': fields['seed'], 'state': 'queued', 'asked': 0, 'created': time.monotonic(),
+                                'smooth': smooth, 'negative': fields.get('negative_prompt', '')}
+        self.send_json({'id': video_id, 'object': 'video', 'status': 'queued', 'progress': 0})
+
+    def export(self, raw):
+        """POST /v1/video-export with an MP4: a GIF or an animated WebP."""
+        fields, files = form(self.headers['Content-Type'], raw)
+        mime, video = files.get('file', ('', b''))
+        if mime != 'video/mp4' or video[4:8] != b'ftyp' or fields.get('format') not in ('gif', 'webp'):
+            self.send_bytes(422, b'{"error": {"message": "Not an MP4 video"}}', 'application/json')
+            return
+        if fields['format'] == 'gif':
+            self.send_bytes(200, b'GIF89a' + b'\x00' * 40, 'image/gif')
+        else:
+            self.send_bytes(200, b'RIFF\x20\x00\x00\x00WEBPVP8X' + b'\x00' * 30, 'image/webp')
     def send_json(self, value):
         payload = json.dumps(value).encode()
         self.send_response(200)
@@ -55,6 +153,12 @@ class Mock(BaseHTTPRequestHandler):
         raw = self.rfile.read(int(self.headers['Content-Length']))
         if self.headers.get('Authorization') != 'Bearer integration-test-key':
             self.send_error(401)
+            return
+        if self.path == '/v1/videos':
+            self.videos(raw)
+            return
+        if self.path == '/v1/video-export':
+            self.export(raw)
             return
         if self.path == '/v1/images/edits':
             # "Transformer": the starting image and a strength, in a multipart form; the new image is green.
@@ -165,6 +269,10 @@ class Mock(BaseHTTPRequestHandler):
                     # "Retoucher": a short instruction written by Qwen looking at the image.
                     assert len(images) == 1 and images[0].startswith('data:image/jpeg;base64,/9j/')
                     content = '"Make the square blue. Keep everything else exactly the same: the size and the framing."'
+            if 'Wan 2.2 image-to-video' in system:
+                # Description of a video written by Qwen looking at the starting image.
+                assert body.get('reasoning_effort') == 'none' and len(images) == 1 and images[0].startswith('data:image/jpeg;base64,/9j/')
+                content = '"The small brown square slowly rotates while the light shifts. ' + last + '"'
             if 'style words' in system:
                 # Words of a user's style proposed by Qwen, with what the API must clean up.
                 assert body.get('reasoning_effort') == 'none'

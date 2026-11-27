@@ -1,4 +1,4 @@
-//! User library of images and documents. The API never decodes a file sent by a user:
+//! User library of images, documents and videos (made in the Video tab, see video.rs). The API never decodes a file sent by a user:
 //! image-guard, an isolated container without network or data, re-encodes images first, and
 //! only that clean copy is stored, displayed and sent to Qwen. Documents go to doc-guard (see
 //! documents.rs).
@@ -28,6 +28,8 @@ pub enum Kind {
     #[default]
     Image,
     Document,
+    /// Made in the Video tab; never attached to a message (Qwen does not read videos).
+    Video,
 }
 impl Kind {
     fn is_image(&self) -> bool { *self == Kind::Image }
@@ -57,6 +59,7 @@ impl AttachmentRef {
         self.name.chars().count() <= 120 && match self.kind {
             Kind::Image => (1..=4096).contains(&self.width) && (1..=4096).contains(&self.height) && self.pages == 0 && self.tokens == 0,
             Kind::Document => self.width == 0 && self.height == 0 && self.pages <= documents::MAX_PAGES && (1..=documents::MAX_TOKENS).contains(&self.tokens),
+            Kind::Video => false,
         }
     }
 }
@@ -235,7 +238,7 @@ impl FileQuery {
     fn download(&self) -> bool { matches!(self.download.as_deref(), Some("1" | "true")) }
 }
 
-fn disposition(name: &str, download: bool) -> HeaderValue {
+pub(crate) fn disposition(name: &str, download: bool) -> HeaderValue {
     let encoded: String = name.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
     let kind = if download { "attachment" } else { "inline" };
     HeaderValue::from_str(&format!("{kind}; filename*=UTF-8''{encoded}")).unwrap_or(HeaderValue::from_static("inline"))
@@ -264,13 +267,47 @@ pub async fn file(State(app): State<App>, headers: HeaderMap, Path(id): Path<Uui
     let user = session(&app, &headers, false).await?;
     let (name, kind, mime, sha, data): (String, String, String, String, Vec<u8>) = sqlx::query_as("SELECT name,kind,mime,sha256,data FROM attachments WHERE id=$1 AND user_id=$2")
         .bind(id).bind(user.user_id).fetch_optional(&app.db).await?.ok_or_else(Error::missing)?;
+    let disposition = Some(disposition(&name, query.download() || kind == "document"));
+    if kind == "video" { return Ok(video_response(&headers, sha, data, disposition)); }
     // Documents are never shown by the browser itself: always downloaded.
-    Ok(image_response(&headers, sha, &mime, data, Some(disposition(&name, query.download() || kind == "document"))))
+    Ok(image_response(&headers, sha, &mime, data, disposition))
+}
+
+/// First and last byte asked by a `Range: bytes=a-b` header (one range), within `size` bytes; None for a
+/// missing header or a range that cannot be served (then the whole file is sent).
+pub fn byte_range(value: Option<&str>, size: usize) -> Option<(usize, usize)> {
+    let spec = value?.trim().strip_prefix("bytes=")?;
+    if size == 0 || spec.contains(',') { return None; }
+    let (start, end) = spec.split_once('-')?;
+    let (start, end) = match (start.trim(), end.trim()) {
+        ("", "") => return None,
+        // The last n bytes.
+        ("", last) => { let last: usize = last.parse().ok()?; (size.saturating_sub(last.max(1)), size - 1) }
+        (start, "") => (start.parse().ok()?, size - 1),
+        (start, end) => (start.parse().ok()?, end.parse::<usize>().ok()?.min(size - 1)),
+    };
+    (start <= end && start < size).then_some((start, end))
+}
+
+/// A video of the library, in parts when the player asks (Safari plays only that way, and seeking needs it).
+fn video_response(headers: &HeaderMap, sha: String, data: Vec<u8>, disposition: Option<HeaderValue>) -> Response {
+    let range = byte_range(headers.get(header::RANGE).and_then(|v| v.to_str().ok()), data.len());
+    let size = data.len();
+    let mut response = image_response(headers, sha, "video/mp4", match range { Some((start, end)) => data[start..=end].to_vec(), None => data }, disposition);
+    if response.status() == StatusCode::NOT_MODIFIED { return response; }
+    let out = response.headers_mut();
+    out.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    out.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; media-src 'self'; sandbox"));
+    if let Some((start, end)) = range {
+        out.insert(header::CONTENT_RANGE, HeaderValue::from_str(&format!("bytes {start}-{end}/{size}")).expect("ascii"));
+        *response.status_mut() = StatusCode::PARTIAL_CONTENT;
+    }
+    response
 }
 
 pub async fn thumbnail(State(app): State<App>, headers: HeaderMap, Path(id): Path<Uuid>) -> Result<Response, Error> {
     let user = session(&app, &headers, false).await?;
-    let (sha, data): (String, Vec<u8>) = sqlx::query_as("SELECT sha256,thumbnail FROM attachments WHERE id=$1 AND user_id=$2 AND kind='image'")
+    let (sha, data): (String, Vec<u8>) = sqlx::query_as("SELECT sha256,thumbnail FROM attachments WHERE id=$1 AND user_id=$2 AND kind IN ('image','video')")
         .bind(id).bind(user.user_id).fetch_optional(&app.db).await?.ok_or_else(Error::missing)?;
     Ok(image_response(&headers, format!("{sha}-t"), "image/jpeg", data, None))
 }
@@ -304,6 +341,7 @@ pub async fn check_owned(app: &App, user: Uuid, refs: &[&AttachmentRef]) -> Resu
         let same = match attachment.kind {
             Kind::Image => kind == "image",
             Kind::Document => kind == "document" && status == "ready" && *pages as u32 == attachment.pages && *tokens as u32 == attachment.tokens,
+            Kind::Video => false,
         };
         if !same { return Err(Error::bad("Un fichier joint est introuvable dans ta bibliothèque.")); }
     }
@@ -361,6 +399,20 @@ mod tests {
         for (w, h, tokens) in [(28, 28, 66), (224, 224, 66), (448, 448, 198), (896, 672, 590), (1280, 720, 882), (1600, 1200, 1902), (2048, 1536, 3074)] {
             assert_eq!(image_tokens(w, h), tokens, "{w}x{h}");
         }
+    }
+    #[test]
+    fn video_ranges_are_read() {
+        assert_eq!(byte_range(Some("bytes=0-"), 100), Some((0, 99)));
+        assert_eq!(byte_range(Some("bytes=10-19"), 100), Some((10, 19)));
+        assert_eq!(byte_range(Some("bytes=90-500"), 100), Some((90, 99)));
+        assert_eq!(byte_range(Some("bytes=-10"), 100), Some((90, 99)));
+        assert_eq!(byte_range(Some("bytes=100-"), 100), None);
+        assert_eq!(byte_range(Some("bytes=5-2"), 100), None);
+        assert_eq!(byte_range(Some("bytes=0-1,5-6"), 100), None);
+        assert_eq!(byte_range(Some("items=0-1"), 100), None);
+        assert_eq!(byte_range(None, 100), None);
+        let video: AttachmentRef = serde_json::from_str(r#"{"id":"6f1c2a52-3a8e-4a8c-9a59-2f1d3c4b5a69","name":"a.mp4","kind":"video","width":480,"height":832}"#).unwrap();
+        assert!(!video.is_valid(), "a video is never attached to a message");
     }
     #[test]
     fn names_are_cleaned() {

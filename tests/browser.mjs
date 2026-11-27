@@ -118,6 +118,28 @@ try {
   await page.locator('.document-viewer-text',{hasText:'treize[?]'}).waitFor({state:'visible'});await page.keyboard.press('Escape');
   await page.locator('#library-link').click();
   await page.locator('.library-state',{hasText:'2 pages · 1 lue sur l’image · 1 passage incertain'}).waitFor({state:'visible'});
+  // Video tab: an image animated by the fake video service of the mock, then kept in the library.
+  await page.locator('#images-link').click();await page.locator('.studio-item').first().hover();
+  await page.getByRole('button',{name:/^Animer /}).first().click();
+  await page.locator('#video-studio .studio-strip').waitFor({state:'visible'});assert.equal(await page.locator('#page-title').innerText(),'Vidéo');
+  await page.locator('#video-remove-source').click();await page.locator('#video-source-pick').click();
+  await page.locator('#source-picker .source-grid button').first().click();await page.locator('#video-studio .studio-strip').waitFor({state:'visible'});
+  await page.locator('#video-improve').click();await page.waitForFunction(()=>document.querySelector('#video-prompt').value.startsWith('The small brown square slowly rotates'));
+  await page.locator('#video-camera-orbite').click();assert.equal(await page.locator('#video-camera-orbite').getAttribute('aria-pressed'),'true');
+  assert.match(await page.locator('#video-estimate').innerText(),/calcul estimé : environ 8 min/);
+  await page.locator('#video-resolution-720p').click();assert.match(await page.locator('#video-estimate').innerText(),/jamais mesuré/);
+  await page.locator('#video-resolution-480p').click();
+  await page.locator('#video-quick').click();await page.locator('.video-item .video-state').first().waitFor({state:'visible'});
+  assert.equal(await page.locator('#video-create').isDisabled(),true,'one video at a time per account');
+  await page.locator('.video-item .video-player').first().waitFor({state:'visible',timeout:30000});
+  assert.equal(await page.locator('#video-create').isDisabled(),false);
+  if (process.env.SHOTS) await page.screenshot({path:`${process.env.SHOTS}/video.png`,fullPage:true});
+  const gif=page.waitForEvent('download');await page.locator('.video-item').first().getByRole('button',{name:'GIF'}).click();
+  assert.match((await gif).suggestedFilename(),/\.gif$/);
+  await page.locator('#library-link').click();await page.locator('.library-play').first().waitFor({state:'visible'});
+  if (process.env.SHOTS) await page.screenshot({path:`${process.env.SHOTS}/library.png`});
+  await page.locator('.library-item',{has:page.locator('.library-play')}).first().locator('.library-thumb').click();
+  await page.locator('.video-viewer video').waitFor({state:'visible'});await page.keyboard.press('Escape');
   await page.locator('#new-chat').click();
   await page.reload();await page.locator('#chat-app').waitFor({state:'visible'});await page.getByRole('button',{name:'Sujet Question privée Alice',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('.user .message-content')?.textContent==='Question privée Alice');
@@ -135,10 +157,13 @@ try {
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.locator('#login-username').fill('alice');await page.locator('#login-password').fill(password);await page.locator('#login-submit').click();
   await page.locator('#chat-app').waitFor({state:'visible'});assert.equal(await page.getByRole('button',{name:'Sujet Question privée Bob',exact:true}).count(),0);
+  await page.locator('#menu').click();await page.locator('#video-link').click();await page.locator('#video-studio .video-head').waitFor({state:'visible'});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  if (process.env.SHOTS) await page.screenshot({path:`${process.env.SHOTS}/video-mobile.png`,fullPage:true});
   await page.locator('#menu').click();await page.locator('#account-toggle').click();await page.locator('#change-password').click();
   await page.locator('#current-password').fill(password);await page.locator('#new-password').fill('Browser-new-password-2026!');await page.locator('#confirm-password').fill('Browser-new-password-2026!');await page.locator('#password-submit').click();
   await page.locator('#login-form').waitFor({state:'visible'});assert.match(await page.locator('#login-error').innerText(),/modifié/);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   assert.deepEqual(errors,[]);
-  console.log('Browser OK: login, history in PostgreSQL, settings, copy, parallel conversations, titles and rename, continue after reload, images and library, documents, opt-in import, account isolation, logout, password change, mobile.');
+  console.log('Browser OK: login, history in PostgreSQL, settings, copy, parallel conversations, titles and rename, continue after reload, images and library, documents, video tab, opt-in import, account isolation, logout, password change, mobile.');
 } finally {await browser.close();}

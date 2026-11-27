@@ -445,3 +445,31 @@ Sujet habituel, avec la graine 42, pour comparer les styles entre eux (`EXAMPLE_
 un renard roux assis dans une clairière en automne, feuilles dorées, lumière douce
 ```
 Les mots des 15 styles fournis sont dans `STYLES`, au début de `backend/src/creation.rs`.
+
+## 6. Onglet Vidéo
+
+`backend/src/video.rs`.
+
+### Écrire la description d’une vidéo (`DESCRIBE`) — Système
+
+Bouton « Améliorer » : Qwen reçoit l’idée de l’utilisateur (ou rien) et la miniature de l’image de départ, et écrit la description envoyée à Wan 2.2. Reprise de la consigne du Labo vidéo d’Amelia.
+
+```text
+You write one prompt for the Wan 2.2 image-to-video model, which animates the attached image into a short video clip of a few seconds. The user says, in any language, what should happen; they may say nothing.
+
+Rules:
+- First look carefully at the attached image: the subjects and how many there are, their appearance, the setting, the lighting and the visual style.
+- Describe the scene as it appears in the image, then the motion during the clip: what moves and how (speed, direction), facial expressions and gestures, and how the surroundings react (wind, water, light, background).
+- Add one camera movement only if it helps the shot (for example a slow push-in, a gentle pan, an orbit, or a static shot). If the user asked for a camera movement, use exactly that one.
+- Keep everything consistent with the image: same subjects, faces, clothes, colors and style. Do not add new people or objects unless the user asks for them.
+- The motion must be physically plausible and fit in a few seconds.
+- If the user said nothing, choose a natural, subtle motion that suits the image.
+- Write in English, as a single paragraph of 60 to 120 words.
+- Answer with the prompt only: no introduction, no title, no list, no quotes around the whole prompt.
+```
+Ce que la vidéo doit éviter, par défaut (`DEFAULT_NEGATIVE`, modifiable dans les réglages) :
+
+```text
+blurry, low quality, distorted, deformed, extra limbs, bad hands, jittery motion, flickering, static image, watermark, text, subtitles
+```
+Les phrases des mouvements de caméra, ajoutées après la description, sont dans `CAMERAS`, au début de `backend/src/video.rs`.

@@ -40,6 +40,10 @@ services:
       # Chat answers go through the orchestrator (tools such as the web search); Qwen directly if it is down.
       ORCHESTRATEUR_URL: http://orchestrateur:8080/v1
       ORCHESTRATEUR_TOKEN: ${ORCHESTRATEUR_TOKEN:-}
+      # Video tab: Wan 2.2 through the same LiteLLM as Qwen (empty: no videos); videos waiting or being made at most.
+      VIDEO_MODEL: ${VIDEO_MODEL:-wan2.2-i2v-a14b}
+      VIDEO_MAX_TOTAL: ${VIDEO_MAX_TOTAL:-2}
+      VIDEO_POLL_SECONDS: ${VIDEO_POLL_SECONDS:-7}
       RUST_LOG: observatoire=info,tower_http=info
     depends_on:
       db:

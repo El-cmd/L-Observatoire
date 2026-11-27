@@ -1,4 +1,4 @@
-type Name = 'copy' | 'check' | 'retry' | 'sidebar' | 'new' | 'edit' | 'plus' | 'image' | 'download' | 'link' | 'ask' | 'trash' | 'user' | 'settings' | 'send' | 'stop' | 'close' | 'news' | 'document' | 'globe' | 'chevron' | 'ephemeral' | 'create' | 'imageAdd' | 'brush' | 'scissors' | 'thumbUp' | 'thumbDown';
+type Name = 'copy' | 'check' | 'retry' | 'sidebar' | 'new' | 'edit' | 'plus' | 'image' | 'download' | 'link' | 'ask' | 'trash' | 'user' | 'settings' | 'send' | 'stop' | 'close' | 'news' | 'document' | 'globe' | 'chevron' | 'ephemeral' | 'create' | 'imageAdd' | 'brush' | 'scissors' | 'thumbUp' | 'thumbDown' | 'video' | 'play' | 'bell';
 export function Icon({name}: {name: Name}) {
   const paths = {
     copy: <><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></>,
@@ -15,6 +15,9 @@ export function Icon({name}: {name: Name}) {
     thumbUp: <><path d="M7 10v11"/><path d="M15 5.9 14 10h5.8a2 2 0 0 1 1.9 2.6l-2.3 8a2 2 0 0 1-1.9 1.4H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.8a2 2 0 0 0 1.8-1.1L12 2a3.1 3.1 0 0 1 3 3.9z"/></>,
     thumbDown: <><path d="M17 14V3"/><path d="M9 18.1 10 14H4.2a2 2 0 0 1-1.9-2.6l2.3-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.8a2 2 0 0 0-1.8 1.1L12 22a3.1 3.1 0 0 1-3-3.9z"/></>,
     download: <path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/>,
+    video: <><rect x="2.5" y="5" width="14" height="14" rx="2.5"/><path d="m16.5 10 5-3v10l-5-3"/></>,
+    play: <path d="M8 5.5v13l10.5-6.5z"/>,
+    bell: <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5a2.2 2.2 0 0 0 4 0"/>,
     link: <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>,
     ask: <><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 4v-4h0A1.5 1.5 0 0 1 4 14.5z"/><path d="M10 8.6a2 2 0 1 1 2.9 1.8c-.6.3-.9.8-.9 1.4M12 13.6h.01"/></>,
     trash: <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5"/>,

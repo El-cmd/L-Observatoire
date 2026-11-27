@@ -3,7 +3,7 @@ import type {Feedback} from '../lib/feedback';
 import {APIClient, APIError, errorMessage} from '../lib/api';
 import {consumeCompletion} from '../lib/stream';
 import {MAX_IMAGES, documentSize, isDocument, isImage, prepareImage, thumbnailURL, toRef} from '../lib/images';
-import type {Activity, AttachmentRef, Auth, Conversation, ConversationSummary, CreationConfig, Legacy, Library, LibraryItem, Message, MyStyle, Notice, PendingImage, Settings, ContextUsage, WebMode, CreateBody} from '../types';
+import type {Activity, AttachmentRef, Auth, Conversation, ConversationSummary, CreationConfig, Legacy, Library, LibraryItem, Message, MyStyle, Notice, PendingImage, Settings, ContextUsage, WebMode, CreateBody, Video, VideoBody, VideoConfig} from '../types';
 
 function readLegacy(): Legacy | null {
   try { return JSON.parse(localStorage.getItem('observatoir-chat-v1') || localStorage.getItem('qwen-chat-v1') || 'null') as Legacy | null; }
@@ -544,6 +544,18 @@ export function useObservatoire() {
     suggest: (description: string) => client.json<{words: string}>('/api/creation/styles/suggest', {method:'POST', body:{description}}).then(value => value.words),
   };
   const attachmentInfo = (id: string) => client.json<LibraryItem>(`/api/attachments/${id}/status`);
+  // Video tab: the server keeps the queue and follows each video; the page only reads where they stand.
+  const video = {
+    config: () => client.json<VideoConfig>('/api/video'),
+    create: (body: VideoBody) => client.json<Video>('/api/video', {method:'POST', body}),
+    get: (id: string) => client.json<Video>(`/api/video/${id}`),
+    remove: (id: string) => client.json<void>(`/api/video/${id}`, {method:'DELETE'}),
+    improve: (prompt: string, source: string, signal?: AbortSignal) =>
+      client.json<{prompt: string}>('/api/video/improve', {method:'POST', body:{prompt, source}, signal}).then(value => value.prompt),
+    /** GIF or animated WebP of a video of the library, to save. */
+    export: (attachment: string, format: 'gif' | 'webp') =>
+      client.response('/api/video/export', {method:'POST', body:{attachment, format}}).then(response => response.blob()),
+  };
   const documentText = (id: string) => client.json<{content: string}>(`/api/attachments/${id}/text`).then(value => value.content);
 
   async function continueAnswer() {
@@ -581,7 +593,7 @@ export function useObservatoire() {
   return {auth, initializing, loginError, signingIn, login, logout, changePassword,
     chats, current:activeChat, activity, busy:currentActivity === 'generating', navigating,
     notice:(currentId && notices[currentId]) || notices[''] || null, notify,
-    prompt, setPrompt, pending, addImages, addFromLibrary, removePending, library, loadLibrary, deleteImage, imageConversations, documentText, attachmentInfo, removedImages, creationConfig, improvePrompt, createImage, cutoutImage, uploadImage, styles, loadVotes, sendVote, voteImage,
+    prompt, setPrompt, pending, addImages, addFromLibrary, removePending, library, loadLibrary, deleteImage, imageConversations, documentText, attachmentInfo, removedImages, creationConfig, improvePrompt, createImage, cutoutImage, uploadImage, styles, loadVotes, sendVote, voteImage, video,
     settings, setSettings, newChat, openChat, ephemeral:isEphemeral(activeChat), toggleEphemeral, deleteChat, renameChat, send, regenerate, continueAnswer,
     contextUsage:contextUsage && contextUsage.conversation_id === currentId && contextUsage.version === activeChat?.version ? contextUsage : null,
     compacting:currentActivity === 'compacting', compactContext, summaryFocus,
