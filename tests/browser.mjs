@@ -126,7 +126,7 @@ try {
   await page.locator('#source-picker .source-grid button').first().click();await page.locator('#video-studio .studio-strip').waitFor({state:'visible'});
   await page.locator('#video-improve').click();await page.waitForFunction(()=>document.querySelector('#video-prompt').value.startsWith('The small brown square slowly rotates'));
   await page.locator('#video-camera').click();await page.locator('#video-camera-orbite').click();
-  assert.equal(await page.locator('#video-camera').innerText(),'Orbite');assert.equal(await page.locator('.video-camera-menu').count(),0);
+  assert.match(await page.locator('#video-camera').innerText(),/Orbite/);assert.equal(await page.locator('.video-camera-list').count(),0);
   assert.match(await page.locator('#video-estimate').innerText(),/≈ 8 min/);
   await page.locator('#video-resolution-720p').click();assert.match(await page.locator('#video-estimate').innerText(),/estimé/);
   await page.locator('#video-resolution-480p').click();
