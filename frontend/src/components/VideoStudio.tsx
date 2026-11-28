@@ -97,6 +97,16 @@ export function VideoStudio({userId, config, loadError, reload, api, library, on
   const [notify, setNotify] = useState(() => wantsNotification(userId));
   const [now, setNow] = useState(() => Date.now());
   const improveRun = useRef<AbortController | null>(null);
+  // The camera movements, in a menu of the bar like "Retoucher" in the Images tab.
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const cameraMenu = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!cameraOpen) return;
+    function outside(event: MouseEvent) {if (!cameraMenu.current?.contains(event.target as Node)) setCameraOpen(false);}
+    function escape(event: KeyboardEvent) {if (event.key === 'Escape') setCameraOpen(false);}
+    document.addEventListener('mousedown', outside); document.addEventListener('keydown', escape);
+    return () => {document.removeEventListener('mousedown', outside); document.removeEventListener('keydown', escape);};
+  }, [cameraOpen]);
 
   useEffect(() => {
     onLoad();
@@ -246,7 +256,7 @@ export function VideoStudio({userId, config, loadError, reload, api, library, on
             {item.id}{!item.measured && <small>estimé</small>}</button>)}
         </div>
         <h3>Format <span className="studio-help" tabIndex={0} title="Choisi d’après l’image de départ : portrait pour une image en hauteur ou carrée, paysage pour une image en largeur. L’image est recadrée à ce format.">?</span></h3>
-        <div className="studio-formats video-formats">
+        <div className="studio-formats">
           {(['portrait', 'paysage'] as const).map(value => {
             const [w, h] = (value === 'portrait' ? resolution.portrait : resolution.paysage).split('x').map(Number), k = 26 / Math.max(w, h);
             return <button key={value} type="button" id={`video-orientation-${value}`} aria-pressed={settings.orientation === value} onClick={() => change({orientation: value})}>
@@ -285,36 +295,46 @@ export function VideoStudio({userId, config, loadError, reload, api, library, on
             placeholder={source ? 'Décrivez ce qui bouge, par exemple : elle tourne la tête et sourit, le vent agite ses cheveux… (ou laissez vide et touchez « Améliorer »)' : 'Choisissez d’abord une image de départ avec le bouton d’image ci-dessous.'}
             onChange={event => {setPrompt(event.target.value); if (!event.target.value.trim()) setBeforeImprove(null);}}
             onKeyDown={event => {if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {event.preventDefault(); event.currentTarget.form?.requestSubmit();}}}/>
-          <div className="video-cameras" role="group" aria-label="Mouvement de caméra">
-            <span>Caméra</span>
-            {config.cameras.map(item => <button key={item.id} type="button" id={`video-camera-${item.id}`} aria-pressed={settings.camera === item.id} title={item.sentence}
-              onClick={() => change({camera: settings.camera === item.id ? null : item.id})}>{item.name}</button>)}
-          </div>
+          {/* Every option in one bar, like the Images tab: the image, the camera, a notification at the end, then the actions. */}
           <div className="studio-actions">
             <div className="studio-options">
               {!source && <button type="button" id="video-source-pick" className="icon-button studio-add-image" aria-label="Choisir l’image de départ" title="Choisir l’image de départ" onClick={() => setPicking(true)}><Icon name="imageAdd"/></button>}
-              <span className="studio-progress" id="video-estimate">{source ? `${size.replace('x', '×')} · calcul estimé : environ ${formatDuration(estimate)}${resolution.measured ? '' : ' (720p jamais mesuré : estimation)'}` : ''}</span>
+              <div className="studio-strengths studio-modes" role="group" aria-label="Mouvement de caméra">
+                <div className={`studio-retouch video-camera${settings.camera ? ' on' : ''}`} ref={cameraMenu}>
+                  <button type="button" id="video-camera" aria-pressed={settings.camera !== null} aria-haspopup="menu" aria-expanded={cameraOpen}
+                    title={settings.camera ? `Caméra : ${config.cameras.find(item => item.id === settings.camera)?.sentence}` : 'Mouvement de caméra : laissé au modèle'}
+                    onClick={() => setCameraOpen(value => !value)}><Icon name="video"/>{settings.camera ? config.cameras.find(item => item.id === settings.camera)?.name : 'Caméra'}</button>
+                  <button type="button" id="video-camera-more" className="studio-retouch-more" aria-label="Choisir le mouvement de caméra" title="Choisir le mouvement de caméra"
+                    aria-haspopup="menu" aria-expanded={cameraOpen} onClick={() => setCameraOpen(value => !value)}><Icon name="chevron"/></button>
+                  {cameraOpen && <div className="studio-menu video-camera-menu" role="menu" aria-label="Mouvement de caméra">
+                    <button type="button" role="menuitemradio" id="video-camera-aucun" aria-checked={settings.camera === null} onClick={() => {change({camera: null}); setCameraOpen(false);}}>
+                      <span><span className="web-menu-title">Libre</span><span className="web-menu-hint">Le modèle choisit, ou suit ce que dit la description.</span></span></button>
+                    {config.cameras.map(item => <button key={item.id} type="button" role="menuitemradio" id={`video-camera-${item.id}`} aria-checked={settings.camera === item.id}
+                      onClick={() => {change({camera: item.id}); setCameraOpen(false);}}>
+                      <span><span className="web-menu-title">{item.name}</span><span className="web-menu-hint">{item.sentence}</span></span></button>)}
+                  </div>}
+                </div>
+              </div>
+              <button type="button" id="video-notify" className="icon-button studio-add-image" aria-pressed={notify} onClick={() => {void toggleNotify();}}
+                aria-label={notify ? 'Ne plus me prévenir à la fin' : 'Me prévenir à la fin'}
+                title={notify ? 'Prévenu à la fin : touchez pour arrêter' : 'Me prévenir à la fin : une notification quand la vidéo est prête, même si vous êtes ailleurs sur le site'}><Icon name="bell"/></button>
+              <span className="studio-help" tabIndex={0} title="Choisissez une image, décrivez ce qui bouge (ou touchez « Améliorer » : Qwen regarde l’image et écrit la description), puis « Essai rapide » pour voir le mouvement en environ 1 min 30, ou « Créer la vidéo » avec vos réglages. Les vidéos se font une à la fois sur le serveur : vous pouvez fermer la page pendant ce temps.">?</span>
             </div>
+            <span className="studio-progress" id="video-estimate">{source ? `≈ ${formatDuration(estimate)}${resolution.measured ? '' : ' (estimé)'}` : ''}</span>
             {beforeImprove !== null && <button type="button" className="studio-link" onClick={() => {setPrompt(beforeImprove); setBeforeImprove(null);}}>Revenir à mon texte</button>}
             <button type="button" id="video-improve" className="studio-secondary" disabled={!config.configured || !source || improving} onClick={() => {void improveNow();}}
               title="Qwen regarde l’image et écrit la description en anglais, à partir de votre idée"><Icon name="news"/>{improving ? 'Amélioration…' : 'Améliorer'}</button>
             <button type="button" id="video-quick" className="studio-secondary" disabled={blocked} onClick={() => launch(true)}
               title={`480p, 2 s, 20 étapes : environ ${formatDuration(quick)}, pour voir le mouvement avant la version soignée`}>Essai rapide</button>
-            <button type="submit" id="video-create" className="auth-submit" disabled={blocked} title="Ctrl / Cmd + Entrée">{sending ? 'Envoi…' : 'Créer la vidéo'}</button>
+            <button type="submit" id="video-create" className="auth-submit" disabled={blocked} title={`${size.replace('x', '×')}, calcul estimé : environ ${formatDuration(estimate)}${resolution.measured ? '' : ' (720p jamais mesuré)'} · Ctrl / Cmd + Entrée`}>{sending ? 'Envoi…' : 'Créer'}</button>
           </div>
         </form>
         {why && <p className="video-note" id="video-why">{why}</p>}
         {!config.configured && <p className="studio-error" role="alert">La création de vidéos n’est pas configurée sur ce site.</p>}
         {(error || loadError) && <p className="studio-error" role="alert">{error || loadError}</p>}
-        <div className="video-head">
-          <h2>Vos vidéos</h2>
-          <span>{config.open ? `${config.open} vidéo${config.open > 1 ? 's' : ''} dans la file du site (${config.max_total} au plus)` : 'Le serveur vidéo est libre'}</span>
-          <button type="button" id="video-notify" className={`studio-secondary${notify ? ' on' : ''}`} aria-pressed={notify} onClick={() => {void toggleNotify();}}
-            title="Une notification quand une vidéo est finie, même si vous êtes ailleurs sur le site. Le titre de l’onglet change aussi.">
-            <Icon name="bell"/>{notify ? 'Prévenu à la fin' : 'Me prévenir à la fin'}</button>
-        </div>
+        {config.open > 0 && <p className="video-note" id="video-queue">{`${config.open} vidéo${config.open > 1 ? 's' : ''} dans la file du site (${config.max_total} au plus).`}</p>}
         {!config.videos.length ? <p className="library-empty">Les vidéos que vous créez apparaîtront ici, et dans votre bibliothèque. La première prend environ 1 min 30 en essai rapide, 8 min en qualité.</p>
-          : <ul className="studio-grid video-grid">{config.videos.map(video => {
+          : <ul className="studio-grid">{config.videos.map(video => {
             const s = video.settings, [w, h] = s.size.split('x');
             const file = video.attachment ? files.get(video.attachment) : undefined;
             const name = file?.name ?? 'video.mp4';

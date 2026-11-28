@@ -125,9 +125,10 @@ try {
   await page.locator('#video-remove-source').click();await page.locator('#video-source-pick').click();
   await page.locator('#source-picker .source-grid button').first().click();await page.locator('#video-studio .studio-strip').waitFor({state:'visible'});
   await page.locator('#video-improve').click();await page.waitForFunction(()=>document.querySelector('#video-prompt').value.startsWith('The small brown square slowly rotates'));
-  await page.locator('#video-camera-orbite').click();assert.equal(await page.locator('#video-camera-orbite').getAttribute('aria-pressed'),'true');
-  assert.match(await page.locator('#video-estimate').innerText(),/calcul estimé : environ 8 min/);
-  await page.locator('#video-resolution-720p').click();assert.match(await page.locator('#video-estimate').innerText(),/jamais mesuré/);
+  await page.locator('#video-camera').click();await page.locator('#video-camera-orbite').click();
+  assert.equal(await page.locator('#video-camera').innerText(),'Orbite');assert.equal(await page.locator('.video-camera-menu').count(),0);
+  assert.match(await page.locator('#video-estimate').innerText(),/≈ 8 min/);
+  await page.locator('#video-resolution-720p').click();assert.match(await page.locator('#video-estimate').innerText(),/estimé/);
   await page.locator('#video-resolution-480p').click();
   await page.locator('#video-quick').click();await page.locator('.video-item .video-state').first().waitFor({state:'visible'});
   assert.equal(await page.locator('#video-create').isDisabled(),true,'one video at a time per account');
@@ -157,7 +158,7 @@ try {
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.locator('#login-username').fill('alice');await page.locator('#login-password').fill(password);await page.locator('#login-submit').click();
   await page.locator('#chat-app').waitFor({state:'visible'});assert.equal(await page.getByRole('button',{name:'Sujet Question privée Bob',exact:true}).count(),0);
-  await page.locator('#menu').click();await page.locator('#video-link').click();await page.locator('#video-studio .video-head').waitFor({state:'visible'});
+  await page.locator('#menu').click();await page.locator('#video-link').click();await page.locator('#video-prompt').waitFor({state:'visible'});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   if (process.env.SHOTS) await page.screenshot({path:`${process.env.SHOTS}/video-mobile.png`,fullPage:true});
   await page.locator('#menu').click();await page.locator('#account-toggle').click();await page.locator('#change-password').click();
